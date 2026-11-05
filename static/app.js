@@ -1245,6 +1245,7 @@ $('#addAccountBtn').addEventListener('click', () => openAccountDialog());
 
 async function loadUserFolders() {
   try { state.userFolders = await api('/api/user-folders'); } catch { return; }
+  renderSettingsFolders();
   if (state.view.type === 'ufolder' && !state.userFolders.some(f => f.id === state.view.id))
     setView({ type: 'unified', filter: 'important' });  // zobrazená složka byla smazána
   else renderSidebar();
@@ -1340,7 +1341,9 @@ function syncFolderTarget() {
     : '';
 }
 
+/** Konfigurace složky (id) nebo nové složky (null) – obrazovka v Nastavení. */
 async function openFolderDialog(id) {
+  if (!$('#settingsDialog').open) return openSettings('folder', id);
   const folder = id ? state.userFolders.find(f => f.id === id) : null;
   state.editingFolder = folder ? folder.id : null;
   const f = folderForm();
@@ -1354,16 +1357,17 @@ async function openFolderDialog(id) {
   f.namedItem('mark_read').checked = !!folder?.mark_read;
   syncFolderOptions();
   $('#folderTitle').textContent = folder ? `Složka ${folder.name}` : 'Nová složka';
-  $('#folderSaveBtn').textContent = folder ? 'Uložit' : 'Vytvořit složku';
+  $('#folderSaveBtn').textContent = folder ? 'Uložit změny' : 'Vytvořit složku';
   $('#folderDeleteBtn').hidden = !folder;
   $('#folderDeletePanel').hidden = true;
   $('#folderRuleKind').value = 'sender';
   $('#folderRuleInput').placeholder = RULE_PLACEHOLDERS.sender;
   $('#folderError').textContent = folder && !folder.account_id
     ? 'Složka z dřívější verze nemá cílový účet – vyberte účet a složku a uložte. Do té doby se pravidla neuplatňují.' : '';
-  $('#folderRulesSection').hidden = !folder;
   $('#folderRuleInput').value = '';
-  $('#folderDialog').showModal();
+  $('#folderRules').innerHTML = '';
+  $('#folderRulesCount').textContent = '';
+  showSettingsSection('folder');
   await fillServerFolders(folder?.account_id ? folder.imap_name : null);
   if (folder) renderFolderRules(); else f.namedItem('name').focus();
 }
@@ -1410,7 +1414,7 @@ $('#folderForm').addEventListener('submit', async e => {
     if (state.editingFolder) {
       await api(`/api/user-folders/${state.editingFolder}`, { method: 'PUT', body });
       toast('Složka uložena');
-      $('#folderDialog').close();
+      $('#folderTitle').textContent = `Složka ${body.name.trim()}`;
     } else {
       const created = await api('/api/user-folders', { method: 'POST', body });
       toast(`Složka ${created.name} vytvořena – teď jí přidejte pravidla`);
@@ -1499,10 +1503,12 @@ $('#folderDeletePanel').addEventListener('click', async e => {
   }
   try {
     await api('/api/user-folders/' + state.editingFolder + (onServer ? '?server=1' : ''), { method: 'DELETE' });
-    $('#folderDialog').close();
     toast(onServer ? 'Složka se maže na serveru (zprávy jdou do koše)…'
                    : 'Složka odebrána z aplikace (na serveru i se zprávami zůstává)');
-    loadUserFolders();
+    state.editingFolder = null;
+    await loadUserFolders();
+    if (state.userFolders.length) openFolderDialog(state.userFolders[0].id);
+    else showSettingsSection('spam');
   } catch (err) { $('#folderError').textContent = err.message; }
 });
 
@@ -1516,24 +1522,50 @@ let settingsSection = 'spam';
 function showSettingsSection(section) {
   settingsSection = section;
   const dlg = $('#settingsDialog');
-  dlg.querySelectorAll('[data-section]').forEach(b => b.classList.toggle('active', b.dataset.section === section));
   dlg.querySelectorAll('[data-panel]').forEach(el => { el.hidden = el.dataset.panel !== section; });
-  // pravý sloupec jen pokud téma má pravidla
-  const hasRules = !!dlg.querySelector(`.settings-rules [data-panel="${section}"]`);
+  // pravý sloupec jen pokud téma má pravidla (nová, ještě neuložená složka je nemá)
+  const hasRules = section === 'folder' ? !!state.editingFolder
+    : !!dlg.querySelector(`.settings-rules [data-panel="${section}"]`);
   dlg.querySelector('.settings-body').classList.toggle('no-rules', !hasRules);
+  markSettingsNav();
 }
 
-async function openSettings() {
+/** Složky v levém sloupci Nastavení – každá má svou obrazovku. */
+function renderSettingsFolders() {
+  $('#settingsFolders').innerHTML = state.userFolders.map(f => {
+    const acc = accById(f.account_id);
+    return `<button type="button" data-section="folder" data-folder-id="${f.id}" title="${esc(f.name)}">
+      <svg class="folder-ico" viewBox="0 0 24 24" style="color:${acc ? accColor(acc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span class="label">${esc(f.name)}</span>${acc ? '' : '<span class="warn-mark" title="Nastavte cílový účet">!</span>'}</button>`;
+  }).join('');
+  markSettingsNav();
+}
+
+function markSettingsNav() {
+  const dlg = $('#settingsDialog'), folder = settingsSection === 'folder';
+  dlg.querySelectorAll('.settings-nav [data-section]').forEach(b => b.classList.toggle('active',
+    b.dataset.section === settingsSection && (!folder || +b.dataset.folderId === state.editingFolder)));
+  dlg.querySelector('.settings-nav [data-new-folder]').classList.toggle('active', folder && !state.editingFolder);
+}
+
+/** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil. */
+async function openSettings(section = settingsSection, folderId = state.editingFolder) {
+  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'spam';
   $('#spamRules').innerHTML = $('#notifyRules').innerHTML = '<li class="empty-rules">Načítám…</li>';
-  showSettingsSection(settingsSection);
+  renderSettingsFolders();
   renderSettingOptions();
+  if (section !== 'folder') showSettingsSection(section);
   $('#settingsDialog').showModal();
+  if (section === 'folder') openFolderDialog(folderId);
   await Promise.all([renderSpamRules(), renderNotifyRules(), loadSettings().then(renderSettingOptions)]);
 }
 
 $('#settingsDialog .settings-nav').addEventListener('click', e => {
+  if (e.target.closest('[data-new-folder]')) return openFolderDialog(null);
   const b = e.target.closest('[data-section]');
-  if (b) showSettingsSection(b.dataset.section);
+  if (!b) return;
+  if (b.dataset.section === 'folder') return openFolderDialog(+b.dataset.folderId);
+  showSettingsSection(b.dataset.section);
 });
 // klik mimo dialog (na ztmavené pozadí) nastavení zavře
 $('#settingsDialog').addEventListener('click', e => {
@@ -1629,7 +1661,7 @@ $('#spamRules').addEventListener('click', async e => {
   } catch (err) { toast(err.message, true); btn.disabled = false; }
 });
 
-$('#settingsBtn').addEventListener('click', openSettings);
+$('#settingsBtn').addEventListener('click', () => openSettings());
 document.querySelectorAll('dialog [data-close]').forEach(b =>
   b.addEventListener('click', () => b.closest('dialog').close()));
 

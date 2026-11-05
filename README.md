@@ -6,6 +6,8 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 
 **Sestavená aplikace:** spusťte `dist\Mailer\Mailer.exe`. Složka `dist\Mailer` obsahuje vše potřebné, takže ji můžete přesunout kamkoli (např. do `C:\Program Files\Mailer`). Zástupce na plochu vytvoříte pravým tlačítkem na `Mailer.exe` → *Zobrazit další možnosti* → *Odeslat* → *Plocha*.
 
+**Připnutí na hlavní panel:** na běžícím Maileru klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `Mailer.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
+
 **Sestavení `.exe`:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a výsledek uloží do `dist\Mailer\`.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
@@ -34,7 +36,7 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
   - *Mazat nepřečtené notifikace starší než týden* (výchozí: vypnuto).
 
   Mazání probíhá v rámci synchronizace (přesun do koše). Odložené zprávy se nemažou.
-- **Složky** (levý sloupec, *+ Přidat složku*): každá složka v aplikaci míří na **jednu konkrétní složku na jednom účtu**, buď existující na serveru, nebo novou. V konfiguraci (⚙ u složky) nastavíte cílový účet a složku, pravidla (e-mail odesílatele, lze přidat a smazat), kdy přesouvat (*ihned po doručení* / *až po přečtení*) a zda přesunuté zprávy označit jako přečtené. Pravidlo vznikne i tlačítkem **Do složky…** ve sloupci Akce.
+- **Složky** (levý sloupec, *+ Přidat složku*): každá složka v aplikaci míří na **jednu konkrétní složku na jednom účtu**, buď existující na serveru, nebo novou. Konfigurace složek je v **Nastavení** pod Spamem a Notifikacemi, v sekci **Složky**. Každá složka tam má svou obrazovku: uprostřed je konfigurace, vpravo pravidla. Je tam i *+ Nová složka*. Tlačítko ⚙ u složky v levém sloupci otevře Nastavení rovnou na obrazovce této složky. V konfiguraci nastavíte cílový účet a složku, pravidla (e-mail odesílatele, lze přidat a smazat), kdy přesouvat (*ihned po doručení* / *až po přečtení*) a zda přesunuté zprávy označit jako přečtené. Pravidlo vznikne i tlačítkem **Do složky…** ve sloupci Akce.
   - Typy pravidel: **odesílatel**, **příjemce** (adresa v Komu nebo Kopii, např. když jste v kopii a příjemcem je kolega) a **slovo či fráze v předmětu** (bez ohledu na velikost písmen a předpony Re:/Fw:).
   - Pravidla platí pro doručenou poštu všech účtů. Zprávy z jiného účtu se přenesou na cílový účet (s původním datem a příznaky) a na původním účtu skončí v **koši**. Když uložení na cílový server selže, ze zdroje se nic nemaže.
   - Odložené zprávy se nepřesouvají. Odesílatel může patřit jen do jedné složky. *Smazat složku* nabídne volbu: **jen v aplikaci** (složka i zprávy na serveru zůstanou), nebo **i na serveru včetně všech zpráv** (zprávy se přesunou do koše účtu, pak se složka smaže, potvrzuje se druhým kliknutím).

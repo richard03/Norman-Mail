@@ -160,59 +160,6 @@
   </form>
 </dialog>
 
-<!-- Konfigurace uživatelské složky -->
-<dialog id="folderDialog">
-  <form id="folderForm" method="dialog">
-    <h2 id="folderTitle">Nová složka</h2>
-    <label>Název složky v aplikaci<input name="name" maxlength="60" autocomplete="off" placeholder="např. Projekt Alfa"></label>
-    <fieldset>
-      <legend>Kam zprávy přesouvat</legend>
-      <div class="grid2">
-        <label>Účet<select name="account_id" id="folderAccount"></select></label>
-        <label>Složka na serveru<select name="server_folder" id="folderServer"></select></label>
-      </div>
-      <label id="folderNewWrap" hidden>Název nové složky na serveru
-        <input name="new_folder" maxlength="60" autocomplete="off" placeholder="vznikne při prvním přesunu"></label>
-      <p id="folderTargetNote" class="note"></p>
-    </fieldset>
-    <fieldset>
-      <legend>Kdy zprávy podle pravidel přesouvat</legend>
-      <label class="option"><input type="radio" name="when" value="now" checked> Ihned po doručení</label>
-      <label class="option"><input type="radio" name="when" value="read"> Až po přečtení</label>
-    </fieldset>
-    <label class="option"><input type="checkbox" name="mark_read"> Přesunuté zprávy označit jako přečtené</label>
-    <p id="folderError" class="error"></p>
-    <section id="folderRulesSection" class="folder-rules" hidden>
-      <h3>Pravidla <span id="folderRulesCount" class="muted"></span></h3>
-      <p class="note">Zprávy z doručené pošty všech účtů, které odpovídají kterémukoli pravidlu, se přesouvají do
-        složky. Pravidlo podle odesílatele vznikne i tlačítkem <b>Do složky…</b> u zprávy.</p>
-      <div class="rule-add">
-        <select id="folderRuleKind">
-          <option value="sender">Odesílatel</option>
-          <option value="recipient">Příjemce (Komu / Kopie)</option>
-          <option value="subject">Slovo v předmětu</option>
-        </select>
-        <input id="folderRuleInput" placeholder="odesilatel@example.cz" autocomplete="off">
-        <button type="button" id="folderRuleAdd" class="btn">Přidat pravidlo</button>
-      </div>
-      <ul id="folderRules" class="rules"></ul>
-    </section>
-    <div id="folderDeletePanel" class="delete-panel" hidden>
-      <p><b>Jak chcete složku smazat?</b></p>
-      <button type="button" class="btn" data-del="local">Jen v aplikaci – složka i zprávy na serveru zůstanou</button>
-      <button type="button" class="btn danger" data-del="server" id="folderDeleteServer">Smazat i na serveru včetně všech zpráv</button>
-      <button type="button" class="btn" data-del="cancel">Zrušit</button>
-      <p id="folderDeleteNote" class="note"></p>
-    </div>
-    <div class="dialog-actions">
-      <button type="button" id="folderDeleteBtn" class="btn danger" hidden>Smazat složku</button>
-      <span class="spacer"></span>
-      <button type="button" class="btn" data-close>Zavřít</button>
-      <button type="submit" id="folderSaveBtn" class="btn primary">Vytvořit složku</button>
-    </div>
-  </form>
-</dialog>
-
 <!-- Nastavení: témata | nastavení | pravidla -->
 <dialog id="settingsDialog" class="settings">
   <div class="settings-head">
@@ -223,6 +170,9 @@
     <nav class="settings-nav">
       <button type="button" data-section="spam">Spam</button>
       <button type="button" data-section="notifications">Notifikace</button>
+      <div class="settings-nav-section">Složky</div>
+      <div id="settingsFolders"></div>
+      <button type="button" class="nav-new" data-new-folder>+ Nová složka</button>
     </nav>
 
     <section class="settings-main">
@@ -246,6 +196,41 @@
         </div>
         <p class="note">Mazáním se notifikace přesouvají do koše. Odložené zprávy se nemažou.</p>
       </div>
+      <div data-panel="folder">
+        <form id="folderForm" class="folder-form" autocomplete="off">
+          <h3 id="folderTitle">Nová složka</h3>
+          <label>Název složky v aplikaci<input name="name" maxlength="60" placeholder="např. Projekt Alfa"></label>
+          <fieldset>
+            <legend>Kam zprávy přesouvat</legend>
+            <div class="grid2">
+              <label>Účet<select name="account_id" id="folderAccount"></select></label>
+              <label>Složka na serveru<select name="server_folder" id="folderServer"></select></label>
+            </div>
+            <label id="folderNewWrap" hidden>Název nové složky na serveru
+              <input name="new_folder" maxlength="60" placeholder="vznikne při prvním přesunu"></label>
+            <p id="folderTargetNote" class="note"></p>
+          </fieldset>
+          <fieldset>
+            <legend>Kdy zprávy podle pravidel přesouvat</legend>
+            <label class="option"><input type="radio" name="when" value="now" checked> Ihned po doručení</label>
+            <label class="option"><input type="radio" name="when" value="read"> Až po přečtení</label>
+          </fieldset>
+          <label class="option"><input type="checkbox" name="mark_read"> Přesunuté zprávy označit jako přečtené</label>
+          <p id="folderError" class="error"></p>
+          <div class="dialog-actions">
+            <button type="button" id="folderDeleteBtn" class="btn danger" hidden>Smazat složku</button>
+            <span class="spacer"></span>
+            <button type="submit" id="folderSaveBtn" class="btn primary">Vytvořit složku</button>
+          </div>
+          <div id="folderDeletePanel" class="delete-panel" hidden>
+            <p><b>Jak chcete složku smazat?</b></p>
+            <button type="button" class="btn" data-del="local">Jen v aplikaci – složka i zprávy na serveru zůstanou</button>
+            <button type="button" class="btn danger" data-del="server" id="folderDeleteServer">Smazat i na serveru včetně všech zpráv</button>
+            <button type="button" class="btn" data-del="cancel">Zrušit</button>
+            <p id="folderDeleteNote" class="note"></p>
+          </div>
+        </form>
+      </div>
     </section>
 
     <aside class="settings-rules">
@@ -256,6 +241,21 @@
       <div data-panel="notifications">
         <h3>Pravidla <span id="notifyRulesCount" class="muted"></span></h3>
         <ul id="notifyRules" class="rules"></ul>
+      </div>
+      <div data-panel="folder" id="folderRulesSection">
+        <h3>Pravidla <span id="folderRulesCount" class="muted"></span></h3>
+        <p class="note">Zprávy z doručené pošty všech účtů, které odpovídají kterémukoli pravidlu, se přesouvají do
+          složky. Pravidlo podle odesílatele vznikne i tlačítkem <b>Do složky…</b> u zprávy.</p>
+        <div class="rule-add">
+          <select id="folderRuleKind">
+            <option value="sender">Odesílatel</option>
+            <option value="recipient">Příjemce (Komu / Kopie)</option>
+            <option value="subject">Slovo v předmětu</option>
+          </select>
+          <input id="folderRuleInput" placeholder="odesilatel@example.cz" autocomplete="off">
+          <button type="button" id="folderRuleAdd" class="btn">Přidat</button>
+        </div>
+        <ul id="folderRules" class="rules"></ul>
       </div>
     </aside>
   </div>

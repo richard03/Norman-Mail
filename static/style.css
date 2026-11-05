@@ -351,11 +351,10 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 .folder-rules .rules { max-height: 240px; overflow-y: auto; margin-top: 8px; }
 .rule-add { display: flex; gap: 8px; margin-top: 8px; }
 .rule-add input { flex: 1; }
-#folderDialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
-#folderDialog label.option input { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
+.folder-form label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.folder-form label.option input { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
 .warn-mark { color: var(--danger); font-weight: 700; padding: 0 4px; }
-#folderDialog fieldset .grid2 { margin-bottom: 8px; }
-#folderDialog { width: min(680px, calc(100vw - 32px)); }
+.folder-form fieldset .grid2 { margin-bottom: 8px; }
 .rule-add select { flex: none; width: auto; }
 .delete-panel {
   border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px;
@@ -385,3 +384,19 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 dialog.confirm { width: min(480px, calc(100vw - 32px)); }
 .confirm-lines { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 #confirmQuestion { margin: 4px 0 0; font-weight: 600; }
+
+/* ---------- složky v Nastavení ---------- */
+.settings-nav-section {
+  margin: 14px 12px 4px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+#settingsFolders { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav button { display: flex; align-items: center; gap: 6px; }
+.settings-nav button .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav .nav-new { color: var(--muted); font-size: 13px; }
+.settings-nav .nav-new:hover, .settings-nav .nav-new.active { color: var(--text); }
+.settings-main form.folder-form { padding: 0; }
+.settings-rules .rules { margin-top: 10px; }
+.settings-rules .rule-add input { min-width: 0; }
+.settings-rules .rule-add { flex-wrap: wrap; }
+.settings-rules .rule-add select { flex: 1 1 100%; }

@@ -12,6 +12,7 @@ from werkzeug.serving import make_server
 
 import app as server_app
 import mail
+import taskbar
 from store import DATA_DIR
 
 SAFE_SCHEMES = {"http", "https", "mailto"}
@@ -103,7 +104,22 @@ def resource(name):
     return str(base / name)
 
 
+def pin_identity(window, icon):
+    """Po zobrazení okna: identita pro hlavní panel (připnutá ikona pak spouští Mailer, ne Python)."""
+    try:
+        hwnd = 0
+        try:
+            hwnd = int(window.native.Handle.ToInt64())
+        except Exception:
+            hwnd = taskbar.find_window("Mailer")
+        if not taskbar.apply_to_window(hwnd, icon):
+            print("Identitu okna pro hlavní panel nelze nastavit.")
+    except Exception as e:
+        print("Identitu okna pro hlavní panel nelze nastavit:", e)
+
+
 def main():
+    taskbar.set_process_app_id()
     server_app.start_background()
     url = start_server()
     harden_link_handling()
@@ -114,6 +130,7 @@ def main():
                                    min_size=(1200, 600), text_select=True)
     api._window = window
     icon = resource("assets/mailer.ico")
+    window.events.shown += lambda: pin_identity(window, icon)
     webview.start(icon=icon if os.path.exists(icon) else None, private_mode=False,
                   storage_path=str(DATA_DIR / "webview"))
 
