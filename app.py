@@ -278,6 +278,13 @@ def folders(acc_id):
         return jsonify(mail.list_folders(M))
 
 
+def list_window(default_size):
+    """offset/limit z dotazu (UI: další zprávy od počtu zobrazených; obnovení všech zobrazených najednou)."""
+    offset = request.args.get("offset", type=int)
+    limit = request.args.get("limit", type=int) or default_size
+    return (max(0, offset) if offset is not None else None), max(1, min(limit, 2000))
+
+
 @app.get("/api/accounts/<acc_id>/messages")
 def messages(acc_id):
     acc = account_or_404(acc_id)
@@ -290,8 +297,9 @@ def messages(acc_id):
             m["account_id"] = acc_id
         return jsonify(res)
     syncer.ensure_synced(acc, folder)
+    offset, limit = list_window(PAGE_SIZE)
     version = database.version  # verze dat, ze které seznam vzniká (UI podle ní pozná, že je zastaralý)
-    return jsonify(**database.list_messages([acc_id], folder, page, PAGE_SIZE), version=version)
+    return jsonify(**database.list_messages([acc_id], folder, page, limit, offset=offset), version=version)
 
 
 @app.get("/api/unified")
@@ -341,8 +349,9 @@ def unified():
     for acc in accounts:
         if acc["id"] in syncer.errors and acc not in fresh:
             errors.append(f"{acc['name']}: {syncer.errors[acc['id']]} (zobrazuji uložená data)")
+    offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
-    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, UNIFIED_PAGE_SIZE, view)
+    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset)
     return jsonify(messages=res["messages"], has_more=res["has_more"], errors=errors, version=version)
 
 
@@ -359,8 +368,13 @@ def message(acc_id, uid):
     row = database.message(acc_id, folder, uid)
     raw = database.get_body(acc_id, folder, uid)
     if raw is None:
-        with pool.get(acc) as M:
-            raw, flags = mail.fetch_raw_mark_seen(M, folder, uid)
+        try:
+            with pool.get(acc) as M:
+                raw, flags = mail.fetch_raw_mark_seen(M, folder, uid)
+        except mail.MessageGone as e:  # zastaralá cache – zprávu odebrat, ať zmizí i ze seznamu
+            database.remove_message(acc_id, folder, uid)
+            database.bump()
+            return jsonify(error=str(e), gone=True), 404
         database.put_body(acc_id, folder, uid, raw)
     else:
         flags = ["\\Seen"] + (["\\Flagged"] if row and row["flagged"] else [])

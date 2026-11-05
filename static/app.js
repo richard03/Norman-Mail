@@ -53,7 +53,12 @@ async function api(path, { method = 'GET', body } = {}) {
   const r = await fetch(path, opts);
   let data = null;
   try { data = await r.json(); } catch { /* prázdná odpověď */ }
-  if (!r.ok) throw new Error(data?.error || `Chyba serveru (${r.status})`);
+  if (!r.ok) {
+    const err = new Error(data?.error || `Chyba serveru (${r.status})`);
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -185,24 +190,28 @@ function setView(view) {
 
 // ------------------------------------------------------------------ seznam zpráv
 
-async function loadList({ append = false, quiet = false } = {}) {
+async function loadList({ append = false, quiet = false, keepLoaded = false } = {}) {
   const token = ++listToken;
   const v = state.view;
-  if (!append) state.page = 0;
+  const loaded = state.messages.length;
+  if (!append && !keepLoaded) state.page = 0;
   state.listLoading = true;
   if (!append && !quiet) { state.messages = []; state.listErrors = []; $('#messages').scrollTop = 0; }
   renderList();
   try {
     const qs = new URLSearchParams({ page: state.page });
     if (state.query) qs.set('q', state.query);
+    else if (append) qs.set('offset', loaded);                     // pokračovat za zobrazenými
+    else if (keepLoaded && loaded) { qs.set('offset', 0); qs.set('limit', loaded); }  // obnovit vše zobrazené
     let res;
     if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
     state.messages = append ? state.messages.concat(res.messages) : res.messages;
+    if (keepLoaded && !state.query && !state.messages.length && loaded) state.page = 0;
     state.hasMore = res.has_more;
     state.loadMoreFailed = false;
-    if (!append) state.listVersion = res.version ?? null;
+    if (!append || keepLoaded) state.listVersion = res.version ?? null;
     state.listErrors = res.errors || [];
   } catch (e) {
     if (token !== listToken) return;
@@ -308,6 +317,13 @@ async function openMessage(m) {
     updateActions();
     loadContext();
   } catch (e) {
+    if (e.data?.gone) {  // na serveru už není (např. automaticky smazaná notifikace) – zastaralý seznam
+      state.messages = state.messages.filter(x => x !== m);
+      if (state.current === cur) clearCurrent('Zpráva už neexistuje – byla smazána nebo přesunuta.');
+      else renderList();
+      loadList({ quiet: true, keepLoaded: true });
+      return;
+    }
     if (state.current !== cur) return;
     showReaderPlaceholder(`<div class="empty error">${esc(e.message)}</div>`);
     clearContext('');
@@ -1084,8 +1100,8 @@ async function pollSync() {
   if (lastNoticeId !== null) notices.filter(([id]) => id > lastNoticeId).forEach(([, text]) => toast(text, true));
   lastNoticeId = Math.max(lastNoticeId ?? 0, newest);
   // Seznam vznikl z určité verze databáze; pokud se od té doby změnila, načteme ho znovu.
-  if (!state.listLoading && state.listVersion != null && st.version !== state.listVersion
-      && state.page === 0 && !state.query) loadList({ quiet: true });
+  if (!state.listLoading && state.listVersion != null && st.version !== state.listVersion && !state.query)
+    loadList({ quiet: true, keepLoaded: true });
 }
 
 (async () => {

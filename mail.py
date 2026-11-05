@@ -26,6 +26,10 @@ class MailError(Exception):
     """Chyba s hláškou vhodnou pro uživatele."""
 
 
+class MessageGone(MailError):
+    """Zpráva na serveru už není (smazaná/přesunutá) – lokální cache je zastaralá."""
+
+
 # --------------------------------------------------------------------------
 # Pomocné funkce
 # --------------------------------------------------------------------------
@@ -451,7 +455,7 @@ def _fetch_raw(M, uid):
         m = UID_RE.search(meta)
         if lit and m and int(m.group(1)) == uid:
             return lit, _flags(meta)
-    raise MailError("Zpráva nebyla nalezena (možná byla smazána).")
+    raise MessageGone("Zpráva už na serveru není (byla smazána nebo přesunuta).")
 
 
 def _safe_body(msg, prefs):
@@ -778,7 +782,7 @@ def spam_message(M, folder, uid):
     _select(M, folder, readonly=False)
     headers = _fetch_headers(M, [uid], "FROM DATE")
     if not headers:
-        raise MailError("Zpráva nebyla nalezena (možná byla smazána).")
+        raise MessageGone("Zpráva už na serveru není (byla smazána nebo přesunuta).")
     _, _, h = headers[0]
     sender = next(iter(addr_set(h, "From")), None)
     _move_uids(M, [uid], dest)

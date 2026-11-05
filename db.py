@@ -192,14 +192,18 @@ class Database:
         rows = self._q(self._SELECT + " WHERE m.account_id=? AND m.folder=? AND m.uid=?", (acc_id, folder, uid))
         return self._to_dict(rows[0]) if rows else None
 
-    def list_messages(self, acc_ids, folder, page, page_size, view="all") -> dict:
+    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None) -> dict:
+        """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
+        nic nepřeskočí, ani když mezitím nějaké zprávy zmizely."""
+        if offset is None:
+            offset = page * page_size
         marks = ",".join("?" * len(acc_ids))
         where = f"WHERE m.account_id IN ({marks}) AND m.folder=? AND {VIEW_FILTERS[view]}"
         total = self._q(f"SELECT COUNT(*) FROM messages m {where}", (*acc_ids, folder))[0][0]
         rows = self._q(f"{self._SELECT} {where} ORDER BY m.date DESC, m.uid DESC LIMIT ? OFFSET ?",
-                       (*acc_ids, folder, page_size, page * page_size))
+                       (*acc_ids, folder, page_size, offset))
         return {"messages": [self._to_dict(r) for r in rows], "total": total,
-                "has_more": (page + 1) * page_size < total}
+                "has_more": offset + page_size < total}
 
     def view_unread(self, folder="INBOX") -> dict:
         """Počty nepřečtených pro pohledy Důležité / Notifikace / Všechny doručené."""
