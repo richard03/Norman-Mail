@@ -190,7 +190,7 @@ async function loadList({ append = false, quiet = false } = {}) {
   const v = state.view;
   if (!append) state.page = 0;
   state.listLoading = true;
-  if (!append && !quiet) { state.messages = []; state.listErrors = []; }
+  if (!append && !quiet) { state.messages = []; state.listErrors = []; $('#messages').scrollTop = 0; }
   renderList();
   try {
     const qs = new URLSearchParams({ page: state.page });
@@ -201,14 +201,27 @@ async function loadList({ append = false, quiet = false } = {}) {
     if (token !== listToken) return;
     state.messages = append ? state.messages.concat(res.messages) : res.messages;
     state.hasMore = res.has_more;
+    state.loadMoreFailed = false;
     if (!append) state.listVersion = res.version ?? null;
     state.listErrors = res.errors || [];
   } catch (e) {
     if (token !== listToken) return;
-    state.listErrors = [e.message];
+    if (append) { state.page--; state.loadMoreFailed = true; }  // tlačítko „Zkusit znovu“, ne smyčka
+    else state.listErrors = [e.message];
   }
   state.listLoading = false;
   renderList();
+  setTimeout(maybeLoadMore, 0);  // seznam je pořád kratší než okno → načíst další hned
+}
+
+/** Automatické načítání dalších zpráv, když se seznam posune blízko konce. */
+function maybeLoadMore() {
+  const el = $('#messages');
+  if (!state.hasMore || state.listLoading || state.loadMoreFailed || !state.messages.length) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 400) {
+    state.page++;
+    loadList({ append: true });
+  }
 }
 
 function renderList() {
@@ -232,22 +245,29 @@ function renderList() {
       <div class="subject">${esc(m.subject)}</div>
       ${v.type === 'unified' ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}</div>` : ''}
     </li>`;
-  }).join('');
+  }).join('') + listTail();
+}
 
-  let footer = '';
-  if (state.listLoading) footer = '<div class="muted pad center">Načítám…</div>';
-  else if (state.hasMore) footer = '<button class="btn wide" id="moreBtn">Načíst další</button>';
-  else if (!state.messages.length && state.accounts.length && !state.listErrors.length)
-    footer = `<div class="muted pad center">${state.query ? 'Nic nenalezeno.' : 'Žádné zprávy.'}</div>`;
-  $('#listFooter').innerHTML = footer;
+/** Poslední řádek seznamu: spinner při načítání, jinak stav (prázdno / chyba dalších zpráv). */
+function listTail() {
+  if (state.listLoading) return '<li class="list-tail"><span class="spinner" aria-label="Načítám"></span></li>';
+  if (state.loadMoreFailed)
+    return '<li class="list-tail">Další zprávy se nepodařilo načíst. <button class="link" id="retryMore">Zkusit znovu</button></li>';
+  if (!state.messages.length && state.accounts.length && !state.listErrors.length)
+    return `<li class="list-tail">${state.query ? 'Nic nenalezeno.' : 'Žádné zprávy.'}</li>`;
+  return '';
 }
 
 $('#messages').addEventListener('click', e => {
   const li = e.target.closest('li[data-i]');
   if (li) openMessage(state.messages[+li.dataset.i]);
 });
-$('#listFooter').addEventListener('click', e => {
-  if (e.target.id === 'moreBtn') { state.page++; loadList({ append: true }); }
+$('#messages').addEventListener('scroll', maybeLoadMore, { passive: true });
+$('#messages').addEventListener('click', e => {
+  if (e.target.id !== 'retryMore') return;
+  state.loadMoreFailed = false;
+  maybeLoadMore();
+  if (!state.listLoading) { state.page++; loadList({ append: true }); }
 });
 $('#refreshBtn').addEventListener('click', () => refreshAll());
 $('#searchForm').addEventListener('submit', e => {

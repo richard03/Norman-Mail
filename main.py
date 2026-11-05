@@ -38,6 +38,32 @@ def harden_link_handling():
         pass
 
 
+def disable_tracking_prevention():
+    """WebView2 má ve výchozím stavu zapnutou ochranu před sledováním (úroveň „Vyvážená“), která blokuje
+    obrázky ze serverů rozesílacích služeb – v newsletterech se pak po „Zobrazit obrázky“ ukáže jen část
+    obrázků. Soukromí chrání aplikace sama: vzdálený obsah je zablokovaný (CSP rámce zprávy), dokud ho
+    uživatel výslovně nepovolí."""
+    try:
+        from webview.platforms import edgechromium
+        from Microsoft.Web.WebView2.Core import CoreWebView2TrackingPreventionLevel
+
+        original = edgechromium.EdgeChrome.on_webview_ready
+
+        def on_webview_ready(self, sender, args):
+            original(self, sender, args)
+            try:
+                if args.IsSuccess:
+                    sender.CoreWebView2.Profile.PreferredTrackingPreventionLevel = \
+                        CoreWebView2TrackingPreventionLevel.None_ if hasattr(CoreWebView2TrackingPreventionLevel, "None_") \
+                        else getattr(CoreWebView2TrackingPreventionLevel, "None")
+            except Exception as e:
+                print("Ochranu před sledováním nelze vypnout:", e)
+
+        edgechromium.EdgeChrome.on_webview_ready = on_webview_ready
+    except Exception as e:
+        print("Ochranu před sledováním nelze vypnout:", e)
+
+
 class Api:
     """Funkce volatelné z JavaScriptu přes window.pywebview.api.*"""
 
@@ -81,6 +107,7 @@ def main():
     server_app.start_background()
     url = start_server()
     harden_link_handling()
+    disable_tracking_prevention()
     webview.settings["ALLOW_DOWNLOADS"] = True
     api = Api()
     window = webview.create_window("Mailer", url, js_api=api, width=1600, height=950,

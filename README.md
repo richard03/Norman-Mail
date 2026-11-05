@@ -14,7 +14,7 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 
 ### Jak to funguje
 
-`main.py` spustí na pozadí lokální server (Flask, náhodný volný port na `127.0.0.1`) a zobrazí jeho rozhraní v nativním okně přes **Edge WebView2** (knihovna pywebview). WebView2 je součástí Windows 10 a 11. Odkazy z e-mailů a přihlášení přes Google se otevírají ve vašem výchozím prohlížeči. Povolené jsou jen odkazy `http`, `https` a `mailto`. Přílohy se ukládají přes systémový dialog *Uložit jako*.
+`main.py` spustí na pozadí lokální server (Flask, náhodný volný port na `127.0.0.1`) a zobrazí jeho rozhraní v nativním okně přes **Edge WebView2** (knihovna pywebview). WebView2 je součástí Windows 10 a 11. Odkazy z e-mailů a přihlášení přes Google se otevírají ve vašem výchozím prohlížeči. Povolené jsou jen odkazy `http`, `https` a `mailto`. Přílohy se ukládají přes systémový dialog *Uložit jako*. Vestavěná ochrana WebView2 před sledováním je vypnutá, protože blokovala obrázky v newsletterech i po kliknutí na *Zobrazit obrázky*. Vzdálený obsah zpráv blokuje sama aplikace, dokud ho nepovolíte.
 
 ### Lokální databáze (cache)
 
