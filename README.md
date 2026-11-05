@@ -40,6 +40,18 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
   - Odložené zprávy se nepřesouvají. Odesílatel může patřit jen do jedné složky. *Smazat složku* nabídne volbu: **jen v aplikaci** (složka i zprávy na serveru zůstanou), nebo **i na serveru včetně všech zpráv** (zprávy se přesunou do koše účtu, pak se složka smaže, potvrzuje se druhým kliknutím).
   - Složky z dřívější verze bez cílového účtu se nepoužívají, dokud jim účet nenastavíte (v levém sloupci mají červený vykřičník).
 
+- **Smazané** (levý sloupec): smazané zprávy ze všech účtů na jednom místě (koše jednotlivých účtů). Zprávy v této složce se automaticky označí jako přečtené, i když je tam přesunul jiný klient. Číslo u složky ukazuje celkový počet zpráv. Tlačítko **Vyprázdnit** dole pod seznamem je po potvrzení natrvalo smaže ze všech serverů. Smazání zprávy přímo ve Smazaných je definitivní a potvrzuje se.
+- **Výběr více zpráv:** Ctrl+klik přidá zprávu do výběru nebo ji z něj odebere, Shift+klik vybere rozsah, Ctrl+A vybere všechny načtené zprávy. Vybrané zprávy smažete klávesou **Delete** nebo tlačítkem Smazat.
+- **Drag & drop:** zprávu nebo vybranou skupinu zpráv přetáhněte myší na položku v levém sloupci:
+  - na **složku**: přesun do ní (i na jiný účet), pravidlo se nevytváří;
+  - na **Smazané**: smazání;
+  - na **účet**: přesun do doručené pošty tohoto účtu;
+  - na **Notifikace**: odesílatelé se stanou zdrojem notifikací;
+  - na **Důležité** nebo **Vzít na vědomí**: odesílatelé přestanou být notifikacemi;
+  - ze Smazaných nebo ze složky na kterýkoli pohled doručené pošty: obnovení do doručené pošty.
+
+  Pokud by zprávy po přesunu hned zmizely, aplikace se předem zeptá. Jde o tyto případy: staré notifikace by se podle nastavení smazaly, odesílatel je označený jako spam, nebo zprávu hned přesune pravidlo složky.
+
 Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení, pravidla pro spam, notifikace a složky a o konfiguraci složek (samotné složky a zprávy na serveru zůstanou).
 
 ### Kde jsou data

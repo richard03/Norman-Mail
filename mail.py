@@ -737,12 +737,7 @@ def _ensure_folder(M, folders, roles, fallback):
 
 def delete_message(M, folder, uid):
     """Přesune zprávu do koše; pokud už v koši je (nebo koš neexistuje), smaže ji natrvalo."""
-    trash = find_role(M, "trash")
-    _select(M, folder, readonly=False)
-    if trash and trash != folder:
-        _move_uids(M, [uid], trash)
-    else:
-        _expunge_uids(M, str(uid))
+    trash_uids(M, folder, [uid])
 
 
 def mark_seen_uids(M, folder, uids):
@@ -753,17 +748,29 @@ def mark_seen_uids(M, folder, uids):
 
 
 def trash_uids(M, folder, uids):
-    """Hromadné smazání (přesun do koše; bez koše natrvalo)."""
+    """Hromadné smazání: přesun do koše (zprávy v koši jsou vždy přečtené); zprávy, které už v koši jsou
+    (nebo účet koš nemá), se smažou natrvalo."""
     if not uids:
         return
     trash = find_role(M, "trash")
     _select(M, folder, readonly=False)
+    ids = [str(u) for u in uids]
     if trash and trash != folder:
+        for i in range(0, len(ids), 500):
+            M.uid("STORE", ",".join(ids[i:i + 500]), "+FLAGS", "(\\Seen)")
         _move_uids(M, uids, trash)
     else:
-        uids = [str(u) for u in uids]
-        for i in range(0, len(uids), 500):
-            _expunge_uids(M, ",".join(uids[i:i + 500]))
+        for i in range(0, len(ids), 500):
+            _expunge_uids(M, ",".join(ids[i:i + 500]))
+
+
+def expunge_all(M, folder) -> int:
+    """Natrvalo smaže všechny zprávy ve složce (vyprázdnění koše). Vrací počet smazaných."""
+    _select(M, folder, readonly=False)
+    uids = sorted(all_uids(M))
+    for i in range(0, len(uids), 500):
+        _expunge_uids(M, ",".join(str(u) for u in uids[i:i + 500]))
+    return len(uids)
 
 
 def ensure_named_folder(M, imap_name):

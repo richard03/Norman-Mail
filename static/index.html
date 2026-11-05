@@ -29,6 +29,10 @@
     </form>
     <div id="listErrors"></div>
     <ul id="messages"></ul>
+    <div id="listFooter" class="list-footer" hidden>
+      <span id="trashInfo" class="muted"></span>
+      <button id="emptyTrashBtn" class="btn danger" title="Natrvalo smaže všechny zprávy ve Smazaných na všech účtech">Vyprázdnit</button>
+    </div>
   </section>
 
   <section id="detail">
@@ -73,6 +77,22 @@
   </div>
   </section>
 </div>
+
+<div id="dragGhost" class="drag-ghost"></div>
+
+<!-- Upozornění / potvrzení (přesun, který by zprávy hned smazal; definitivní smazání) -->
+<dialog id="confirmDialog" class="confirm">
+  <form method="dialog">
+    <h2 id="confirmTitle">Upozornění</h2>
+    <ul id="confirmLines" class="confirm-lines"></ul>
+    <p id="confirmQuestion"></p>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button value="cancel" id="confirmCancel" class="btn">Zrušit</button>
+      <button value="ok" id="confirmOk" class="btn danger">Pokračovat</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Nastavení účtu -->
 <dialog id="accountDialog">

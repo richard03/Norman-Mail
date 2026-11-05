@@ -234,9 +234,16 @@ class Database:
         nic nepřeskočí, ani když mezitím nějaké zprávy zmizely."""
         if offset is None:
             offset = page * page_size
-        marks = ",".join("?" * len(acc_ids))
-        where = f"WHERE m.account_id IN ({marks}) AND m.folder=? AND {VIEW_FILTERS[view]}"
-        params = [*acc_ids, folder]
+        if isinstance(folder, dict):  # {account_id: složka} – např. koše všech účtů
+            if not folder:
+                return {"messages": [], "total": 0, "has_more": False}
+            where = "WHERE (" + " OR ".join(["(m.account_id=? AND m.folder=?)"] * len(folder)) + ")"
+            where += f" AND {VIEW_FILTERS[view]}"
+            params = [x for pair in folder.items() for x in pair]
+        else:
+            marks = ",".join("?" * len(acc_ids))
+            where = f"WHERE m.account_id IN ({marks}) AND m.folder=? AND {VIEW_FILTERS[view]}"
+            params = [*acc_ids, folder]
         if search:
             where += " AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ?)"
             params += [f"%{search}%"] * 3
@@ -250,6 +257,35 @@ class Database:
         """Počty nepřečtených pro pohledy Důležité / Notifikace / Všechny doručené."""
         return {view: self._q(f"SELECT COALESCE(SUM(1 - seen), 0) FROM messages m WHERE m.folder=? AND {cond}",
                               (folder,))[0][0] for view, cond in VIEW_FILTERS.items()}
+
+    # ------------------------------------------------------------------ koš („Smazané“)
+
+    def trash_folders(self) -> dict:
+        """{account_id: název koše}"""
+        return {r[0]: r[1] for r in self._q("SELECT account_id, name FROM folders WHERE role='trash'")}
+
+    def trash_total(self, acc_ids) -> int:
+        """Počet zpráv v koších daných účtů (číslo u složky Smazané)."""
+        acc_ids = list(acc_ids)
+        if not acc_ids:
+            return 0
+        return self._q(f"""SELECT COUNT(*) FROM messages m JOIN folders f
+                           ON f.account_id=m.account_id AND f.name=m.folder AND f.role='trash'
+                           WHERE m.account_id IN ({",".join("?" * len(acc_ids))})""", acc_ids)[0][0]
+
+    def unseen_uids(self, acc_id, folder) -> list:
+        return [r[0] for r in self._q("SELECT uid FROM messages WHERE account_id=? AND folder=? AND seen=0",
+                                      (acc_id, folder))]
+
+    def inbox_from_senders(self, senders) -> list:
+        """Zprávy v doručené poště od daných odesílatelů: [{account_id, uid, seen, date, snoozed}]."""
+        out = []
+        for s in senders:
+            out += [dict(r) for r in self._q("""
+                SELECT m.account_id, m.uid, m.seen, m.date, s.uid IS NOT NULL AS snoozed FROM messages m
+                LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
+                WHERE m.folder='INBOX' AND instr(m.from_addrs, ?) > 0""", (f",{s},",))]
+        return out
 
     def unread_counts(self, folder="INBOX") -> dict:
         return {r[0]: r[1] for r in self._q(

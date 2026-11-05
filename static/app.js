@@ -30,8 +30,12 @@ const state = {
   viewUnread: null,
   settings: null,         // nastavení aplikace (z /api/settings)
   userFolders: [],        // uživatelské složky (z /api/user-folders)
-  editingFolder: null,    // id složky v dialogu konfigurace       // nepřečtené v pohledech { important, notifications, all }
+  editingFolder: null,    // id složky v dialogu konfigurace
   messages: [], page: 0, hasMore: false, query: '', listErrors: [], listLoading: false,
+  selected: new Set(),    // klíče vybraných zpráv (Ctrl/Shift + klik) – pro drag & drop a hromadné mazání
+  anchor: null,           // klíč zprávy, od které se počítá výběr se Shiftem
+  dragItems: null,        // právě přetahované zprávy
+  trashTotal: 0,          // počet zpráv ve Smazaných (všechny, ne jen nepřečtené)
   current: null,          // { accountId, folder, uid, data }
   context: [],            // související zprávy aktuální zprávy
   showImages: false,
@@ -99,6 +103,11 @@ function fmtAddr(a) {
 }
 const shortAddr = list => (list || []).map(a => a.name || a.addr).join(', ') || '(neznámý)';
 const badge = n => (n ? `<span class="badge">${n}</span>` : '');
+const zprav = n => `${n} ${n === 1 ? 'zpráva' : n >= 2 && n <= 4 ? 'zprávy' : 'zpráv'}`;
+const keyOf = m => `${m.account_id}|${m.folder}|${m.uid}`;
+const curKey = cur => (cur ? `${cur.accountId}|${cur.folder}|${cur.uid}` : null);
+const selectedItems = () => state.messages.filter(m => state.selected.has(keyOf(m)));
+const TRASH_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>';
 
 function folderRole(accountId, folder) {
   return (state.folders[accountId] || []).find(f => f.name === folder)?.role;
@@ -134,6 +143,10 @@ function renderSidebar() {
       h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
               <span class="label">${label}</span>${badge(vu[filter])}</div>`;
     }
+    // Smazané: koše všech účtů; číslo = celkový počet zpráv (všechny jsou přečtené)
+    h += `<div class="nav-item unified trash-item ${state.view.type === 'trash' ? 'active' : ''}" data-trash
+            title="Smazané zprávy ze všech účtů">${TRASH_ICON}<span class="label">Smazané</span>
+            ${state.trashTotal ? `<span class="badge total">${state.trashTotal}</span>` : ''}</div>`;
   } else {
     h += `<p class="muted pad">Zatím nemáte žádný účet. Začněte tlačítkem „Přidat účet“.</p>`;
   }
@@ -151,6 +164,7 @@ function renderSidebar() {
     }
     h += '<div class="nav-item add-folder" data-add-folder>+ Přidat složku</div>';
   }
+  if (state.dragItems) setTimeout(markDropCandidates, 0);  // překreslení během přetahování
   if (state.accounts.length) h += '<div class="nav-section">Účty</div>';
   for (const a of state.accounts) {
     // Každý účet = jedna položka vedoucí do jeho doručené pošty.
@@ -170,8 +184,9 @@ function renderSidebar() {
 }
 
 $('#accounts').addEventListener('click', e => {
-  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-edit],[data-retry],[data-unified],[data-acc]');
+  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-edit],[data-retry],[data-trash],[data-unified],[data-acc]');
   if (!el) return;
+  if (el.hasAttribute('data-trash')) return setView({ type: 'trash' });
   if (el.dataset.editFolder) return openFolderDialog(+el.dataset.editFolder);
   if (el.hasAttribute('data-add-folder')) return openFolderDialog(null);
   if (el.dataset.ufolder) {
@@ -205,6 +220,8 @@ function setView(view) {
   if (isNotifView(state.view) && !isNotifView(view) && state.settings?.notify_mark_read_on_leave)
     markNotificationsRead();
   state.view = view;
+  state.selected = new Set();
+  state.anchor = null;
   state.query = '';
   $('#searchInput').value = '';
   renderSidebar();
@@ -229,9 +246,15 @@ async function loadList({ append = false, quiet = false, keepLoaded = false } = 
     let res;
     if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
+    else if (v.type === 'trash') res = await api('/api/trash?' + qs);
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
     state.messages = append ? state.messages.concat(res.messages) : res.messages;
+    if (v.type === 'trash' && !state.query && res.total != null && res.total !== state.trashTotal) {
+      state.trashTotal = res.total;
+      renderSidebar();
+    }
+    if (!append) pruneSelection();
     if (keepLoaded && !state.query && !state.messages.length && loaded) state.page = 0;
     state.hasMore = res.has_more;
     state.loadMoreFailed = false;
@@ -260,17 +283,20 @@ function maybeLoadMore() {
 function renderList() {
   const v = state.view;
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
-  const multi = v.type === 'unified' || v.type === 'ufolder';  // zprávy z více účtů
-  $('#listTitle').textContent = v.type === 'unified' ? UNIFIED_TITLE[v.filter]
+  const multi = v.type === 'unified' || v.type === 'ufolder' || v.type === 'trash';  // zprávy z více účtů
+  $('#listTitle').textContent = v.type === 'unified' ? UNIFIED_TITLE[v.filter] : v.type === 'trash' ? 'Smazané'
     : v.type === 'ufolder' ? v.title : `${v.title || v.folder} · ${acc?.name || ''}`;
-  $('#searchInput').placeholder = v.type === 'unified' ? 'Hledat v doručené poště…' : 'Hledat ve složce…';
+  $('#searchInput').placeholder = v.type === 'unified' ? 'Hledat v doručené poště…'
+    : v.type === 'trash' ? 'Hledat ve Smazaných…' : 'Hledat ve složce…';
+  renderTrashFooter();
   $('#listErrors').innerHTML = state.listErrors.map(e => `<div class="list-error">${esc(e)}</div>`).join('');
 
   const showTo = v.type === 'folder' && ['sent', 'drafts'].includes(folderRole(v.accountId, v.folder));
   const cur = state.current;
   $('#messages').innerHTML = state.messages.map((m, i) => {
     const active = cur && cur.accountId === m.account_id && cur.folder === m.folder && cur.uid === m.uid;
-    return `<li class="msg ${m.seen ? '' : 'unread'} ${active ? 'active' : ''}" data-i="${i}">
+    const sel = state.selected.has(keyOf(m));
+    return `<li class="msg ${m.seen ? '' : 'unread'} ${active ? 'active' : ''} ${sel ? 'selected' : ''}" data-i="${i}" draggable="true">
       ${multi ? `<span class="strip" style="background:${accColor(m.account_id)}"></span>` : ''}
       <div class="row1">
         <span class="from">${esc(showTo ? 'Komu: ' + shortAddr(m.to) : shortAddr(m.from))}</span>
@@ -280,6 +306,15 @@ function renderList() {
       ${multi ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}</div>` : ''}
     </li>`;
   }).join('') + listTail();
+}
+
+/** Smazané: dole počet zpráv a tlačítko Vyprázdnit. */
+function renderTrashFooter() {
+  const isTrash = state.view.type === 'trash';
+  $('#listFooter').hidden = !isTrash;
+  if (!isTrash) return;
+  $('#trashInfo').textContent = state.trashTotal ? `Celkem ${zprav(state.trashTotal)}` : 'Složka je prázdná';
+  $('#emptyTrashBtn').disabled = !state.trashTotal;
 }
 
 /** Poslední řádek seznamu: spinner při načítání, jinak stav (prázdno / chyba dalších zpráv). */
@@ -292,10 +327,51 @@ function listTail() {
   return '';
 }
 
+// Klik = otevřít zprávu; Ctrl+klik = přidat/odebrat z výběru; Shift+klik = výběr rozsahu.
 $('#messages').addEventListener('click', e => {
   const li = e.target.closest('li[data-i]');
-  if (li) openMessage(state.messages[+li.dataset.i]);
+  if (!li) return;
+  const i = +li.dataset.i, m = state.messages[i], k = keyOf(m);
+  if (e.shiftKey && state.anchor) {
+    const a = state.messages.findIndex(x => keyOf(x) === state.anchor);
+    if (a >= 0) {
+      const [from, to] = a < i ? [a, i] : [i, a];
+      state.selected = new Set(state.messages.slice(from, to + 1).map(keyOf));
+      return afterSelectionChange();
+    }
+  }
+  if (e.ctrlKey || e.metaKey) {
+    if (state.current && !state.selected.size) state.selected.add(curKey(state.current));
+    if (state.selected.has(k)) state.selected.delete(k); else state.selected.add(k);
+    state.anchor = k;
+    return afterSelectionChange();
+  }
+  openMessage(m);
 });
+
+/** Po změně výběru: jedna zpráva = otevřít ji, více zpráv = souhrn místo obsahu. */
+function afterSelectionChange() {
+  const items = selectedItems();
+  if (items.length === 1) {
+    if (curKey(state.current) === keyOf(items[0])) return renderList();
+    return openMessage(items[0]);
+  }
+  if (!items.length) return clearCurrent();
+  state.current = null;
+  showReaderPlaceholder(`<div class="empty"><b>Vybráno ${zprav(items.length)}</b><br>
+    Přetáhněte je myší na složku v levém sloupci, nebo je smažte klávesou Delete.</div>`);
+  clearContext('');
+  updateActions();
+  renderList();
+}
+
+/** Výběr po obnovení seznamu: zprávy, které už v seznamu nejsou, z něj vypadnou. */
+function pruneSelection() {
+  const before = state.selected.size;
+  const present = new Set(state.messages.map(keyOf));
+  state.selected = new Set([...state.selected].filter(k => present.has(k)));
+  if (before > 1 && !state.current && state.selected.size !== before) afterSelectionChange();
+}
 $('#messages').addEventListener('scroll', maybeLoadMore, { passive: true });
 $('#messages').addEventListener('click', e => {
   if (e.target.id !== 'retryMore') return;
@@ -324,6 +400,8 @@ function adjustUnseen(accountId, folder, delta) {
 async function openMessage(m) {
   // item = položka ze seznamu: stačí pro většinu akcí, takže jsou dostupné hned (obsah se načítá na pozadí)
   state.current = { accountId: m.account_id, folder: m.folder, uid: m.uid, data: null, item: m, loading: null };
+  state.selected = new Set([keyOf(m)]);
+  state.anchor = keyOf(m);
   state.showImages = false;
   renderList();
   updateActions();
@@ -364,6 +442,7 @@ function showReaderPlaceholder(html) {
 
 function clearCurrent(text = 'Vyberte zprávu') {
   state.current = null;
+  state.selected = new Set();
   showReaderPlaceholder(`<div class="empty">${esc(text)}</div>`);
   clearContext();
   updateActions();
@@ -439,7 +518,10 @@ $('#messageHead').addEventListener('click', async e => {
 
 function updateActions() {
   const ready = !!state.current;
-  document.querySelectorAll('#actions [data-act]').forEach(b => { b.disabled = !ready; });
+  const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat
+  document.querySelectorAll('#actions [data-act]').forEach(b => {
+    b.disabled = !(ready || (multi && b.dataset.act === 'delete'));
+  });
   const nb = $('#actions [data-act="notification"]');
   const isNotif = !!state.current && isNotification(state.current);
   nb.classList.toggle('active', isNotif);
@@ -448,7 +530,7 @@ function updateActions() {
                      : 'Označí tuto i všechny ostatní zprávy od stejného odesílatele jako notifikace';
 }
 
-const MOVE_DONE = { archive: 'Zpráva archivována', spam: 'Zpráva přesunuta do spamu', delete: 'Zpráva přesunuta do koše' };
+const MOVE_DONE = { archive: 'Zpráva archivována', spam: 'Zpráva přesunuta do spamu', delete: 'Zpráva přesunuta do Smazaných' };
 
 /** Je odesílatel zprávy zdroj notifikací? (z načtené zprávy, jinak z položky seznamu) */
 function isNotification(cur) {
@@ -467,7 +549,11 @@ async function withLoadedMessage(cur, fn) {
 
 async function doAction(act, btn) {
   const cur = state.current;
+  if (act === 'delete' && !cur && state.selected.size > 1) return moveItems(selectedItems(), { type: 'trash' });
   if (!cur) return;
+  // ve Smazaných se maže definitivně – přes hromadnou cestu s potvrzením
+  if (act === 'delete' && state.view.type === 'trash')
+    return moveItems([cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid }], { type: 'trash' });
   if (act === 'replyAll') return withLoadedMessage(cur, () => reply(true));
   if (act === 'forward') return withLoadedMessage(cur, forward);
   if (act === 'notification') return toggleNotification(cur, btn);
@@ -609,9 +695,203 @@ document.addEventListener('keydown', e => {
   const el = document.activeElement;
   if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
   const btn = $('#actions [data-act="delete"]');
-  if (!state.current || btn.disabled || btn.classList.contains('busy')) return;
+  if (btn.disabled || btn.classList.contains('busy')) return;  // nic vybraného
   e.preventDefault();
   doAction('delete', btn);
+});
+
+// Ctrl+A v seznamu vybere všechny načtené zprávy (ne při psaní).
+document.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+  if (document.querySelector('dialog[open]')) return;
+  const el = document.activeElement;
+  if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+  if (!state.messages.length) return;
+  e.preventDefault();
+  state.selected = new Set(state.messages.map(keyOf));
+  afterSelectionChange();
+});
+
+// ------------------------------------------------------------------ přesun více zpráv (drag & drop, Delete)
+
+/** Dialog s upozorněním; vrací true, pokud uživatel potvrdí. */
+function confirmDialog({ title = 'Upozornění', lines = [], question = '', ok = 'Pokračovat' }) {
+  const dlg = $('#confirmDialog');
+  $('#confirmTitle').textContent = title;
+  $('#confirmLines').innerHTML = lines.map(l => `<li>${esc(l)}</li>`).join('');
+  $('#confirmQuestion').textContent = question;
+  $('#confirmOk').textContent = ok;
+  dlg.returnValue = '';
+  dlg.showModal();
+  $('#confirmCancel').focus();
+  return new Promise(resolve => dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true }));
+}
+
+/** Opustí zpráva aktuální pohled, když se přesune na cíl? (pro okamžité odebrání ze seznamu) */
+function leavesView(m, target) {
+  const v = state.view;
+  if (target.type !== 'inbox') return true;                      // Smazané, složka
+  if (target.account_id && target.account_id !== m.account_id) return v.type !== 'unified';
+  if (m.folder !== 'INBOX') return true;                         // ze složky / Smazaných do doručené
+  if (v.type === 'unified' && target.view === 'notifications') return !['notifications', 'all'].includes(v.filter);
+  if (v.type === 'unified' && ['important', 'fyi'].includes(target.view)) return v.filter === 'notifications';
+  return false;
+}
+
+/** Odebere zprávy ze seznamu; pokud mezi nimi byla otevřená (nebo vybrané), otevře další. */
+function removeItems(items) {
+  if (!items.length) return;
+  const keys = new Set(items.map(keyOf));
+  const cur = state.current;
+  const idx = state.messages.findIndex(m => keys.has(keyOf(m)));
+  const affectsOpen = cur ? keys.has(curKey(cur)) : [...state.selected].some(k => keys.has(k));
+  state.messages = state.messages.filter(m => !keys.has(keyOf(m)));
+  state.selected = new Set([...state.selected].filter(k => !keys.has(k)));
+  if (!affectsOpen) return renderList();
+  if (!cur && state.selected.size) return afterSelectionChange();
+  const next = idx >= 0 ? (state.messages[idx] || state.messages[idx - 1]) : null;
+  if (next) openMessage(next); else clearCurrent('Žádná další zpráva');
+}
+
+function targetLabel(target) {
+  if (target.type === 'trash') return state.view.type === 'trash' ? 'Definitivně smazáno' : 'Přesunuto do Smazaných';
+  if (target.type === 'ufolder') return `Přesunuto do složky ${state.userFolders.find(f => f.id === target.id)?.name || ''}`;
+  if (target.account_id) { const a = accById(target.account_id); return `Přesunuto do doručené pošty účtu ${a?.name || a?.email || ''}`; }
+  return `Přesunuto do ${{ important: 'Důležité', fyi: 'Vzít na vědomí', notifications: 'Notifikací',
+                           all: 'doručené pošty' }[target.view]}`;
+}
+
+/** Přesune (nebo smaže) zprávy. Nejdřív se zeptá serveru, co by se s nimi hned stalo (smazání starých
+ *  notifikací, spam, pravidla složek, definitivní smazání), a případně zobrazí upozornění. */
+async function moveItems(items, target) {
+  if (!items.length) return;
+  const body = { target, items: items.map(m => ({ account_id: m.account_id, folder: m.folder, uid: m.uid,
+    sender: m.from?.[0]?.addr || '', date: m.date || null, seen: !!m.seen })) };
+  let preview;
+  try { preview = await api('/api/messages/move/preview', { method: 'POST', body }); }
+  catch (err) { return toast(err.message, true); }
+  if (preview.warnings.length) {
+    const permanent = target.type === 'trash';
+    const ok = await confirmDialog({
+      title: permanent ? 'Definitivní smazání' : 'Upozornění',
+      lines: preview.warnings,
+      question: permanent ? 'Opravdu zprávy definitivně smazat?' : `Chcete ${items.length === 1 ? 'zprávu' : 'zprávy'} přesto přesunout?`,
+      ok: permanent ? 'Smazat definitivně' : 'Přesto přesunout',
+    });
+    if (!ok) return;
+  }
+  removeItems(items.filter(m => leavesView(m, target)));
+  toast(`${targetLabel(target)}: ${zprav(items.length)}`);
+  try {
+    await api('/api/messages/move', { method: 'POST', body });
+  } catch (err) { toast(err.message, true); }
+  loadList({ quiet: true, keepLoaded: true });
+  if (target.type === 'ufolder') loadUserFolders();
+  pollSync();
+}
+
+// --- drag & drop na položky levého sloupce
+
+/** Cíl přesunu pro položku levého sloupce (nebo null, pokud na ni přetahované zprávy pustit nejde). */
+function dropTarget(el) {
+  const items = state.dragItems, v = state.view;
+  if (!el || !items?.length) return null;
+  if (el.hasAttribute('data-trash'))
+    return v.type === 'trash' ? null : { type: 'trash' };
+  if (el.dataset.ufolder) {
+    const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
+    if (!f || !accById(f.account_id) || (v.type === 'ufolder' && v.id === f.id)) return null;
+    return { type: 'ufolder', id: f.id };
+  }
+  if (el.dataset.unified) {
+    const view = el.dataset.unified;
+    if (v.type === 'unified' && v.filter === view) return null;
+    if (view === 'all' && items.every(m => m.folder === 'INBOX')) return null;  // nic by se nezměnilo
+    return { type: 'inbox', view };
+  }
+  if (el.dataset.acc) {
+    if (items.every(m => m.account_id === el.dataset.acc && m.folder === 'INBOX')) return null;
+    return { type: 'inbox', account_id: el.dataset.acc };
+  }
+  return null;
+}
+
+function markDropCandidates() {
+  document.querySelectorAll('#accounts .nav-item').forEach(el =>
+    el.classList.toggle('drop-candidate', !!state.dragItems && !!dropTarget(el)));
+}
+
+function clearDropMarks() {
+  document.querySelectorAll('#accounts .drop-over, #accounts .drop-candidate')
+    .forEach(el => el.classList.remove('drop-over', 'drop-candidate'));
+}
+
+$('#messages').addEventListener('dragstart', e => {
+  const li = e.target.closest('li[data-i]');
+  if (!li) return;
+  const m = state.messages[+li.dataset.i];
+  const items = state.selected.has(keyOf(m)) ? selectedItems() : [m];  // vybraná skupina, jinak jen tahle
+  state.dragItems = items;
+  const label = items.length === 1 ? (m.subject || '(bez předmětu)') : zprav(items.length);
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', label);
+  const ghost = $('#dragGhost');
+  ghost.textContent = label;
+  e.dataTransfer.setDragImage(ghost, 14, 14);
+  markDropCandidates();
+});
+
+document.addEventListener('dragend', () => {  // i když se mezitím seznam překreslil
+  state.dragItems = null;
+  clearDropMarks();
+});
+
+$('#accounts').addEventListener('dragover', e => {
+  const el = e.target.closest('.nav-item');
+  const target = dropTarget(el);
+  document.querySelectorAll('#accounts .drop-over').forEach(x => { if (x !== el) x.classList.remove('drop-over'); });
+  if (!target) return;  // bez preventDefault = sem pustit nelze
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  el.classList.add('drop-over');
+});
+
+$('#accounts').addEventListener('dragleave', e => {
+  if (!e.relatedTarget || !$('#accounts').contains(e.relatedTarget))
+    document.querySelectorAll('#accounts .drop-over').forEach(x => x.classList.remove('drop-over'));
+});
+
+$('#accounts').addEventListener('drop', e => {
+  const el = e.target.closest('.nav-item');
+  const target = dropTarget(el);
+  const items = state.dragItems;
+  e.preventDefault();
+  state.dragItems = null;
+  clearDropMarks();
+  if (target && items?.length) moveItems(items, target);
+});
+
+// --- Smazané: Vyprázdnit
+
+$('#emptyTrashBtn').addEventListener('click', async () => {
+  const n = state.trashTotal;
+  const ok = await confirmDialog({
+    title: 'Vyprázdnit Smazané',
+    lines: [`${zprav(n)} ve složce Smazané (ze všech účtů) se natrvalo smaže ze serverů.`],
+    question: 'Tuto akci nejde vrátit. Opravdu vyprázdnit?',
+    ok: 'Vyprázdnit',
+  });
+  if (!ok) return;
+  if (state.view.type === 'trash') { state.messages = []; state.hasMore = false; clearCurrent('Složka Smazané je prázdná'); }
+  state.trashTotal = 0;
+  renderSidebar();
+  renderList();
+  try {
+    const res = await api('/api/trash/empty', { method: 'POST' });
+    toast(`Smazané vyprázdněny – natrvalo smazáno: ${zprav(res.deleted)}`);
+  } catch (err) { toast(err.message, true); }
+  pollSync();
+  if (state.view.type === 'trash') loadList({ quiet: true });
 });
 
 // ------------------------------------------------------------------ sloupec Kontext
@@ -1364,7 +1644,7 @@ async function refreshAll() {
  *  zda se databáze změnila (levný lokální dotaz), a případně překreslíme seznam a počty. */
 let lastNoticeId = null;  // poslední zobrazené hlášení ze serveru
 async function pollSync() {
-  if (document.hidden) return;
+  if (document.hidden || state.dragItems) return;  // během přetahování nepřekreslovat (zrušilo by tah)
   let st;
   try { st = await api('/api/sync/status'); } catch { return; }
   let countsChanged = false;
@@ -1388,6 +1668,11 @@ async function pollSync() {
   for (const f of state.userFolders) {
     const n = st.folders?.[f.id] ?? f.unread;
     if (n !== f.unread) { f.unread = n; countsChanged = true; }
+  }
+  if (st.trash != null && st.trash !== state.trashTotal) {
+    state.trashTotal = st.trash;
+    countsChanged = true;
+    renderTrashFooter();
   }
   if (countsChanged) renderSidebar();
   const notices = st.notices || [];

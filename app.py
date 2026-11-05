@@ -435,7 +435,8 @@ def message_delete(acc_id, uid):
     """Smazání: z databáze (a tím z UI) hned, na serveru na pozadí."""
     acc = account_or_404(acc_id)
     folder = folder_arg(request.get_json(force=True))
-    syncer.enqueue(acc, folder, uid, "Smazání zprávy", lambda M: mail.delete_message(M, folder, uid), remove=True)
+    syncer.enqueue(acc, folder, uid, "Smazání zprávy", lambda: syncer.trash_messages(acc, folder, [uid]),
+                   remove=True, use_conn=False)
     database.remove_message(acc_id, folder, uid)
     database.bump()
     return jsonify(ok=True)
@@ -660,6 +661,213 @@ def message_to_folder(acc_id, uid):
     return jsonify(ok=True, sender=sender, folder=target["name"])
 
 
+# --------------------------------------------------------------------------
+# Přesun více zpráv najednou (drag & drop, hromadné mazání) a složka Smazané
+# --------------------------------------------------------------------------
+
+MAX_BULK = 5000
+INBOX_VIEWS = ("important", "fyi", "notifications", "all")
+
+
+def pl(n, one, few, many):
+    """Český tvar podle počtu: 1 / 2–4 / 0 a 5+."""
+    return one if n == 1 else few if 2 <= n <= 4 else many
+
+
+def zprav(n):
+    return f"{n} {pl(n, 'zpráva', 'zprávy', 'zpráv')}"
+
+
+def _parse_move(data):
+    """Zprávy a cíl přesunu. Cíl: {type: trash} | {type: ufolder, id} | {type: inbox, view?, account_id?}."""
+    t = data.get("target") or {}
+    kind = t.get("type")
+    if kind == "trash":
+        target = {"type": "trash"}
+    elif kind == "ufolder":
+        f = _folder_or_404(int(t.get("id") or 0))
+        if not f["account_id"] or store.get(f["account_id"]) is None:
+            raise ValidationError(f"Složka {f['name']} nemá nastavený cílový účet – nastavte ho v konfiguraci (⚙).")
+        target = {"type": "ufolder", "folder": f}
+    elif kind == "inbox":
+        view = t.get("view") or "all"
+        if view not in INBOX_VIEWS:
+            abort(400, "Neznámý pohled.")
+        if t.get("account_id"):
+            account_or_404(t["account_id"])
+        target = {"type": "inbox", "view": view, "account_id": t.get("account_id") or None}
+    else:
+        abort(400, "Neznámý cíl přesunu.")
+    raw = data.get("items") or []
+    if not raw or len(raw) > MAX_BULK:
+        abort(400, "Žádné zprávy k přesunu." if not raw else f"Najednou lze přesunout nejvýš {MAX_BULK} zpráv.")
+    trash = database.trash_folders()
+    items, seen_keys = [], set()
+    for it in raw:
+        acc_id, folder, uid = it.get("account_id"), it.get("folder"), it.get("uid")
+        if not acc_id or not folder or not isinstance(uid, int) or (acc_id, folder, uid) in seen_keys:
+            continue
+        if store.get(acc_id) is None:
+            continue
+        seen_keys.add((acc_id, folder, uid))
+        row = database.message(acc_id, folder, uid)
+        if row:
+            sender = row["from"][0]["addr"].lower() if row["from"] else ""
+            info = {"sender": sender, "date": row["date"], "seen": row["seen"], "snoozed": bool(row["snoozed_until"]),
+                    "rec": row}
+        else:  # např. výsledek hledání na serveru – údaje od klienta
+            info = {"sender": str(it.get("sender") or "").lower(), "date": it.get("date"),
+                    "seen": bool(it.get("seen")), "snoozed": False, "rec": None}
+        if target["type"] == "trash":
+            dst = (acc_id, trash.get(acc_id))
+        elif target["type"] == "ufolder":
+            dst = (target["folder"]["account_id"], target["folder"]["imap_name"])
+        else:
+            dst = (target["account_id"] or acc_id, "INBOX")
+        items.append({"account_id": acc_id, "folder": folder, "uid": uid, "dst": dst,
+                      "stays": dst == (acc_id, folder), **info})
+    if not items:
+        abort(400, "Žádné zprávy k přesunu.")
+    return items, target
+
+
+def _move_warnings(items, target):
+    """Co by se se zprávami stalo hned po přesunu (smazání, spam, přesun pravidlem) – pro varování v UI."""
+    warnings = []
+    if target["type"] == "trash":
+        final = [i for i in items if i["dst"][1] is None or i["stays"]]
+        if final:
+            n = len(final)
+            warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} už ve Smazaných (nebo účet nemá koš) – "
+                            f"{pl(n, 'smaže', 'smažou', 'smaže')} se definitivně a nepůjde to vrátit.")
+        return warnings
+    if target["type"] != "inbox":
+        return warnings
+    view = target["view"]
+    senders = {i["sender"] for i in items if i["sender"]}
+    notify = database.notify_senders()
+    new_senders = set()
+    if view == "notifications":
+        new_senders = senders - notify
+        notify = notify | senders
+    elif view in ("important", "fyi"):
+        notify = notify - senders
+    arriving = [i for i in items if not i["stays"]]
+    spam = database.spam_senders()
+    to_spam = [i for i in arriving if i["sender"] in spam]
+    if to_spam:
+        n = len(to_spam)
+        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} od odesílatele označeného jako spam – hned by se "
+                        f"{pl(n, 'přesunula', 'přesunuly', 'přesunulo')} do spamu.")
+    rules = sorted(database.folder_rules_active(), key=lambda r: db.RULE_KINDS.index(r["kind"]))
+    by_folder, moved_away = {}, {(i["account_id"], i["folder"], i["uid"]) for i in to_spam}
+    for i in arriving:
+        if i["rec"] is None or (i["account_id"], i["folder"], i["uid"]) in moved_away:
+            continue
+        rule = next((r for r in rules if (not r["after_read"] or i["seen"]) and db.rule_matches(r, i["rec"])), None)
+        if rule:
+            by_folder[rule["name"]] = by_folder.get(rule["name"], 0) + 1
+            moved_away.add((i["account_id"], i["folder"], i["uid"]))
+    for name, n in by_folder.items():
+        warnings.append(f"{zprav(n)} {pl(n, 'odpovídá', 'odpovídají', 'odpovídá')} pravidlu složky {name} – "
+                        f"hned by se do ní {pl(n, 'přesunula', 'přesunuly', 'přesunulo')}.")
+    settings = database.settings()
+    cutoff = time.time() - db.WEEK
+
+    def doomed(seen, date, snoozed):
+        return (not snoozed and date and date < cutoff
+                and (settings["notify_delete_read_after_week"] if seen else settings["notify_delete_unread_after_week"]))
+    dragged = [i for i in items if (i["account_id"], i["folder"], i["uid"]) not in moved_away
+               and i["sender"] in notify and doomed(i["seen"], i["date"], i["snoozed"])]
+    if dragged:
+        n = len(dragged)
+        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než týden – jako notifikace by se podle "
+                        f"nastavení hned {pl(n, 'smazala', 'smazaly', 'smazalo')} (do Smazaných).")
+    if new_senders:
+        keys = {(i["account_id"], i["folder"], i["uid"]) for i in items}
+        others = {(r["account_id"], r["uid"]) for r in database.inbox_from_senders(new_senders)
+                  if (r["account_id"], "INBOX", r["uid"]) not in keys and doomed(r["seen"], r["date"], r["snoozed"])}
+        if others:
+            warnings.append("Kromě toho by se hned smazaly i starší zprávy od stejných odesílatelů, které už "
+                            f"v doručené poště máte: {zprav(len(others))}.")
+    return warnings
+
+
+@app.post("/api/messages/move/preview")
+def messages_move_preview():
+    items, target = _parse_move(request.get_json(force=True))
+    return jsonify(warnings=_move_warnings(items, target), count=len(items))
+
+
+@app.post("/api/messages/move")
+def messages_move():
+    """Přesun / smazání více zpráv. Databáze (a tím UI) hned, server na pozadí."""
+    items, target = _parse_move(request.get_json(force=True))
+    senders = {i["sender"] for i in items if i["sender"]}
+    own = {a["email"].lower() for a in store.list_public()}
+    if target["type"] == "inbox" and target["view"] == "notifications":
+        for s in senders - own:
+            database.add_notify_rule(s)
+    elif target["type"] == "inbox" and target["view"] in ("important", "fyi"):
+        for s in senders:
+            database.remove_notify_sender(s)
+    groups = {}
+    for i in items:
+        if not i["stays"] or target["type"] == "trash":  # ze Smazaných se maže natrvalo
+            groups.setdefault((i["account_id"], i["folder"]), []).append(i["uid"])
+    for (acc_id, folder), uids in groups.items():
+        acc = store.get(acc_id)
+        if target["type"] == "trash":
+            syncer.enqueue(acc, folder, uids, "Smazání zpráv",
+                           lambda a=acc, f=folder, u=uids: syncer.trash_messages(a, f, u), remove=True, use_conn=False)
+        else:
+            if target["type"] == "ufolder":
+                f = target["folder"]
+                dest = {"account_id": f["account_id"], "imap_name": f["imap_name"], "mark_read": f["mark_read"],
+                        "name": f["name"]}
+            else:
+                dest = {"account_id": target["account_id"] or acc_id, "imap_name": "INBOX", "mark_read": False,
+                        "name": "Doručená pošta"}
+            syncer.enqueue(acc, folder, uids, f"Přesun do složky {dest['name']}",
+                           lambda a=acc, f=folder, u=uids, d=dest: syncer.move_messages(a, f, u, d),
+                           remove=True, use_conn=False)
+        database.delete_uids(acc_id, folder, uids)
+    database.bump()
+    syncer.trigger()
+    return jsonify(ok=True, moved=sum(len(u) for u in groups.values()))
+
+
+@app.get("/api/trash")
+def trash_list():
+    """Složka Smazané: koše všech účtů dohromady (z databáze)."""
+    trash = database.trash_folders()
+    locations = {a["id"]: trash[a["id"]] for a in store.all() if a["id"] in trash}
+    page = max(0, request.args.get("page", 0, type=int))
+    offset, limit = list_window(UNIFIED_PAGE_SIZE)
+    version = database.version
+    res = database.list_messages([], locations, page, limit, offset=offset,
+                                 search=(request.args.get("q") or "").strip() or None)
+    return jsonify(messages=res["messages"], has_more=res["has_more"], total=res["total"], errors=[], version=version)
+
+
+@app.post("/api/trash/empty")
+def trash_empty():
+    """Vyprázdnit: natrvalo smaže všechny zprávy v koších všech účtů."""
+    trash = database.trash_folders()
+    accounts = [a for a in store.all() if a["id"] in trash]
+    deleted, errors = 0, []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for acc, fut in [(a, ex.submit(syncer.empty_trash, a, trash[a["id"]])) for a in accounts]:
+            try:
+                deleted += fut.result()
+            except Exception as e:
+                errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
+    syncer.trigger()
+    if errors:
+        raise mail.MailError("Vyprázdnění se nepodařilo – " + "; ".join(errors))
+    return jsonify(ok=True, deleted=deleted)
+
+
 @app.get("/api/settings")
 def settings_get():
     return jsonify(database.settings())
@@ -704,7 +912,8 @@ def spam_rule_delete(rule_id):
 def sync_status():
     """Levný dotaz pro UI: změnila se data? (verze), nepřečtené v doručené poště, chyby synchronizace."""
     return jsonify(version=database.version, unread=database.unread_counts(), views=database.view_unread(),
-                   folders=database.folder_unread(), errors=syncer.errors, notices=syncer.notices)
+                   folders=database.folder_unread(), trash=database.trash_total(a["id"] for a in store.all()),
+                   errors=syncer.errors, notices=syncer.notices)
 
 
 @app.post("/api/sync")

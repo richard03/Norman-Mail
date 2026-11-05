@@ -363,3 +363,25 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 }
 .delete-panel p { margin: 0; }
 .delete-panel .btn { text-align: left; white-space: normal; }
+
+/* ---------- výběr více zpráv, drag & drop, Smazané ---------- */
+.msg { user-select: none; }
+.msg.selected { background: var(--active); }
+.msg.selected:not(.active) { box-shadow: inset 3px 0 0 var(--accent); }
+.drag-ghost {
+  position: fixed; top: -200px; left: 0; max-width: 260px;
+  padding: 6px 12px; border-radius: 8px; background: var(--accent); color: var(--accent-text);
+  font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-item.drop-candidate { outline: 1px dashed var(--muted); outline-offset: -1px; }
+.nav-item.drop-over { background: var(--active); outline: 2px solid var(--accent); outline-offset: -2px; }
+.trash-item .folder-ico { color: var(--muted); }
+.badge.total { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.list-footer {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  padding: 8px 14px; border-top: 1px solid var(--border); font-size: 13px;
+}
+.list-footer[hidden] { display: none; }
+dialog.confirm { width: min(480px, calc(100vw - 32px)); }
+.confirm-lines { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+#confirmQuestion { margin: 4px 0 0; font-weight: 600; }

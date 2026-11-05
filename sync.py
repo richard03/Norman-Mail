@@ -79,9 +79,10 @@ class SyncManager:
         """Zařadí operaci se zprávou. fn(M) běží na pozadí pod zámkem spojení synchronizace
         (use_conn=False: fn() bez spojení – např. přesun mezi účty, který spojení střídá sám).
         remove=True: zpráva ze složky zmizí (po dokončení se pro jistotu odebere i z databáze)."""
-        key = (acc["id"], folder, uid)
-        self.pending.add(key)
-        self._ops.put((acc, key, label, fn if use_conn else (lambda M, f=fn: f()), remove, on_error, use_conn))
+        uids = list(uid) if isinstance(uid, (list, tuple, set)) else [uid]  # i více zpráv najednou
+        keys = [(acc["id"], folder, u) for u in uids]
+        self.pending.update(keys)
+        self._ops.put((acc, keys, label, fn if use_conn else (lambda M, f=fn: f()), remove, on_error, use_conn))
         if not self._op_thread:  # např. v testech bez start()
             self._run_op(self._ops.get())
 
@@ -90,16 +91,18 @@ class SyncManager:
             self._run_op(self._ops.get())
 
     def _run_op(self, item):
-        acc, key, label, fn, remove, on_error, use_conn = item
+        acc, keys, label, fn, remove, on_error, use_conn = item
         try:
             if use_conn:
                 with self.pool.get(acc) as M:
                     fn(M)
             else:
                 fn(None)
-            if remove and self.db.message(*key):
-                self.db.remove_message(*key)
-                self.db.bump()
+            if remove:
+                left = [k for k in keys if self.db.message(*k)]
+                if left:
+                    self.db.delete_uids(acc["id"], keys[0][1], [k[2] for k in left])
+                    self.db.bump()
         except Exception as e:
             msg = f"{label} se na serveru nepodařilo: {mail.friendly_error(e)}"
             log.warning(msg)
@@ -107,7 +110,8 @@ class SyncManager:
             if on_error:
                 on_error(msg)
         finally:
-            self.pending.discard(key)
+            for k in keys:
+                self.pending.discard(k)
         self.trigger()  # srovnat se serverem (při chybě se zpráva vrátí)
 
     def notice(self, text):
@@ -179,7 +183,9 @@ class SyncManager:
         with self.pool.get(acc) as M:
             folders = mail.list_folders(M, with_counts=False)
         self.db.upsert_folders(acc["id"], folders)
-        return context_folders(folders, self.db.user_folder_names(acc["id"]))
+        chosen = context_folders(folders, self.db.user_folder_names(acc["id"]))
+        # koš se synchronizuje kvůli složce Smazané (do kontextu ale nepatří)
+        return chosen + [f for f in folders if f["role"] == "trash" and f not in chosen]
 
     # ------------------------------------------------------------------ synchronizace složky
 
@@ -246,7 +252,43 @@ class SyncManager:
             self.db.set_folder_state(acc_id, folder, complete=int(complete), last_sync=time.time())
             if changed:
                 self.db.bump()
-            return complete
+        if folder == self.db.trash_folders().get(acc_id):
+            self._mark_folder_read(acc, folder)
+        return complete
+
+    # ------------------------------------------------------------------ koš („Smazané“)
+
+    def _mark_folder_read(self, acc, folder):
+        """Zprávy v koši jsou vždy přečtené – i ty, které tam přesunul jiný klient."""
+        uids = [u for u in self.db.unseen_uids(acc["id"], folder) if (acc["id"], folder, u) not in self.pending]
+        if not uids:
+            return
+        try:
+            with self.pool.get(acc) as M:
+                mail.mark_seen_uids(M, folder, uids)
+        except Exception as e:
+            self._error(acc, e)
+            return
+        self.db.set_seen_bulk(acc["id"], folder, uids)
+        self.db.bump()
+
+    def trash_messages(self, acc, folder, uids):
+        """Smazání zpráv (do koše, označené jako přečtené; z koše natrvalo) a stažení koše,
+        ať jsou zprávy hned ve složce Smazané."""
+        with self.pool.get(acc) as M:
+            mail.trash_uids(M, folder, uids)
+        trash = self.db.trash_folders().get(acc["id"])
+        if trash and trash != folder:
+            self._sync_target(acc, trash)
+
+    def empty_trash(self, acc, trash) -> int:
+        """Natrvalo smaže všechny zprávy v koši účtu. Pod zámkem složky, ať je synchronizace mezitím nevrátí."""
+        with self._folder_lock(acc["id"], trash):
+            with self.pool.get(acc) as M:
+                n = mail.expunge_all(M, trash)
+            self.db.clear_folder(acc["id"], trash)
+        self.db.bump()
+        return n
 
     def _apply_spam_rules(self, acc, folder, records, rules):
         """Nové zprávy od odesílatelů z pravidel přesune do spamu (dřív, než se ukážou v seznamu).
