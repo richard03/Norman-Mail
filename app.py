@@ -37,6 +37,15 @@ database = db.Database()   # lokální cache metadat a těl zpráv
 syncer = sync.SyncManager(store, database, mail.ImapPool())  # vlastní spojení pro synchronizaci
 
 
+def refresh_my_addresses():
+    """Adresy účtů do databáze – podle nich se pozná, zda je zpráva přímo pro mě (Důležité / Vzít na vědomí)."""
+    for a in store.list_public():
+        database.set_my_addresses(a["id"], {a["email"], a.get("username") or ""})
+
+
+refresh_my_addresses()
+
+
 def start_background():
     """Spustí synchronizaci na pozadí (volá desktopová aplikace i webový režim)."""
     syncer.start()
@@ -137,6 +146,7 @@ def _save_account(acc_id):
         raise ValidationError("Zadejte heslo.")
     mail.test_account({**acc, "password": password, "id": acc_id or "test"})
     new_id = store.save(acc_id, acc, password)
+    refresh_my_addresses()
     drop_connections(new_id)
     if existing and (existing["imap_host"], existing["username"]) != (acc["imap_host"], acc["username"]):
         database.delete_account(new_id)  # jiná schránka – stará cache neplatí
@@ -248,6 +258,7 @@ def oauth_callback():
         new_id = store.save(existing.get("id"), acc, tok["refresh_token"])
         google_oauth.seed(new_id, tok["access_token"], tok["expires_in"], tok["refresh_token"])
         drop_connections(new_id)
+        refresh_my_addresses()
         syncer.trigger()
         google_oauth.finish(state, account_id=new_id)
         return callback_page(True, f"Účet {email_addr} je připojen. Toto okno můžete zavřít a vrátit se do Maileru.")
@@ -331,10 +342,15 @@ def unified():
                     m["account_id"] = acc["id"]
                 result.extend(res["messages"])
                 has_more = has_more or res["has_more"]
-        if view != "all":  # výsledky hledání ze serveru roztřídíme podle pravidel
-            senders = database.notify_senders()
-            is_notif = lambda m: any(a["addr"].lower() in senders for a in m["from"])
-            result = [m for m in result if is_notif(m) == (view == "notifications")]
+        if view != "all":  # výsledky hledání ze serveru roztřídíme stejně jako pohledy z databáze
+            senders, mine = database.notify_senders(), database.my_addresses()
+
+            def view_of(m):
+                if any(a["addr"].lower() in senders for a in m["from"]):
+                    return "notifications"
+                direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
+                return "important" if direct else "fyi"
+            result = [m for m in result if view_of(m) == view]
         result.sort(key=lambda m: m["date"] or 0, reverse=True)
         return jsonify(messages=result, has_more=has_more, errors=errors)
 
@@ -494,6 +510,156 @@ def message_notification(acc_id, uid):
     return jsonify(ok=True, sender=sender.lower(), notification=value)
 
 
+# --------------------------------------------------------------------------
+# Uživatelské složky (na serveru: stejnojmenná složka v každém účtu, u Gmailu štítek)
+# --------------------------------------------------------------------------
+
+RESERVED_FOLDER_NAMES = {"inbox"} | {n for names in mail.ROLE_NAMES.values() for n in names}
+
+
+def _folder_or_404(folder_id):
+    f = database.user_folder(folder_id)
+    if f is None:
+        abort(404, "Složka neexistuje.")
+    return f
+
+
+def _folder_config(data, current_id=None):
+    """Ověří konfiguraci složky: (název, účet, imap název složky, po přečtení, označit přečtené)."""
+    name = " ".join(str(data.get("name") or "").split())
+    if not name or len(name) > 60:
+        raise ValidationError("Zadejte název složky (nejvýš 60 znaků).")
+    if any(f["name"].lower() == name.lower() and f["id"] != current_id for f in database.user_folders()):
+        raise ValidationError(f"Složka „{name}“ už v aplikaci existuje.")
+    acc_id = data.get("account_id")
+    if not acc_id or store.get(acc_id) is None:
+        raise ValidationError("Vyberte účet, na kterém má složka být.")
+    if data.get("new_folder"):  # nová složka na serveru
+        new = " ".join(str(data["new_folder"]).split())
+        if len(new) > 60 or any(ch in new for ch in '/\\"*%'):
+            raise ValidationError('Název složky na serveru může mít nejvýš 60 znaků a nesmí obsahovat / \\ " * %.')
+        if new.lower() in RESERVED_FOLDER_NAMES:
+            raise ValidationError(f"Název „{new}“ je vyhrazený pro systémovou složku – zvolte jiný.")
+        imap_name = mail.encode_utf7(new)
+    else:  # existující složka na serveru
+        imap_name = str(data.get("server_folder") or "")
+        known = {f["name"]: f for f in database.folders(acc_id)}
+        if imap_name not in known:
+            raise ValidationError("Vyberte složku na serveru, nebo zadejte název nové.")
+        if known[imap_name]["role"] in ("inbox", "trash", "junk", "drafts", "sent"):
+            raise ValidationError("Do systémové složky (doručená, odeslaná, koncepty, spam, koš) nelze přesouvat.")
+    if any(f["account_id"] == acc_id and f["imap_name"] == imap_name and f["id"] != current_id
+           for f in database.user_folders()):
+        raise ValidationError("Na tuto složku už míří jiná složka v aplikaci.")
+    return name, acc_id, imap_name, bool(data.get("after_read")), bool(data.get("mark_read"))
+
+
+@app.get("/api/user-folders")
+def user_folders():
+    return jsonify(database.user_folders())
+
+
+@app.post("/api/user-folders")
+def user_folder_create():
+    folder_id = database.create_user_folder(*_folder_config(request.get_json(force=True)))
+    syncer.trigger()
+    return jsonify(database.user_folder(folder_id))
+
+
+@app.put("/api/user-folders/<int:folder_id>")
+def user_folder_update(folder_id):
+    _folder_or_404(folder_id)
+    database.update_user_folder(folder_id, *_folder_config(request.get_json(force=True), folder_id))
+    database.bump()
+    syncer.trigger()  # nový cíl / režim uplatnit hned
+    return jsonify(database.user_folder(folder_id))
+
+
+@app.delete("/api/user-folders/<int:folder_id>")
+def user_folder_delete(folder_id):
+    """Smaže složku z aplikace (konfiguraci a pravidla). S ?server=1 i na serveru včetně všech zpráv
+    (zprávy do koše) – to běží na pozadí."""
+    f = _folder_or_404(folder_id)
+    on_server = request.args.get("server") == "1"
+    acc = store.get(f["account_id"]) if f["account_id"] else None
+    if on_server and acc is None:
+        raise ValidationError("Složka nemá platný cílový účet – na serveru ji smazat nelze.")
+    database.delete_user_folder(folder_id)
+    if on_server:
+        database.clear_folder(acc["id"], f["imap_name"])  # z UI hned
+        threading.Thread(target=syncer.delete_server_folder, args=(acc, f["imap_name"], f["name"]),
+                         daemon=True).start()
+    database.bump()
+    return jsonify(ok=True, server=on_server)
+
+
+@app.get("/api/user-folders/<int:folder_id>/rules")
+def user_folder_rules(folder_id):
+    _folder_or_404(folder_id)
+    return jsonify(database.folder_rules(folder_id))
+
+
+@app.post("/api/user-folders/<int:folder_id>/rules")
+def user_folder_rule_add(folder_id):
+    _folder_or_404(folder_id)
+    data = request.get_json(force=True)
+    kind = data.get("kind") or "sender"
+    value = " ".join(str(data.get("value") or data.get("sender") or "").split()).lower()
+    if kind not in db.RULE_KINDS:
+        raise ValidationError("Neznámý typ pravidla.")
+    if kind in ("sender", "recipient") and not mail.ADDR_RE.match(value):
+        raise ValidationError("Zadejte platnou e-mailovou adresu.")
+    if kind == "subject" and not 2 <= len(value) <= 100:
+        raise ValidationError("Slovo nebo fráze v předmětu musí mít 2 až 100 znaků.")
+    database.add_folder_rule(folder_id, kind, value)
+    syncer.trigger()  # existující zprávy od odesílatele přesunout
+    return jsonify(database.folder_rules(folder_id))
+
+
+@app.delete("/api/user-folder-rules/<int:rule_id>")
+def user_folder_rule_delete(rule_id):
+    database.delete_folder_rule(rule_id)
+    return jsonify(ok=True)
+
+
+@app.get("/api/user-folders/<int:folder_id>/messages")
+def user_folder_messages(folder_id):
+    f = _folder_or_404(folder_id)
+    if not f["account_id"] or store.get(f["account_id"]) is None:
+        return jsonify(messages=[], has_more=False, version=database.version,
+                       errors=["Složka nemá platný cílový účet – nastavte ho v konfiguraci složky (⚙)."])
+    page = max(0, request.args.get("page", 0, type=int))
+    offset, limit = list_window(UNIFIED_PAGE_SIZE)
+    version = database.version
+    res = database.list_messages([f["account_id"]], f["imap_name"], page, limit, offset=offset,
+                                 search=(request.args.get("q") or "").strip() or None)
+    return jsonify(messages=res["messages"], has_more=res["has_more"], errors=[], version=version)
+
+
+@app.post("/api/accounts/<acc_id>/messages/<int:uid>/to-folder")
+def message_to_folder(acc_id, uid):
+    """Přesune zprávu do složky aplikace (i na jiný účet) a vytvoří pravidlo pro jejího odesílatele.
+    UI a databáze hned, server na pozadí."""
+    acc = account_or_404(acc_id)
+    data = request.get_json(force=True)
+    folder = folder_arg(data)
+    target = _folder_or_404(int(data.get("target_id") or 0))
+    if not target["account_id"]:
+        raise ValidationError(f"Složka {target['name']} nemá nastavený cílový účet – nastavte ho v konfiguraci (⚙).")
+    if target["account_id"] == acc_id and target["imap_name"] == folder:
+        raise ValidationError("Zpráva už v této složce je.")
+    row = database.message(acc_id, folder, uid)
+    sender = row["from"][0]["addr"].lower() if row and row["from"] else None
+    if sender:
+        database.add_folder_rule_hits(database.add_folder_rule(target["id"], "sender", sender), 1)
+    syncer.enqueue(acc, folder, uid, f"Přesun do složky {target['name']}",
+                   lambda: syncer.move_messages(acc, folder, [uid], target), remove=True, use_conn=False)
+    database.remove_message(acc_id, folder, uid)
+    database.bump()
+    syncer.trigger()  # další zprávy od odesílatele podle pravidla
+    return jsonify(ok=True, sender=sender, folder=target["name"])
+
+
 @app.get("/api/settings")
 def settings_get():
     return jsonify(database.settings())
@@ -538,7 +704,7 @@ def spam_rule_delete(rule_id):
 def sync_status():
     """Levný dotaz pro UI: změnila se data? (verze), nepřečtené v doručené poště, chyby synchronizace."""
     return jsonify(version=database.version, unread=database.unread_counts(), views=database.view_unread(),
-                   errors=syncer.errors, notices=syncer.notices)
+                   folders=database.folder_unread(), errors=syncer.errors, notices=syncer.notices)
 
 
 @app.post("/api/sync")
@@ -628,7 +794,8 @@ def message_context(acc_id, uid):
         counterpart = row["from"][0]["addr"] if row["from"] else ""
         if counterpart.lower() == me:  # moje odeslaná zpráva – protistranou je adresát
             counterpart = next((a["addr"] for a in row["to"] if a["addr"].lower() != me), "")
-        related = database.related(acc_id, sync.context_folders(database.folders(acc_id)), me, counterpart,
+        related = database.related(acc_id, sync.context_folders(database.folders(acc_id), database.user_folder_names(acc_id)),
+                                   me, counterpart,
                                    row["base_subject"], row["message_id"])
         return jsonify(messages=related, counterpart=counterpart, cached=True)
 

@@ -72,6 +72,26 @@ def decode_utf7(s: str) -> str:
     return "".join(out)
 
 
+def encode_utf7(s: str) -> str:
+    """Kóduje název složky do modifikovaného UTF-7 (RFC 3501) – pro CREATE/SELECT názvů s diakritikou."""
+    out, buf = [], []
+
+    def flush():
+        if buf:
+            b64 = base64.b64encode("".join(buf).encode("utf-16-be")).decode().rstrip("=").replace("/", ",")
+            out.append("&" + b64 + "-")
+            buf.clear()
+
+    for ch in s:
+        if 0x20 <= ord(ch) <= 0x7E:
+            flush()
+            out.append("&-" if ch == "&" else ch)
+        else:
+            buf.append(ch)
+    flush()
+    return "".join(out)
+
+
 def dec(value) -> str:
     """Dekóduje hlavičku s encoded-words (=?utf-8?...?=)."""
     if value is None:
@@ -744,6 +764,83 @@ def trash_uids(M, folder, uids):
         uids = [str(u) for u in uids]
         for i in range(0, len(uids), 500):
             _expunge_uids(M, ",".join(uids[i:i + 500]))
+
+
+def ensure_named_folder(M, imap_name):
+    """Vytvoří složku (u Gmailu štítek), pokud na serveru ještě není."""
+    if any(f["name"] == imap_name for f in list_folders(M, with_counts=False)):
+        return
+    typ, _ = M.create(q(imap_name))
+    if typ != "OK":
+        raise MailError(f"Složku „{decode_utf7(imap_name)}“ se nepodařilo vytvořit.")
+    try:
+        M.subscribe(q(imap_name))
+    except imaplib.IMAP4.error:
+        pass
+
+
+def move_to_named_folder(M, folder, uids, imap_name, mark_read=False) -> int:
+    """Přesune zprávy do uživatelské složky (vytvoří ji, pokud chybí); volitelně je označí jako přečtené."""
+    if not uids or folder == imap_name:
+        return 0
+    ensure_named_folder(M, imap_name)
+    _select(M, folder, readonly=False)
+    if mark_read:
+        ids = [str(u) for u in uids]
+        for i in range(0, len(ids), 500):
+            M.uid("STORE", ",".join(ids[i:i + 500]), "+FLAGS", "(\\Seen)")
+    _move_uids(M, uids, imap_name)
+    return len(uids)
+
+
+INTERNALDATE_RE = re.compile(rb'INTERNALDATE "([^"]+)"')
+TRANSFER_FLAGS = ("\\Seen", "\\Flagged", "\\Answered")
+
+
+def fetch_for_transfer(M, folder, uids) -> list:
+    """Celé zprávy pro přesun na jiný účet: [(uid, raw, flags, internaldate)]."""
+    _select(M, folder, readonly=True)
+    typ, data = M.uid("FETCH", ",".join(str(u) for u in uids), "(UID FLAGS INTERNALDATE BODY.PEEK[])")
+    out = []
+    for meta, lit in _parse_fetch(data):
+        m = UID_RE.search(meta)
+        if m and lit:
+            d = INTERNALDATE_RE.search(meta)
+            out.append((int(m.group(1)), lit, _flags(meta), d.group(1).decode() if d else None))
+    return out
+
+
+def append_messages(M, imap_name, items, mark_read=False):
+    """Vloží zprávy do složky (vytvoří ji, pokud chybí) se zachováním data a příznaků.
+    Vrací (uid zdrojových zpráv, které se uložily, chyba nebo None)."""
+    ensure_named_folder(M, imap_name)
+    done = []
+    for uid, raw, flags, idate in items:
+        fl = [f for f in flags if f in TRANSFER_FLAGS]
+        if mark_read and "\\Seen" not in fl:
+            fl.append("\\Seen")
+        date = f'"{idate}"' if idate else imaplib.Time2Internaldate(time.time())
+        try:
+            typ, data = M.append(q(imap_name), "(" + " ".join(fl) + ")", date, raw)
+        except imaplib.IMAP4.error as e:
+            return done, MailError(f"Uložení zprávy do cílové složky selhalo: {e}")
+        if typ != "OK":
+            return done, MailError("Cílový server zprávu odmítl uložit.")
+        done.append(uid)
+    return done, None
+
+
+def delete_folder_with_messages(M, imap_name):
+    """Smaže složku na serveru i se zprávami: zprávy nejdřív do koše (u Gmailu by smazání štítku
+    zprávy nesmazalo), pak složku."""
+    _select(M, imap_name, readonly=False)
+    uids = sorted(all_uids(M))
+    if uids:
+        trash_uids(M, imap_name, uids)
+    M.select(q("INBOX"))  # vybranou složku některé servery smazat nedovolí
+    typ, data = M.delete(q(imap_name))
+    if typ != "OK":
+        raise MailError(f"Složku „{decode_utf7(imap_name)}“ se na serveru nepodařilo smazat.")
 
 
 def archive_message(M, folder, uid):

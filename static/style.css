@@ -326,3 +326,40 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
 dialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); cursor: pointer; }
 dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); flex: none; }
+
+/* ---------- uživatelské složky ---------- */
+.folder-ico { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; color: var(--muted); }
+.ufolder-item .edit { visibility: hidden; }
+.ufolder-item:hover .edit, .ufolder-item.active .edit { visibility: visible; }
+.nav-item.add-folder { color: var(--muted); font-size: 13px; }
+.nav-item.add-folder:hover { color: var(--text); }
+.action-wrap { position: relative; }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 100%; width: max-content; max-width: 260px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .3); max-height: 50vh; overflow-y: auto;
+}
+.menu button {
+  display: block; width: 100%; text-align: left; border: none; background: none; padding: 7px 10px;
+  border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.menu button:hover { background: var(--hover); }
+.menu .menu-new { color: var(--accent); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 2px; }
+.menu-empty { padding: 7px 10px; color: var(--muted); font-size: 13px; }
+.folder-rules { border-top: 1px solid var(--border); padding-top: 10px; }
+.folder-rules h3 { margin: 0 0 4px; font-size: 15px; }
+.folder-rules .rules { max-height: 240px; overflow-y: auto; margin-top: 8px; }
+.rule-add { display: flex; gap: 8px; margin-top: 8px; }
+.rule-add input { flex: 1; }
+#folderDialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+#folderDialog label.option input { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
+.warn-mark { color: var(--danger); font-weight: 700; padding: 0 4px; }
+#folderDialog fieldset .grid2 { margin-bottom: 8px; }
+#folderDialog { width: min(680px, calc(100vw - 32px)); }
+.rule-add select { flex: none; width: auto; }
+.delete-panel {
+  border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+}
+.delete-panel p { margin: 0; }
+.delete-panel .btn { text-align: left; white-space: normal; }

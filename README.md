@@ -26,6 +26,7 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
 - **Odložené zprávy:** akce *Odložit o den* / *Odložit o týden* označí zprávu jako přečtenou a zítra, resp. za týden v 8:00, ji zase označí jako nepřečtenou. Pokud aplikace v tu chvíli neběží, stane se to hned po dalším spuštění.
 
 - **Pravidla pro spam:** označením zprávy jako *Spam* vznikne pravidlo „odesílatel je spam“. Nové zprávy od tohoto odesílatele synchronizace ve všech účtech přesune do spamu dřív, než se objeví v seznamu. Pravidla jsou přehledně v **Nastavení** (dole v levém sloupci), kde je lze mazat. Pro vlastní adresy pravidla nevznikají.
+- **Vzít na vědomí:** zprávy z doručené pošty, ve kterých nejste v poli Komu, tedy jste v kopii nebo ve skryté kopii. Tyto zprávy se nezobrazují v **Důležité**. Notifikace mají přednost.
 - **Důležité / Notifikace:** tlačítko *Notifikace* u zprávy označí jejího odesílatele za zdroj notifikací. Všechny jeho dosavadní i budoucí zprávy se pak zobrazují ve složce **Notifikace** a ne v **Důležité** (výchozí pohled po startu). **Všechny doručené** ukazuje obojí. Zprávy zůstávají na serveru v doručené poště, jde jen o lokální třídění. U zprávy, která už notifikací je, se tlačítko změní na *Není notifikace*. Pravidla lze mazat v **Nastavení**.
 - **Nastavení notifikací** (v Nastavení pod pravidly):
   - *Když opustím sekci Notifikace, označit všechny notifikace jako přečtené* (výchozí: vypnuto). Uplatní se při přepnutí na jiný pohled.
@@ -33,8 +34,13 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
   - *Mazat nepřečtené notifikace starší než týden* (výchozí: vypnuto).
 
   Mazání probíhá v rámci synchronizace (přesun do koše). Odložené zprávy se nemažou.
+- **Složky** (levý sloupec, *+ Přidat složku*): každá složka v aplikaci míří na **jednu konkrétní složku na jednom účtu**, buď existující na serveru, nebo novou. V konfiguraci (⚙ u složky) nastavíte cílový účet a složku, pravidla (e-mail odesílatele, lze přidat a smazat), kdy přesouvat (*ihned po doručení* / *až po přečtení*) a zda přesunuté zprávy označit jako přečtené. Pravidlo vznikne i tlačítkem **Do složky…** ve sloupci Akce.
+  - Typy pravidel: **odesílatel**, **příjemce** (adresa v Komu nebo Kopii, např. když jste v kopii a příjemcem je kolega) a **slovo či fráze v předmětu** (bez ohledu na velikost písmen a předpony Re:/Fw:).
+  - Pravidla platí pro doručenou poštu všech účtů. Zprávy z jiného účtu se přenesou na cílový účet (s původním datem a příznaky) a na původním účtu skončí v **koši**. Když uložení na cílový server selže, ze zdroje se nic nemaže.
+  - Odložené zprávy se nepřesouvají. Odesílatel může patřit jen do jedné složky. *Smazat složku* nabídne volbu: **jen v aplikaci** (složka i zprávy na serveru zůstanou), nebo **i na serveru včetně všech zpráv** (zprávy se přesunou do koše účtu, pak se složka smaže, potvrzuje se druhým kliknutím).
+  - Složky z dřívější verze bez cílového účtu se nepoužívají, dokud jim účet nenastavíte (v levém sloupci mají červený vykřičník).
 
-Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení a pravidla pro spam a notifikace.
+Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení, pravidla pro spam, notifikace a složky a o konfiguraci složek (samotné složky a zprávy na serveru zůstanou).
 
 ### Kde jsou data
 

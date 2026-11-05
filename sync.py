@@ -36,10 +36,12 @@ def uid_ranges(uids) -> str:
     return ",".join(parts)
 
 
-def context_folders(folders):
-    """Složky, ve kterých se hledá kontext (a které se proto synchronizují)."""
+def context_folders(folders, extra_names=()):
+    """Složky, ve kterých se hledá kontext (a které se proto synchronizují).
+    extra_names: uživatelské složky aplikace – synchronizují se vždy (u Gmailu jde o štítky)."""
     if any(f["role"] == "all" for f in folders):  # Gmail: štítky jsou jen pohledy na „Všechny zprávy“
-        chosen = [f for f in folders if f["role"] in ("inbox", "sent", "drafts", "junk", "all")]
+        chosen = [f for f in folders if f["role"] in ("inbox", "sent", "drafts", "junk", "all")
+                  or f["name"] in extra_names]
     else:
         chosen = [f for f in folders if f["role"] != "trash"]
     return sorted(chosen, key=lambda f: (f["role"] != "inbox", f["role"] == "all"))
@@ -73,12 +75,13 @@ class SyncManager:
 
     # ------------------------------------------------------------------ fronta operací
 
-    def enqueue(self, acc, folder, uid, label, fn, remove=False, on_error=None):
-        """Zařadí operaci se zprávou. fn(M) běží na pozadí pod zámkem spojení synchronizace.
+    def enqueue(self, acc, folder, uid, label, fn, remove=False, on_error=None, use_conn=True):
+        """Zařadí operaci se zprávou. fn(M) běží na pozadí pod zámkem spojení synchronizace
+        (use_conn=False: fn() bez spojení – např. přesun mezi účty, který spojení střídá sám).
         remove=True: zpráva ze složky zmizí (po dokončení se pro jistotu odebere i z databáze)."""
         key = (acc["id"], folder, uid)
         self.pending.add(key)
-        self._ops.put((acc, key, label, fn, remove, on_error))
+        self._ops.put((acc, key, label, fn if use_conn else (lambda M, f=fn: f()), remove, on_error, use_conn))
         if not self._op_thread:  # např. v testech bez start()
             self._run_op(self._ops.get())
 
@@ -87,13 +90,16 @@ class SyncManager:
             self._run_op(self._ops.get())
 
     def _run_op(self, item):
-        acc, key, label, fn, remove, on_error = item
+        acc, key, label, fn, remove, on_error, use_conn = item
         try:
-            with self.pool.get(acc) as M:
-                fn(M)
-                if remove and self.db.message(*key):
-                    self.db.remove_message(*key)
-                    self.db.bump()
+            if use_conn:
+                with self.pool.get(acc) as M:
+                    fn(M)
+            else:
+                fn(None)
+            if remove and self.db.message(*key):
+                self.db.remove_message(*key)
+                self.db.bump()
         except Exception as e:
             msg = f"{label} se na serveru nepodařilo: {mail.friendly_error(e)}"
             log.warning(msg)
@@ -159,6 +165,7 @@ class SyncManager:
                     self._last_full = time.time()
                 self.process_snoozes()
                 self.cleanup_notifications()
+                self.apply_folder_rules()
             except Exception:
                 log.exception("Chyba synchronizace")
             self._wake.wait(BUSY_INTERVAL if busy else INTERVAL)
@@ -172,7 +179,7 @@ class SyncManager:
         with self.pool.get(acc) as M:
             folders = mail.list_folders(M, with_counts=False)
         self.db.upsert_folders(acc["id"], folders)
-        return context_folders(folders)
+        return context_folders(folders, self.db.user_folder_names(acc["id"]))
 
     # ------------------------------------------------------------------ synchronizace složky
 
@@ -215,6 +222,10 @@ class SyncManager:
 
             missing = sorted(server - cached.keys() - self._pending_uids(acc_id, folder), reverse=True)  # nejnovější první
             rules = self.db.spam_senders() if folder == "INBOX" else set()
+            # pravidla složek v režimu „ihned“ – nové zprávy přesunout dřív, než se ukážou v seznamu
+            order = {k: i for i, k in enumerate(db_module.RULE_KINDS)}  # odesílatel > příjemce > předmět
+            frules = sorted((r for r in self.db.folder_rules_active() if not r["after_read"]),
+                            key=lambda r: order[r["kind"]]) if folder == "INBOX" else []
             batches = [missing[i:i + BATCH] for i in range(0, len(missing), BATCH)]
             for n, chunk in enumerate(batches):
                 if max_batches is not None and n >= max_batches:
@@ -224,6 +235,8 @@ class SyncManager:
                     records = mail.fetch_header_records(M, chunk)
                 if rules:
                     records = self._apply_spam_rules(acc, folder, records, rules)
+                if frules:
+                    records = self._apply_folder_rules_new(acc, records, frules)
                 self.db.insert_messages(acc_id, folder, records)
                 changed = True
                 if n == 0 and folder == "INBOX":
@@ -258,6 +271,110 @@ class SyncManager:
         moved = set(uids)
         return [r for r in records if r["uid"] not in moved]
 
+    # ------------------------------------------------------------------ uživatelské složky
+
+    def move_messages(self, src_acc, src_folder, uids, target):
+        """Přesune zprávy do cílové složky aplikace. Vrací seznam přesunutých UID.
+        Mezi účty: stáhnout ze zdroje → vložit do cíle → teprve pak smazat ze zdroje (do koše).
+        Zámky spojení obou účtů se nikdy nedrží současně (žádné uváznutí)."""
+        uids = list(uids)
+        if not uids:
+            return []
+        imap_name, mark_read = target["imap_name"], bool(target["mark_read"])
+        if target["account_id"] == src_acc["id"]:
+            with self.pool.get(src_acc) as M:
+                mail.move_to_named_folder(M, src_folder, uids, imap_name, mark_read)
+            self._sync_target(src_acc, imap_name)
+            return uids
+        dst_acc = self.store.get(target["account_id"])
+        if dst_acc is None:
+            raise mail.MailError(f"Cílový účet složky {target['name']} už neexistuje – upravte její nastavení.")
+        with self.pool.get(src_acc) as M:
+            items = mail.fetch_for_transfer(M, src_folder, uids)
+        with self.pool.get(dst_acc) as M:
+            done, error = mail.append_messages(M, imap_name, items, mark_read)
+        if done:
+            with self.pool.get(src_acc) as M:
+                mail.trash_uids(M, src_folder, done)
+            self._sync_target(dst_acc, imap_name)
+        if error:
+            raise error
+        return done
+
+    def _apply_folder_rules_new(self, acc, records, frules):
+        """Nově stažené zprávy z doručené pošty přesune podle pravidel složek („ihned“). Vrací zbylé záznamy."""
+        groups = {}  # folder_id -> (složka, {uid: id pravidla})
+        for r in records:
+            if r.get("deleted"):
+                continue
+            rule = next((x for x in frules if db_module.rule_matches(x, r)), None)
+            if rule:
+                groups.setdefault(rule["id"], (rule, {}))[1][r["uid"]] = rule["rule_id"]
+        if not groups:
+            return records
+        moved = set()
+        for f, uids in groups.values():
+            try:
+                done = self.move_messages(acc, "INBOX", uids, f)
+            except Exception as e:  # zůstanou v doručené poště, zkusí se příště
+                self._error(acc, e)
+                continue
+            moved |= set(done)
+            self._count_hits({u: uids[u] for u in done})
+        return [r for r in records if r["uid"] not in moved]
+
+    def apply_folder_rules(self):
+        """Přesune zprávy z doručené pošty (všech účtů) podle pravidel složek – i ty, které už v databázi
+        jsou (např. po přidání pravidla nebo po přečtení v režimu „až po přečtení“)."""
+        for f in self.db.user_folders():
+            if not f["account_id"]:
+                continue  # složka z dřívější verze bez cílového účtu – čeká na dokonfigurování
+            for acc_id, uids in self.db.folder_rule_matches(f["id"], only_seen=bool(f["after_read"])).items():
+                uids = {u: s for u, s in uids.items() if (acc_id, "INBOX", u) not in self.pending}
+                acc = self.store.get(acc_id)
+                if not uids or acc is None:
+                    continue
+                keys = {(acc_id, "INBOX", u) for u in uids}
+                self.pending |= keys  # synchronizace je mezitím nevrátí
+                try:
+                    done = self.move_messages(acc, "INBOX", uids, f)
+                    self.db.delete_uids(acc_id, "INBOX", done)
+                except Exception as e:
+                    self._error(acc, e)
+                    continue
+                finally:
+                    self.pending -= keys
+                self._count_hits({u: uids[u] for u in done})
+                log.info("Složka %s: přesunuto %d zpráv (z účtu %s)", f["name"], len(done), acc["name"])
+                self.db.bump()
+
+    def _count_hits(self, uid_to_rule):
+        counts = {}
+        for rule_id in uid_to_rule.values():
+            counts[rule_id] = counts.get(rule_id, 0) + 1
+        for rule_id, n in counts.items():
+            self.db.add_folder_rule_hits(rule_id, n)
+
+    def delete_server_folder(self, acc, imap_name, label):
+        """Smaže složku na serveru i se zprávami (na pozadí); při chybě hlášení do UI."""
+        try:
+            with self.pool.get(acc) as M:
+                mail.delete_folder_with_messages(M, imap_name)
+        except Exception as e:
+            self.notice(f"Smazání složky {label} na serveru se nepodařilo: {mail.friendly_error(e)}")
+            self.trigger()
+            return
+        self.db.clear_folder(acc["id"], imap_name)
+        self.db.bump()
+        self.trigger()  # seznam složek účtu
+
+    def _sync_target(self, acc, imap_name):
+        """Po přesunu stáhnout cílovou složku, ať jsou zprávy hned vidět ve složce."""
+        try:
+            self.sync_folder(acc, imap_name, max_batches=BACKFILL_BATCHES)
+        except Exception as e:
+            self._error(acc, e)
+
     def ensure_synced(self, acc, folder="INBOX"):
         """Při prvním zobrazení složky stáhne alespoň nejnovější dávku (synchronně)."""
         state = self.db.folder(acc["id"], folder)
@@ -266,7 +383,7 @@ class SyncManager:
             self.trigger()
 
     def context_ready(self, acc_id) -> bool:
-        folders = context_folders(self.db.folders(acc_id))
+        folders = context_folders(self.db.folders(acc_id), self.db.user_folder_names(acc_id))
         return bool(folders) and all(f["complete"] and f["last_sync"] for f in folders)
 
     # ------------------------------------------------------------------ úklid notifikací

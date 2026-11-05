@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS snoozes(
 CREATE TABLE IF NOT EXISTS spam_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
     created REAL, hits INTEGER DEFAULT 0, UNIQUE(kind, value));
+CREATE TABLE IF NOT EXISTS user_folders(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, imap_name TEXT NOT NULL,
+    after_read INTEGER DEFAULT 0, mark_read INTEGER DEFAULT 0, created REAL);
+CREATE TABLE IF NOT EXISTS user_folder_rules(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL,
+    created REAL, hits INTEGER DEFAULT 0, UNIQUE(kind, value));
+CREATE TABLE IF NOT EXISTS my_addresses(
+    account_id TEXT, email TEXT, PRIMARY KEY(account_id, email));
 CREATE TABLE IF NOT EXISTS notify_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
     created REAL, UNIQUE(kind, value));
@@ -43,7 +51,22 @@ CREATE TABLE IF NOT EXISTS notify_rules(
 # Zpráva je notifikace, pokud její odesílatel odpovídá některému pravidlu (přesná shoda adresy).
 IS_NOTIFICATION = ("EXISTS (SELECT 1 FROM notify_rules r WHERE r.kind='sender' "
                    "AND instr(m.from_addrs, ',' || r.value || ',') > 0)")
-VIEW_FILTERS = {"important": f"NOT {IS_NOTIFICATION}", "notifications": IS_NOTIFICATION, "all": "1"}
+# Zpráva je přímo pro mě, pokud je některá z mých adres (daného účtu) v poli Komu.
+IS_DIRECT = ("EXISTS (SELECT 1 FROM my_addresses a WHERE a.account_id=m.account_id "
+             "AND instr(m.to_addrs, ',' || a.email || ',') > 0)")
+VIEW_FILTERS = {
+    "important": f"NOT {IS_NOTIFICATION} AND {IS_DIRECT}",
+    "fyi": f"NOT {IS_NOTIFICATION} AND NOT {IS_DIRECT}",   # Vzít na vědomí: jsem v kopii / skryté kopii
+    "notifications": IS_NOTIFICATION,
+    "all": "1",
+}
+
+# Typy pravidel složek a jejich podmínka v SQL (r = pravidlo, m = zpráva)
+RULE_KINDS = ("sender", "recipient", "subject")
+RULE_MATCH = ("((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0)"
+              " OR (r.kind='recipient' AND (instr(m.to_addrs, ',' || r.value || ',') > 0"
+              "                             OR instr(m.cc_addrs, ',' || r.value || ',') > 0))"
+              " OR (r.kind='subject' AND instr(m.base_subject, r.value) > 0))")
 
 WEEK = 7 * 24 * 3600
 DEFAULT_SETTINGS = {
@@ -51,6 +74,16 @@ DEFAULT_SETTINGS = {
     "notify_delete_read_after_week": True,    # mazat přečtené notifikace starší než týden
     "notify_delete_unread_after_week": False,  # mazat nepřečtené notifikace starší než týden
 }
+
+
+def rule_matches(rule, rec) -> bool:
+    """Odpovídá zpráva (záznam z hlaviček) pravidlu složky? Stejná logika jako RULE_MATCH v SQL."""
+    v = rule["value"]
+    if rule["kind"] == "sender":
+        return any(a["addr"].lower() == v for a in rec["from"])
+    if rule["kind"] == "recipient":
+        return any(a["addr"].lower() == v for a in rec["to"] + rec["cc"])
+    return v in (rec.get("base_subject") or "")
 
 
 def _addrs(lst) -> str:
@@ -67,6 +100,10 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
         self._conn.execute("INSERT OR IGNORE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+        # migrace: uživatelské složky míří na konkrétní účet (starší složky bez účtu je třeba dokonfigurovat)
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folders)")}
+        if "account_id" not in cols:
+            self._conn.execute("ALTER TABLE user_folders ADD COLUMN account_id TEXT")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -130,7 +167,7 @@ class Database:
 
     def delete_account(self, acc_id):
         def run(c):
-            for table in ("folders", "messages", "bodies", "snoozes"):
+            for table in ("folders", "messages", "bodies", "snoozes", "my_addresses"):
                 c.execute(f"DELETE FROM {table} WHERE account_id=?", (acc_id,))
         self._tx(run)
         self.bump()
@@ -192,16 +229,20 @@ class Database:
         rows = self._q(self._SELECT + " WHERE m.account_id=? AND m.folder=? AND m.uid=?", (acc_id, folder, uid))
         return self._to_dict(rows[0]) if rows else None
 
-    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None) -> dict:
+    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None) -> dict:
         """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
         nic nepřeskočí, ani když mezitím nějaké zprávy zmizely."""
         if offset is None:
             offset = page * page_size
         marks = ",".join("?" * len(acc_ids))
         where = f"WHERE m.account_id IN ({marks}) AND m.folder=? AND {VIEW_FILTERS[view]}"
-        total = self._q(f"SELECT COUNT(*) FROM messages m {where}", (*acc_ids, folder))[0][0]
+        params = [*acc_ids, folder]
+        if search:
+            where += " AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ?)"
+            params += [f"%{search}%"] * 3
+        total = self._q(f"SELECT COUNT(*) FROM messages m {where}", params)[0][0]
         rows = self._q(f"{self._SELECT} {where} ORDER BY m.date DESC, m.uid DESC LIMIT ? OFFSET ?",
-                       (*acc_ids, folder, page_size, offset))
+                       (*params, page_size, offset))
         return {"messages": [self._to_dict(r) for r in rows], "total": total,
                 "has_more": offset + page_size < total}
 
@@ -291,6 +332,107 @@ class Database:
     def set_seen_bulk(self, acc_id, folder, uids):
         self._tx(lambda c: c.executemany("UPDATE messages SET seen=1 WHERE account_id=? AND folder=? AND uid=?",
                                          [(acc_id, folder, u) for u in uids]))
+
+    # ------------------------------------------------------------------ uživatelské složky
+
+    def user_folders(self):
+        """Složky s počtem pravidel a nepřečtených (v cílové složce cílového účtu)."""
+        return [dict(r) for r in self._q("""
+            SELECT f.*,
+                   (SELECT COUNT(*) FROM user_folder_rules r WHERE r.folder_id=f.id) AS rules,
+                   (SELECT COUNT(*) FROM messages m WHERE m.account_id=f.account_id AND m.folder=f.imap_name) AS total,
+                   (SELECT COALESCE(SUM(1 - seen), 0) FROM messages m
+                     WHERE m.account_id=f.account_id AND m.folder=f.imap_name) AS unread
+            FROM user_folders f ORDER BY f.name COLLATE NOCASE""")]
+
+    def user_folder(self, folder_id):
+        rows = self._q("SELECT * FROM user_folders WHERE id=?", (folder_id,))
+        return dict(rows[0]) if rows else None
+
+    def user_folder_names(self, acc_id) -> set:
+        """Názvy cílových složek na daném účtu (synchronizují se vždy)."""
+        return {r[0] for r in self._q("SELECT imap_name FROM user_folders WHERE account_id=?", (acc_id,))}
+
+    def create_user_folder(self, name, account_id, imap_name, after_read, mark_read):
+        with self._lock:
+            cur = self._conn.execute(
+                """INSERT INTO user_folders(name, account_id, imap_name, after_read, mark_read, created)
+                   VALUES(?,?,?,?,?,?)""",
+                (name, account_id, imap_name, int(after_read), int(mark_read), time.time()))
+            return cur.lastrowid
+
+    def update_user_folder(self, folder_id, name, account_id, imap_name, after_read, mark_read):
+        self._q("UPDATE user_folders SET name=?, account_id=?, imap_name=?, after_read=?, mark_read=? WHERE id=?",
+                (name, account_id, imap_name, int(after_read), int(mark_read), folder_id))
+
+    def delete_user_folder(self, folder_id):
+        def run(c):
+            c.execute("DELETE FROM user_folder_rules WHERE folder_id=?", (folder_id,))
+            c.execute("DELETE FROM user_folders WHERE id=?", (folder_id,))
+        self._tx(run)
+
+    def folder_rules(self, folder_id):
+        return [dict(r) for r in self._q(
+            "SELECT * FROM user_folder_rules WHERE folder_id=? ORDER BY created DESC", (folder_id,))]
+
+    def add_folder_rule(self, folder_id, kind, value):
+        """Pravidlo složky (odesílatel / příjemce / slovo v předmětu). Stejné pravidlo může patřit
+        jen do jedné složky (při přidání do jiné se přesune)."""
+        assert kind in RULE_KINDS
+        value = " ".join(value.lower().split())
+        self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created) VALUES(?, ?, ?, ?)
+                   ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created""",
+                (folder_id, kind, value, time.time()))
+        return self._q("SELECT id FROM user_folder_rules WHERE kind=? AND value=?", (kind, value))[0][0]
+
+    def delete_folder_rule(self, rule_id):
+        self._q("DELETE FROM user_folder_rules WHERE id=?", (rule_id,))
+
+    def add_folder_rule_hits(self, rule_id, count):
+        self._q("UPDATE user_folder_rules SET hits=hits+? WHERE id=?", (count, rule_id))
+
+    def folder_rules_active(self) -> list:
+        """Všechna pravidla složek, které mají cílový účet, i s nastavením složky."""
+        return [dict(r) for r in self._q("""
+            SELECT r.id AS rule_id, r.kind, r.value, f.id, f.name, f.account_id, f.imap_name, f.after_read, f.mark_read
+            FROM user_folder_rules r JOIN user_folders f ON f.id=r.folder_id
+            WHERE f.account_id IS NOT NULL""")]
+
+    def folder_rule_matches(self, folder_id, only_seen) -> dict:
+        """{account_id: {uid: id pravidla}} zpráv v doručené poště, které pravidla složky přesouvají
+        (odložené se vynechávají)."""
+        sql = f"""SELECT m.account_id, m.uid, r.id FROM messages m
+                  JOIN user_folder_rules r ON r.folder_id=? AND {RULE_MATCH}
+                  LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
+                  WHERE m.folder='INBOX' AND s.uid IS NULL"""
+        if only_seen:
+            sql += " AND m.seen=1"
+        out = {}
+        for acc_id, uid, rule_id in self._q(sql, (folder_id,)):
+            out.setdefault(acc_id, {}).setdefault(uid, rule_id)
+        return out
+
+    # ------------------------------------------------------------------ moje adresy (pro „Vzít na vědomí“)
+
+    def set_my_addresses(self, acc_id, emails):
+        emails = {e.lower() for e in emails if e and "@" in e}
+
+        def run(c):
+            c.execute("DELETE FROM my_addresses WHERE account_id=?", (acc_id,))
+            c.executemany("INSERT INTO my_addresses VALUES(?, ?)", [(acc_id, e) for e in emails])
+        self._tx(run)
+
+    def my_addresses(self) -> dict:
+        out = {}
+        for acc_id, email in self._q("SELECT account_id, email FROM my_addresses"):
+            out.setdefault(acc_id, set()).add(email)
+        return out
+
+    def folder_unread(self) -> dict:
+        return {r[0]: r[1] for r in self._q("""
+            SELECT f.id, (SELECT COALESCE(SUM(1 - seen), 0) FROM messages m
+                           WHERE m.account_id=f.account_id AND m.folder=f.imap_name)
+            FROM user_folders f""")}
 
     # ------------------------------------------------------------------ pravidla pro notifikace
 
