@@ -54,6 +54,11 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
 
   Pokud by zprávy po přesunu hned zmizely, aplikace se předem zeptá. Jde o tyto případy: staré notifikace by se podle nastavení smazaly, odesílatel je označený jako spam, nebo zprávu hned přesune pravidlo složky.
 
+- **Kontextové menu** (pravé tlačítko myši na položce levého panelu):
+  - **Označit vše jako přečtené**: platí pro pohledy doručené pošty, složky i účty. V aplikaci se změna projeví hned, server ji dostane na pozadí.
+  - **Nastavení**: u složky otevře její obrazovku v Nastavení, u účtu nastavení účtu, u Notifikací nastavení notifikací.
+  - Položky, které u dané složky nedávají smysl, jsou zašedlé (např. u Smazaných).
+
 Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení, pravidla pro spam, notifikace a složky a o konfiguraci složek (samotné složky a zprávy na serveru zůstanou).
 
 ### Kde jsou data

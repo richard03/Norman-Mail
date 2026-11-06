@@ -202,6 +202,91 @@ $('#accounts').addEventListener('click', e => {
   setView({ type: 'folder', accountId: el.dataset.acc, folder: 'INBOX', title: 'Doručená pošta' });
 });
 
+// --- kontextové menu položek levého panelu (pravé tlačítko myši)
+
+/** Co položka panelu představuje: cíl pro „Označit vše jako přečtené“, počet nepřečtených a akce Nastavení. */
+function navItemInfo(el) {
+  if (el.hasAttribute('data-trash'))
+    return { label: 'Smazané', target: null, unread: 0, readNote: 'Zprávy ve Smazaných jsou vždy přečtené',
+             settingsNote: 'Smazané nemají žádné nastavení' };
+  if (el.dataset.unified) {
+    const view = el.dataset.unified;
+    return { label: UNIFIED_TITLE[view], target: { type: 'unified', view }, unread: state.viewUnread?.[view] || 0,
+             settings: view === 'notifications' ? () => openSettings('notifications') : null,
+             settingsNote: view === 'notifications' ? '' : 'Tento pohled nemá žádné nastavení' };
+  }
+  if (el.dataset.ufolder) {
+    const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
+    if (!f) return null;
+    return { label: f.name, target: accById(f.account_id) ? { type: 'ufolder', id: f.id } : null, unread: f.unread || 0,
+             settings: () => openFolderDialog(f.id) };
+  }
+  if (el.dataset.acc) {
+    const a = accById(el.dataset.acc);
+    const inbox = (state.folders[el.dataset.acc] || []).find(x => x.role === 'inbox');
+    return { label: a?.name || a?.email || '', target: { type: 'account', account_id: el.dataset.acc },
+             unread: inbox?.unseen || 0, settings: () => openAccountDialog(el.dataset.acc) };
+  }
+  return null;
+}
+
+let ctxActions = [];
+function openContextMenu(x, y, items) {
+  const menu = $('#ctxMenu');
+  ctxActions = items.map(i => i.run);
+  menu.innerHTML = items.map((i, n) =>
+    `<button type="button" role="menuitem" data-ctx="${n}" ${i.disabled ? 'disabled' : ''} title="${esc(i.title || '')}">${esc(i.text)}</button>`).join('');
+  menu.hidden = false;
+  // v okně: menu nesmí přetéct přes pravý / dolní okraj
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.min(x, innerWidth - r.width - 4) + 'px';
+  menu.style.top = Math.min(y, innerHeight - r.height - 4) + 'px';
+  menu.querySelector('button:not([disabled])')?.focus();
+}
+function closeContextMenu() { $('#ctxMenu').hidden = true; }
+
+$('#accounts').addEventListener('contextmenu', e => {
+  const el = e.target.closest('.nav-item');
+  const info = el && navItemInfo(el);
+  if (!info) return;
+  e.preventDefault();
+  openContextMenu(e.clientX, e.clientY, [
+    { text: 'Označit vše jako přečtené', disabled: !info.target || !info.unread,
+      title: !info.target ? (info.readNote || 'Složka nemá nastavený účet') : (!info.unread ? 'Žádné nepřečtené zprávy' : ''),
+      run: () => markAllRead(info) },
+    { text: 'Nastavení', disabled: !info.settings, title: info.settingsNote || '', run: info.settings },
+  ]);
+});
+$('#ctxMenu').addEventListener('click', e => {
+  const b = e.target.closest('[data-ctx]');
+  if (!b || b.disabled) return;
+  closeContextMenu();
+  ctxActions[+b.dataset.ctx]?.();
+});
+document.addEventListener('mousedown', e => { if (!e.target.closest('#ctxMenu')) closeContextMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeContextMenu(); });
+window.addEventListener('blur', closeContextMenu);
+window.addEventListener('resize', closeContextMenu);
+$('#accounts').addEventListener('scroll', closeContextMenu, { passive: true });
+
+/** Označit vše jako přečtené – v UI hned (seznam i počty), server na pozadí. */
+async function markAllRead(info) {
+  const t = info.target, v = state.view;
+  const isCurrent = (t.type === 'unified' && v.type === 'unified' && v.filter === t.view)
+    || (t.type === 'ufolder' && v.type === 'ufolder' && v.id === t.id)
+    || (t.type === 'account' && v.type === 'folder' && v.accountId === t.account_id && v.folder === 'INBOX');
+  if (isCurrent) {  // zobrazený seznam hned
+    state.messages.forEach(m => { m.seen = true; });
+    renderList();
+  }
+  try {
+    const res = await api('/api/mark-all-read', { method: 'POST', body: t });
+    toast(res.count ? `${info.label}: označeno jako přečtené – ${zprav(res.count)}` : `${info.label}: nic nepřečteného`);
+  } catch (err) { toast(err.message, true); }
+  await pollSync();                                    // počty v levém panelu
+  loadList({ quiet: true, keepLoaded: true });         // seznam z databáze (může se překrývat s cílem)
+}
+
 /** Po opuštění Notifikací: vše označit jako přečtené (počty hned, server na pozadí). */
 function markNotificationsRead() {
   const vu = state.viewUnread;

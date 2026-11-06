@@ -400,3 +400,7 @@ dialog.confirm { width: min(480px, calc(100vw - 32px)); }
 .settings-rules .rule-add input { min-width: 0; }
 .settings-rules .rule-add { flex-wrap: wrap; }
 .settings-rules .rule-add select { flex: 1 1 100%; }
+
+/* ---------- kontextové menu ---------- */
+.menu.ctx-menu { position: fixed; right: auto; top: 0; left: 0; min-width: 210px; z-index: 100; }
+.menu button:disabled { color: var(--muted); opacity: .55; cursor: default; background: none; }

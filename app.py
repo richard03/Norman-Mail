@@ -837,6 +837,41 @@ def messages_move():
     return jsonify(ok=True, moved=sum(len(u) for u in groups.values()))
 
 
+@app.post("/api/mark-all-read")
+def mark_all_read():
+    """Označit vše jako přečtené (kontextové menu levého panelu): pohled doručené pošty, složka aplikace
+    nebo doručená pošta účtu. Databáze hned, server na pozadí."""
+    t = request.get_json(force=True) or {}
+    kind = t.get("type")
+    if kind == "unified":
+        if t.get("view") not in INBOX_VIEWS:
+            abort(400, "Neznámý pohled.")
+        groups = database.unseen_in("INBOX", t["view"])
+        folder = "INBOX"
+    elif kind == "account":
+        account_or_404(t.get("account_id"))
+        groups, folder = database.unseen_in("INBOX", acc_id=t["account_id"]), "INBOX"
+    elif kind == "ufolder":
+        f = _folder_or_404(int(t.get("id") or 0))
+        if not f["account_id"] or store.get(f["account_id"]) is None:
+            raise ValidationError("Složka nemá platný cílový účet.")
+        groups, folder = database.unseen_in(f["imap_name"], acc_id=f["account_id"]), f["imap_name"]
+    else:
+        abort(400, "Neznámý cíl.")
+    total = 0
+    for acc_id, uids in groups.items():
+        acc = store.get(acc_id)
+        if acc is None or not uids:
+            continue
+        database.set_seen_bulk(acc_id, folder, uids)
+        syncer.enqueue(acc, folder, uids, "Označení zpráv jako přečtených",
+                       lambda M, f=folder, u=uids: mail.mark_seen_uids(M, f, u))
+        total += len(uids)
+    if total:
+        database.bump()
+    return jsonify(ok=True, count=total)
+
+
 @app.get("/api/trash")
 def trash_list():
     """Složka Smazané: koše všech účtů dohromady (z databáze)."""

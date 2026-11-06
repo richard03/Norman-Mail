@@ -365,6 +365,18 @@ class Database:
             out.setdefault(acc_id, []).append(uid)
         return out
 
+    def unseen_in(self, folder="INBOX", view="all", acc_id=None) -> dict:
+        """{account_id: [uid]} nepřečtených zpráv ve složce (u doručené pošty volitelně jen v pohledu)."""
+        sql = f"SELECT m.account_id, m.uid FROM messages m WHERE m.folder=? AND m.seen=0 AND {VIEW_FILTERS[view]}"
+        params = [folder]
+        if acc_id:
+            sql += " AND m.account_id=?"
+            params.append(acc_id)
+        out = {}
+        for a, uid in self._q(sql, params):
+            out.setdefault(a, []).append(uid)
+        return out
+
     def set_seen_bulk(self, acc_id, folder, uids):
         self._tx(lambda c: c.executemany("UPDATE messages SET seen=1 WHERE account_id=? AND folder=? AND uid=?",
                                          [(acc_id, folder, u) for u in uids]))
