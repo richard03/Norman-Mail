@@ -36,6 +36,7 @@ const state = {
   anchor: null,           // klíč zprávy, od které se počítá výběr se Shiftem
   dragItems: null,        // právě přetahované zprávy
   trashTotal: 0,          // počet zpráv ve Smazaných (všechny, ne jen nepřečtené)
+  spamUnread: 0,          // nepřečtené zprávy ve spamu (všechny účty)
   current: null,          // { accountId, folder, uid, data }
   context: [],            // související zprávy aktuální zprávy
   showImages: false,
@@ -50,16 +51,31 @@ const UNIFIED_TITLE = Object.fromEntries(UNIFIED_VIEWS);
 
 // ------------------------------------------------------------------ utility
 
+// Desktop: stránka běží na virtuální doméně WebView2 a Python volá přes most pywebview (žádný server).
+// Vývoj (tools/dev_server.py): běžné HTTP požadavky na lokální server.
+const DESKTOP = location.hostname === 'mailer-app.example';
+const bridgeReady = new Promise(resolve => {
+  if (window.pywebview?.api?.request) resolve();
+  else window.addEventListener('pywebviewready', () => resolve(), { once: true });
+});
+
 async function api(path, { method = 'GET', body } = {}) {
-  const opts = { method, headers: {} };
-  if (method !== 'GET') opts.headers['X-Mailer'] = '1';
-  if (body !== undefined) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
+  let r, data = null;
+  if (DESKTOP) {
+    await bridgeReady;
+    const res = await window.pywebview.api.request(method, path, body === undefined ? null : body);
+    r = { ok: res.status >= 200 && res.status < 300, status: res.status };
+    data = res.data;
+  } else {
+    const opts = { method, headers: {} };
+    if (method !== 'GET') opts.headers['X-Mailer'] = '1';
+    if (body !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    r = await fetch(path, opts);
+    try { data = await r.json(); } catch { /* prázdná odpověď */ }
   }
-  const r = await fetch(path, opts);
-  let data = null;
-  try { data = await r.json(); } catch { /* prázdná odpověď */ }
   if (!r.ok) {
     const err = new Error(data?.error || `Chyba serveru (${r.status})`);
     err.status = r.status;
@@ -107,6 +123,7 @@ const zprav = n => `${n} ${n === 1 ? 'zpráva' : n >= 2 && n <= 4 ? 'zprávy' : 
 const keyOf = m => `${m.account_id}|${m.folder}|${m.uid}`;
 const curKey = cur => (cur ? `${cur.accountId}|${cur.folder}|${cur.uid}` : null);
 const selectedItems = () => state.messages.filter(m => state.selected.has(keyOf(m)));
+const SPAM_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg>';
 const TRASH_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>';
 
 function folderRole(accountId, folder) {
@@ -143,6 +160,10 @@ function renderSidebar() {
       h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
               <span class="label">${label}</span>${badge(vu[filter])}</div>`;
     }
+    // Spam: spam všech účtů (kdyby tam něco spadlo omylem); číslo = nepřečtené
+    h += `<div class="nav-item unified spam-item ${state.view.type === 'spam' ? 'active' : ''}" data-spam
+            title="Spam ze všech účtů">${SPAM_ICON}<span class="label">Spam</span>
+            ${state.spamUnread ? `<span class="badge total">${state.spamUnread}</span>` : ''}</div>`;
     // Smazané: koše všech účtů; číslo = celkový počet zpráv (všechny jsou přečtené)
     h += `<div class="nav-item unified trash-item ${state.view.type === 'trash' ? 'active' : ''}" data-trash
             title="Smazané zprávy ze všech účtů">${TRASH_ICON}<span class="label">Smazané</span>
@@ -184,9 +205,10 @@ function renderSidebar() {
 }
 
 $('#accounts').addEventListener('click', e => {
-  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-edit],[data-retry],[data-trash],[data-unified],[data-acc]');
+  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-edit],[data-retry],[data-trash],[data-spam],[data-unified],[data-acc]');
   if (!el) return;
   if (el.hasAttribute('data-trash')) return setView({ type: 'trash' });
+  if (el.hasAttribute('data-spam')) return setView({ type: 'spam' });
   if (el.dataset.editFolder) return openFolderDialog(+el.dataset.editFolder);
   if (el.hasAttribute('data-add-folder')) return openFolderDialog(null);
   if (el.dataset.ufolder) {
@@ -209,6 +231,8 @@ function navItemInfo(el) {
   if (el.hasAttribute('data-trash'))
     return { label: 'Smazané', target: null, unread: 0, readNote: 'Zprávy ve Smazaných jsou vždy přečtené',
              settingsNote: 'Smazané nemají žádné nastavení' };
+  if (el.hasAttribute('data-spam'))
+    return { label: 'Spam', target: { type: 'spam' }, unread: state.spamUnread, settings: () => openSettings('spam') };
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     return { label: UNIFIED_TITLE[view], target: { type: 'unified', view }, unread: state.viewUnread?.[view] || 0,
@@ -274,6 +298,7 @@ async function markAllRead(info) {
   const t = info.target, v = state.view;
   const isCurrent = (t.type === 'unified' && v.type === 'unified' && v.filter === t.view)
     || (t.type === 'ufolder' && v.type === 'ufolder' && v.id === t.id)
+    || (t.type === 'spam' && v.type === 'spam')
     || (t.type === 'account' && v.type === 'folder' && v.accountId === t.account_id && v.folder === 'INBOX');
   if (isCurrent) {  // zobrazený seznam hned
     state.messages.forEach(m => { m.seen = true; });
@@ -332,6 +357,7 @@ async function loadList({ append = false, quiet = false, keepLoaded = false } = 
     if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
+    else if (v.type === 'spam') res = await api('/api/spam?' + qs);
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
     state.messages = append ? state.messages.concat(res.messages) : res.messages;
@@ -368,11 +394,11 @@ function maybeLoadMore() {
 function renderList() {
   const v = state.view;
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
-  const multi = v.type === 'unified' || v.type === 'ufolder' || v.type === 'trash';  // zprávy z více účtů
+  const multi = ['unified', 'ufolder', 'trash', 'spam'].includes(v.type);  // zprávy z více účtů
   $('#listTitle').textContent = v.type === 'unified' ? UNIFIED_TITLE[v.filter] : v.type === 'trash' ? 'Smazané'
-    : v.type === 'ufolder' ? v.title : `${v.title || v.folder} · ${acc?.name || ''}`;
+    : v.type === 'spam' ? 'Spam' : v.type === 'ufolder' ? v.title : `${v.title || v.folder} · ${acc?.name || ''}`;
   $('#searchInput').placeholder = v.type === 'unified' ? 'Hledat v doručené poště…'
-    : v.type === 'trash' ? 'Hledat ve Smazaných…' : 'Hledat ve složce…';
+    : v.type === 'trash' ? 'Hledat ve Smazaných…' : v.type === 'spam' ? 'Hledat ve spamu…' : 'Hledat ve složce…';
   renderTrashFooter();
   $('#listErrors').innerHTML = state.listErrors.map(e => `<div class="list-error">${esc(e)}</div>`).join('');
 
@@ -538,14 +564,32 @@ function hasRemoteContent(html) {
   return /(<img[^>]+src\s*=\s*["']?\s*(https?:)?\/\/)|url\(\s*["']?\s*(https?:)?\/\//i.test(html);
 }
 
+// Značky, které ve zprávě nemají co dělat: načítají cizí obsah mimo CSP (dns-prefetch / preconnect),
+// přesměrovávají (meta refresh), mění cíl odkazů (base) nebo by spouštěly kód.
+const FRAME_DROP = 'link, meta, base, script, iframe, frame, frameset, object, embed, applet, portal, template';
+
+/** HTML zprávy pro rámec (iframe srcdoc, bez skriptů). Rozebere se stejným parserem, který ho vykreslí
+ *  (DOMParser – dokument je inertní, nic nenačítá), nebezpečné značky a atributy se odstraní a na začátek
+ *  hlavičky se vloží vlastní CSP, vypnutí předběžných dotazů DNS a cíl odkazů. */
 function buildFrameDoc(html, allowRemote) {
   const remote = allowRemote ? ' https: http:' : '';
   const csp = `default-src 'none'; img-src data:${remote}; style-src 'unsafe-inline'${remote}; font-src data:${remote}`;
-  return `<!doctype html><html><head><meta charset="utf-8">
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll(FRAME_DROP).forEach(el => el.remove());
+  doc.querySelectorAll('form').forEach(form => form.replaceWith(...form.childNodes));  // obsah zůstane
+  for (const el of doc.querySelectorAll('*')) {
+    for (const { name } of [...el.attributes]) {
+      if (name.startsWith('on') || name === 'ping' || name === 'formaction' || name === 'http-equiv') el.removeAttribute(name);
+    }
+  }
+  const head = new DOMParser().parseFromString(`<!doctype html><html><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="${csp}">
+    <meta http-equiv="x-dns-prefetch-control" content="off">
     <base target="_blank">
     <style>body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;margin:16px;color:#111;background:#fff;word-wrap:break-word}
-    img{max-width:100%;height:auto}</style></head><body>${html}</body></html>`;
+    img{max-width:100%;height:auto}</style></head><body></body></html>`, 'text/html').head;
+  doc.head.prepend(...[...head.childNodes].map(n => doc.importNode(n, true)));  // CSP musí být úplně první
+  return '<!doctype html>' + doc.documentElement.outerHTML;
 }
 
 function renderReader() {
@@ -560,6 +604,8 @@ function renderReader() {
   const role = folderRole(accountId, data.folder);
   const folderNote = role && role !== 'inbox'
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
+  const bayesNote = data.bayes ? `<span class="tag folder spam" title="${esc('Nejvýraznější znaky: '
+      + data.bayes.tokens.map(t => `${t.token} (${Math.round(t.p * 100)} %)`).join(', '))}">Filtr spamu: ${Math.round(data.bayes.score * 100)} %</span>` : '';
 
   // záhlaví je společné pro obsah, akce i kontext
   $('#messageHead').hidden = false;
@@ -568,7 +614,7 @@ function renderReader() {
       <div class="meta">
         ${line('Od', data.from)}${line('Komu', data.to)}${line('Kopie', data.cc)}
         <div><span class="muted">${fmtFull(data.date)}</span>
-          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote}</div>
+          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${bayesNote}</div>
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
       ${data.snoozed_until ? `<div class="banner snooze">⏰ Odloženo – ${esc(fmtSnooze(data.snoozed_until))} se zpráva znovu
@@ -603,10 +649,16 @@ $('#messageHead').addEventListener('click', async e => {
 
 function updateActions() {
   const ready = !!state.current;
-  const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat
+  const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat a (ne)spam
   document.querySelectorAll('#actions [data-act]').forEach(b => {
-    b.disabled = !(ready || (multi && b.dataset.act === 'delete'));
+    b.disabled = !(ready || (multi && ['delete', 'spam'].includes(b.dataset.act)));
   });
+  const sb = $('#actions [data-act="spam"]');
+  const inSpam = state.view.type === 'spam';
+  sb.classList.toggle('active', inSpam);
+  sb.querySelector('.label').textContent = inSpam ? 'Není spam' : 'Spam';
+  sb.title = inSpam ? 'Vrátí zprávu do doručené pošty a odesílatel přestane být označený jako spam'
+                    : 'Přesune zprávu do spamu; další zprávy od odesílatele půjdou rovnou do spamu';
   const nb = $('#actions [data-act="notification"]');
   const isNotif = !!state.current && isNotification(state.current);
   nb.classList.toggle('active', isNotif);
@@ -635,6 +687,10 @@ async function withLoadedMessage(cur, fn) {
 async function doAction(act, btn) {
   const cur = state.current;
   if (act === 'delete' && !cur && state.selected.size > 1) return moveItems(selectedItems(), { type: 'trash' });
+  if (act === 'spam' && (state.view.type === 'spam' || (!cur && state.selected.size > 1))) {
+    const items = !cur ? selectedItems() : [cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid }];
+    return moveItems(items, state.view.type === 'spam' ? { type: 'inbox', view: 'all' } : { type: 'spam' });
+  }
   if (!cur) return;
   // ve Smazaných se maže definitivně – přes hromadnou cestu s potvrzením
   if (act === 'delete' && state.view.type === 'trash')
@@ -840,6 +896,8 @@ function removeItems(items) {
 
 function targetLabel(target) {
   if (target.type === 'trash') return state.view.type === 'trash' ? 'Definitivně smazáno' : 'Přesunuto do Smazaných';
+  if (target.type === 'spam') return 'Přesunuto do spamu';
+  if (state.view.type === 'spam' && target.view === 'all' && !target.account_id) return 'Není spam – vráceno do doručené pošty';
   if (target.type === 'ufolder') return `Přesunuto do složky ${state.userFolders.find(f => f.id === target.id)?.name || ''}`;
   if (target.account_id) { const a = accById(target.account_id); return `Přesunuto do doručené pošty účtu ${a?.name || a?.email || ''}`; }
   return `Přesunuto do ${{ important: 'Důležité', fyi: 'Vzít na vědomí', notifications: 'Notifikací',
@@ -883,6 +941,8 @@ function dropTarget(el) {
   if (!el || !items?.length) return null;
   if (el.hasAttribute('data-trash'))
     return v.type === 'trash' ? null : { type: 'trash' };
+  if (el.hasAttribute('data-spam'))
+    return v.type === 'spam' ? null : { type: 'spam' };
   if (el.dataset.ufolder) {
     const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
     if (!f || !accById(f.account_id) || (v.type === 'ufolder' && v.id === f.id)) return null;
@@ -1177,7 +1237,30 @@ function applyPreset(key) {
   if (!p) return;
   [f.imap_host.value, f.imap_port.value, f.imap_security.value] = p.imap;
   [f.smtp_host.value, f.smtp_port.value, f.smtp_security.value] = p.smtp;
+  updatePasswordRequirement();
 }
+
+// Uložené heslo se posílá jen na server a pod jménem, pro které bylo zadané. Po změně je potřeba ho zadat znovu.
+const LOGIN_FIELDS = ['username', 'imap_host', 'imap_port', 'imap_security', 'smtp_host', 'smtp_port', 'smtp_security'];
+const KEEP_PASSWORD_HINT = '(ponechte prázdné pro zachování stávajícího)';
+
+function loginChanged() {
+  const acc = state.editingId ? accById(state.editingId) : null;
+  if (!acc || acc.auth === 'oauth2') return false;
+  const f = $('#accountForm');
+  const norm = v => String(v ?? '').trim().toLowerCase();
+  return LOGIN_FIELDS.some(k => norm(f.elements.namedItem(k).value) !== norm(acc[k]));
+}
+
+function updatePasswordRequirement() {
+  if (!state.editingId) return;
+  const changed = loginChanged(), pw = $('#accountForm').elements.namedItem('password'), hint = $('#pwHint');
+  pw.required = changed;
+  if (changed) hint.textContent = '* – změnili jste server nebo jméno, zadejte heslo znovu';
+  else if (hint.textContent.startsWith('*')) hint.textContent = KEEP_PASSWORD_HINT;
+}
+$('#accountForm').addEventListener('input', updatePasswordRequirement);
+$('#accountForm').addEventListener('change', updatePasswordRequirement);
 
 function openAccountDialog(id = null) {
   const f = $('#accountForm');
@@ -1190,7 +1273,8 @@ function openAccountDialog(id = null) {
   delete $('#deleteAccountBtn').dataset.confirm;
   $('#accountError').textContent = '';
   $('#presetNote').textContent = '';
-  $('#pwHint').textContent = acc ? '(ponechte prázdné pro zachování stávajícího)' : '*';
+  $('#pwHint').textContent = acc ? KEEP_PASSWORD_HINT : '*';
+  f.elements.namedItem('password').required = false;
   if (acc) for (const k of Object.keys(acc)) {
     const input = f.elements.namedItem(k);
     if (input && k !== 'preset' && k !== 'password') input.value = acc[k] ?? '';
@@ -1199,6 +1283,8 @@ function openAccountDialog(id = null) {
   const oauth = acc?.auth === 'oauth2';
   stopGooglePolling();
   $('#passwordLabel').hidden = oauth;
+  // účet přes Google: servery a adresa jsou dané Googlem (server je stejně nepřijme jinak)
+  for (const k of [...LOGIN_FIELDS, 'email', 'preset']) f.elements.namedItem(k).disabled = oauth;
   $('#googleConfig').hidden = true;
   $('#googleOrPassword').hidden = oauth;
   $('#googleBtnText').textContent = oauth ? 'Přihlásit znovu' : 'Přihlásit přes Google';
@@ -1642,7 +1728,7 @@ async function openSettings(section = settingsSection, folderId = state.editingF
   if (section !== 'folder') showSettingsSection(section);
   $('#settingsDialog').showModal();
   if (section === 'folder') openFolderDialog(folderId);
-  await Promise.all([renderSpamRules(), renderNotifyRules(), loadSettings().then(renderSettingOptions)]);
+  await Promise.all([renderSpamRules(), renderNotifyRules(), renderBayesStatus(), loadSettings().then(renderSettingOptions)]);
 }
 
 $('#settingsDialog .settings-nav').addEventListener('click', e => {
@@ -1666,7 +1752,48 @@ function renderSettingOptions() {
     cb.checked = !!state.settings?.[cb.dataset.setting];
     cb.disabled = !state.settings;
   });
+  const sens = $('#bayesSensitivity');
+  sens.value = state.settings?.bayes_sensitivity || 'medium';
+  sens.disabled = !state.settings || !state.settings.bayes_enabled;
 }
+
+$('#bayesSensitivity').addEventListener('change', async e => {
+  try {
+    state.settings = await api('/api/settings', { method: 'PUT', body: { bayes_sensitivity: e.target.value } });
+  } catch (err) { toast(err.message, true); }
+  renderSettingOptions();
+});
+
+// --- bayesovský filtr: stav učení (v Nastavení → Spam)
+let bayesTimer = null;
+async function renderBayesStatus() {
+  clearTimeout(bayesTimer);
+  const el = $('#bayesStatus');
+  let st;
+  try { st = await api('/api/bayes'); } catch (e) { el.className = 'note bad'; el.textContent = e.message; return; }
+  const b = st.bootstrap;
+  let text;
+  if (b.status === 'running') text = `Učím se z existujících zpráv… ${b.done} / ${b.total || '?'}`;
+  else if (!st.ready) text = `Filtr se zatím učí: ${st.spam} spamových a ${st.ham} dobrých zpráv. Spam začne přesouvat, až bude znát `
+    + `aspoň ${st.min_spam} spamových a ${st.min_ham} dobrých zpráv – označujte spam tlačítkem Spam.`;
+  else text = `Naučeno: ${st.spam} spamových a ${st.ham} dobrých zpráv (${st.tokens} slov). `
+    + `Za posledních 7 dní přesunul do spamu ${zprav(st.moved_week)}.`;
+  el.className = 'note' + (st.ready ? ' ok' : '');
+  el.textContent = text;
+  if (b.status === 'running' && $('#settingsDialog').open) bayesTimer = setTimeout(renderBayesStatus, 1500);
+}
+
+$('#bayesReset').addEventListener('click', async () => {
+  const ok = await confirmDialog({
+    title: 'Naučit filtr znovu',
+    lines: ['Filtr zapomene všechno, co se naučil, a naučí se znovu z existujících zpráv: spam = zprávy ve spamu '
+      + 'od odesílatelů z pravidel, dobré = přečtené zprávy v doručené poště.'],
+    question: 'Pokračovat?', ok: 'Naučit znovu',
+  });
+  if (!ok) return;
+  try { await api('/api/bayes/reset', { method: 'POST' }); } catch (err) { return toast(err.message, true); }
+  renderBayesStatus();
+});
 
 document.querySelectorAll('[data-setting]').forEach(cb => cb.addEventListener('change', async () => {
   try {
@@ -1785,6 +1912,10 @@ async function pollSync() {
   for (const f of state.userFolders) {
     const n = st.folders?.[f.id] ?? f.unread;
     if (n !== f.unread) { f.unread = n; countsChanged = true; }
+  }
+  if (st.spam != null && st.spam !== state.spamUnread) {
+    state.spamUnread = st.spam;
+    countsChanged = true;
   }
   if (st.trash != null && st.trash !== state.trashTotal) {
     state.trashTotal = st.trash;

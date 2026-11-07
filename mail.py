@@ -548,6 +548,7 @@ def parse_message(raw: bytes, uid, folder, flags) -> dict:
                                 "content_type": ctype, "size": len(payload)})
 
     if html:
+        # hrubé předčištění; skutečná sanitizace HTML je v rozhraní (buildFrameDoc v app.js – parser prohlížeče)
         html = re.sub(r"<meta[^>]+http-equiv\s*=\s*[\"']?refresh[^>]*>", "", html, flags=re.I)
     if text is None and html:
         text = html_to_text(html)

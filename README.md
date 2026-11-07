@@ -12,11 +12,11 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 
-**Webový režim** (rozhraní v prohlížeči): `.venv\Scripts\python app.py` otevře <http://127.0.0.1:8765/>.
+**Vývojový server** (rozhraní v prohlížeči, jen pro ladění): `.venv\Scripts\python tools\dev_server.py` otevře <http://127.0.0.1:8765/>. Není součástí `Mailer.exe`. Dokud běží, může se k němu připojit kterýkoli program na počítači, proto ho nepouštějte mimo vývoj.
 
 ### Jak to funguje
 
-`main.py` spustí na pozadí lokální server (Flask, náhodný volný port na `127.0.0.1`) a zobrazí jeho rozhraní v nativním okně přes **Edge WebView2** (knihovna pywebview). WebView2 je součástí Windows 10 a 11. Odkazy z e-mailů a přihlášení přes Google se otevírají ve vašem výchozím prohlížeči. Povolené jsou jen odkazy `http`, `https` a `mailto`. Přílohy se ukládají přes systémový dialog *Uložit jako*. Vestavěná ochrana WebView2 před sledováním je vypnutá, protože blokovala obrázky v newsletterech i po kliknutí na *Zobrazit obrázky*. Vzdálený obsah zpráv blokuje sama aplikace, dokud ho nepovolíte.
+`main.py` zobrazí rozhraní v nativním okně přes **Edge WebView2** (knihovna pywebview). **Aplikace neotevírá žádný síťový port:** stránka se načítá přímo ze souborů (virtuální doména WebView2 `https://mailer-app.example/`) a rozhraní volá Python přes most pywebview uvnitř procesu. Jiný program ani jiný uživatel počítače se k ní tedy nepřipojí. Jedinou výjimkou je přihlášení přes Google: na dobu přihlášení se na `127.0.0.1` spustí dočasný server, který přijímá jen návrat z prohlížeče (`/oauth/callback`) a hned potom se vypne. WebView2 je součástí Windows 10 a 11. Odkazy z e-mailů a přihlášení přes Google se otevírají ve vašem výchozím prohlížeči. Povolené jsou jen odkazy `http`, `https` a `mailto`. Přílohy se ukládají přes systémový dialog *Uložit jako*. Vestavěná ochrana WebView2 před sledováním je vypnutá, protože blokovala obrázky v newsletterech i po kliknutí na *Zobrazit obrázky*. Vzdálený obsah zpráv blokuje sama aplikace, dokud ho nepovolíte. HTML zprávy se před zobrazením vyčistí stejným parserem, který ho vykreslí: odstraní se značky `link`, `meta`, `base`, `script`, `iframe`, `object` apod., formuláře a atributy `on…` a `ping`, a v rámci zprávy jsou vypnuté předběžné dotazy DNS. Zpráva tak nemůže prozradit, že jste ji otevřeli, ani přes DNS nebo přesměrování.
 
 ### Lokální databáze (cache)
 
@@ -43,10 +43,17 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
   - Složky z dřívější verze bez cílového účtu se nepoužívají, dokud jim účet nenastavíte (v levém sloupci mají červený vykřičník).
 
 - **Smazané** (levý sloupec): smazané zprávy ze všech účtů na jednom místě (koše jednotlivých účtů). Zprávy v této složce se automaticky označí jako přečtené, i když je tam přesunul jiný klient. Číslo u složky ukazuje celkový počet zpráv. Tlačítko **Vyprázdnit** dole pod seznamem je po potvrzení natrvalo smaže ze všech serverů. Smazání zprávy přímo ve Smazaných je definitivní a potvrzuje se.
-- **Výběr více zpráv:** Ctrl+klik přidá zprávu do výběru nebo ji z něj odebere, Shift+klik vybere rozsah, Ctrl+A vybere všechny načtené zprávy. Vybrané zprávy smažete klávesou **Delete** nebo tlačítkem Smazat.
+- **Spam** (levý sloupec): spam ze všech účtů na jednom místě, aby šlo najít, co tam spadlo omylem. Číslo u složky ukazuje nepřečtené zprávy. Ve Spamu se z tlačítka Spam stane **Není spam**: zpráva se vrátí do doručené pošty svého účtu a pravidlo spamu pro jejího odesílatele se zruší, aby další zprávy už do spamu nepadaly. Pravidlo se zruší i při přetažení zprávy ze Spamu do doručené pošty nebo do složky.
+- **Bayesovský filtr spamu** (Nastavení → Spam): pozná spam podle obsahu i od odesílatelů, kteří ještě nejsou v pravidlech. Učí se z toho, co označíte: tlačítko Spam nebo přetažení do Spamu = spam, **Není spam** = dobrá zpráva. Dobré zprávy se učí i samy: posouzená zpráva, kterou přečtete a necháte 3 dny v doručené poště, se naučí jako dobrá. Napoprvé se filtr naučí z existujících zpráv (spam = zprávy ve spamu od odesílatelů z pravidel, dobré = přečtené zprávy v doručené poště).
+  - Posuzuje jen nové nepřečtené zprávy (z posledních 3 dnů). Nikdy nepřesune zprávy od lidí, kterým jste psali, od zdrojů notifikací ani zprávy odpovídající pravidlům složek.
+  - Spam začne přesouvat, až zná aspoň 10 spamových a 10 dobrých zpráv. Citlivost: vysoká (hranice 80 %), střední (90 %), nízká (97 %). Filtr jde vypnout; „Zapomenout a naučit znovu“ ho vrátí do výchozího stavu.
+  - U zprávy, kterou filtr přesunul do spamu, je v záhlaví štítek „Filtr spamu: 99 %“; po najetí myší ukáže slova, podle kterých rozhodl.
+  - Metoda: Robinsonova/Fisherova kombinace pravděpodobností slov (jako SpamBayes), slova z předmětu, odesílatele, vybraných hlaviček, odkazů a prvních 32 kB zprávy. Všechno se počítá a ukládá lokálně v databázi aplikace.
+- **Výběr více zpráv:** Ctrl+klik přidá zprávu do výběru nebo ji z něj odebere, Shift+klik vybere rozsah, Ctrl+A vybere všechny načtené zprávy. Vybrané zprávy smažete klávesou **Delete** nebo tlačítkem Smazat, tlačítkem Spam (ve Spamu Není spam) je přesunete hromadně.
 - **Drag & drop:** zprávu nebo vybranou skupinu zpráv přetáhněte myší na položku v levém sloupci:
   - na **složku**: přesun do ní (i na jiný účet), pravidlo se nevytváří;
   - na **Smazané**: smazání;
+  - na **Spam**: přesun do spamu, odesílatelé se přidají do pravidel spamu;
   - na **účet**: přesun do doručené pošty tohoto účtu;
   - na **Notifikace**: odesílatelé se stanou zdrojem notifikací;
   - na **Důležité** nebo **Vzít na vědomí**: odesílatelé přestanou být notifikacemi;
@@ -80,6 +87,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 ## Bezpečnost
 
 - Hesla se ukládají do **Správce pověření Windows** (přes knihovnu `keyring`), ne do souboru. Soubor `accounts.json` obsahuje jen nastavení serverů.
+- Uložené heslo se posílá jen na server a pod jménem, pro které bylo zadané. Když v nastavení účtu změníte server, port, zabezpečení nebo uživatelské jméno, je potřeba heslo zadat znovu. U účtů přihlášených přes Google jsou servery a adresa pevně dané (Gmail) a z formuláře se měnit nedají.
 - Lokální server naslouchá pouze na `127.0.0.1` a odmítá cizí hlavičky Host a Origin (ochrana proti CSRF a DNS rebindingu).
 - HTML zprávy se zobrazují v izolovaném rámci (iframe) s atributem sandbox, takže se v nich nespustí žádné skripty. Vzdálené obrázky jsou ve výchozím stavu zablokované, protože slouží ke sledování otevření zprávy. Lze je povolit tlačítkem.
 - Přílohy se vždy stahují jako soubor, nikdy se neotevírají v rámci aplikace.
@@ -116,7 +124,8 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | Soubor | Účel |
 |---|---|
 | `main.py` | Desktopová aplikace (okno, ukládání příloh) |
-| `app.py` | Lokální server (Flask) a REST API |
+| `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
+| `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `Mailer.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |

@@ -114,7 +114,8 @@ class AccountStore:
         return self.get(acc["id"]) if acc else None
 
     def all(self):
-        return [self.get(a["id"]) for a in self.list_public()]
+        accounts = (self.get(a["id"]) for a in self.list_public())
+        return [a for a in accounts if a is not None]  # účet mohl být mezitím smazán
 
     def save(self, acc_id, acc: dict, password: str):
         """Vytvoří (acc_id=None) nebo aktualizuje účet. Vrací id."""

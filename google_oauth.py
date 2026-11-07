@@ -125,6 +125,13 @@ def get_pending(state):
         return dict(entry) if entry else None
 
 
+def has_pending() -> bool:
+    """Čeká nějaké přihlášení na návrat z prohlížeče?"""
+    with _lock:
+        now = time.time()
+        return any(v["status"] == "pending" and now - v["created"] <= PENDING_TTL for v in _pending.values())
+
+
 def finish(state, account_id=None, error=None):
     with _lock:
         if state in _pending:

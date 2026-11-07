@@ -1,4 +1,6 @@
-"""Mailer – jednoduchý emailový klient pro více účtů. Spuštění: python app.py"""
+"""Mailer – jádro aplikace (Flask). V desktopové verzi (main.py) neběží žádný server: rozhraní volá
+endpointy přes most pywebview uvnitř procesu. Jako skutečný server na 127.0.0.1 běží jen při vývoji
+(tools/dev_server.py) a krátce při přihlášení přes Google (návrat z prohlížeče na /oauth/callback)."""
 
 import base64
 import io
@@ -6,13 +8,14 @@ import os
 import threading
 import time
 import uuid
-import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from urllib.parse import urlparse
 
-from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from flask import Flask, abort, jsonify, redirect, request, send_file
+from werkzeug.serving import make_server
 
+import bayes
 import db
 import google_oauth
 import mail
@@ -21,6 +24,7 @@ from store import KEYRING_OK, AccountStore, ValidationError, normalize
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MAILER_PORT", "8765"))
+EMBEDDED = False  # desktopová verze: žádný trvalý server (nastavuje main.py)
 PAGE_SIZE = 50
 UNIFIED_PAGE_SIZE = 30
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
@@ -119,8 +123,8 @@ def folder_arg(data=None):
 # --------------------------------------------------------------------------
 
 @app.get("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
+def index():  # jen vývojový server – desktop načítá static/index.html přímo
+    return redirect("/static/index.html")
 
 
 @app.get("/api/accounts")
@@ -133,14 +137,30 @@ def info():
     return jsonify(keyring=KEYRING_OK)
 
 
+LOGIN_FIELDS = ("username", "imap_host", "imap_port", "imap_security", "smtp_host", "smtp_port", "smtp_security")
+
+
+def _login_target(acc):
+    """Kam a pod jakým jménem se posílá heslo. Při změně je potřeba heslo zadat znovu."""
+    return tuple(str(acc.get(k) or "").strip().lower() for k in LOGIN_FIELDS)
+
+
 def _save_account(acc_id):
     data = request.get_json(force=True)
     existing = store.get(acc_id) if acc_id else None
     # Typ přihlášení se z formuláře měnit nedá – OAuth účty vznikají přes /oauth/callback.
     data["auth"] = (existing or {}).get("auth") or "password"
+    if data["auth"] == "oauth2":
+        # Účet přes Google: servery jsou vždy Gmail a adresa ta, pro kterou Google vydal token –
+        # jinak by se token Googlu poslal na libovolný server.
+        data.update(google_oauth.GMAIL_SERVERS, email=existing["email"], username=existing["username"])
     acc = normalize(data)
     password = "" if acc["auth"] == "oauth2" else (data.get("password") or "")
     if existing and not password:
+        if acc["auth"] != "oauth2" and _login_target(acc) != _login_target(existing):
+            # uložené heslo se smí poslat jen tam, kam patří – na nový server nebo pro jiné jméno ho nepoužijeme
+            raise ValidationError("Změnili jste server nebo uživatelské jméno – z bezpečnostních důvodů "
+                                  "zadejte heslo znovu.")
         password = existing["password"]
     if not password:
         raise ValidationError("Zadejte heslo.")
@@ -177,14 +197,63 @@ def accounts_delete(acc_id):
 # Přihlášení přes Google
 # --------------------------------------------------------------------------
 
+class OAuthListener:
+    """Dočasný server pro návrat z přihlášení Googlu (desktop nemá trvalý server). Přijímá jen
+    GET /oauth/callback, běží na náhodném portu a vypne se, jakmile žádné přihlášení nečeká
+    (nebo po vypršení PENDING_TTL)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._srv = None
+        self._deadline = 0.0
+
+    @staticmethod
+    def _wsgi(environ, start_response):
+        if environ.get("PATH_INFO") != "/oauth/callback" or environ.get("REQUEST_METHOD") != "GET":
+            start_response("404 Not Found", [("Content-Type", "text/plain")])
+            return [b"Not found"]
+        return app.wsgi_app(environ, start_response)
+
+    def redirect_uri(self):
+        with self._lock:
+            if self._srv is None:
+                self._srv = make_server(HOST, 0, self._wsgi, threaded=True)
+                threading.Thread(target=self._srv.serve_forever, name="oauth-callback", daemon=True).start()
+                threading.Thread(target=self._reaper, args=(self._srv,), daemon=True).start()
+            self._deadline = time.time() + google_oauth.PENDING_TTL
+            return f"http://{HOST}:{self._srv.server_port}/oauth/callback"
+
+    def _reaper(self, srv):
+        time.sleep(5)  # start() mezitím založí čekající přihlášení
+        while True:
+            with self._lock:
+                if self._srv is not srv:
+                    return
+                if time.time() > self._deadline or not google_oauth.has_pending():
+                    self._srv = None
+                    break
+            time.sleep(2)
+        srv.shutdown()
+        srv.server_close()
+
+    @property
+    def running(self):
+        return self._srv is not None
+
+
+oauth_listener = OAuthListener()
+
+
 def redirect_uri():
+    if EMBEDDED:
+        return oauth_listener.redirect_uri()
     return f"http://{HOST}:{PORT}/oauth/callback"
 
 
 @app.get("/api/google/config")
 def google_config():
     cfg = google_oauth.load_config()
-    return jsonify(configured=bool(cfg), client_id=(cfg or {}).get("client_id", ""), redirect_uri=redirect_uri())
+    return jsonify(configured=bool(cfg), client_id=(cfg or {}).get("client_id", ""))
 
 
 @app.post("/api/google/config")
@@ -401,6 +470,11 @@ def message(acc_id, uid):
     data["snoozed_until"] = row["snoozed_until"] if row else None
     senders = database.notify_senders()
     data["notification"] = any(a["addr"].lower() in senders for a in data["from"])
+    data["bayes"] = None
+    if row and database.spam_folders().get(acc_id) == folder:  # proč to filtr dal do spamu
+        v = syncer.bayes.verdict(bayes.record_key(row))
+        if v and v["moved"]:
+            data["bayes"] = {"score": v["score"], "tokens": syncer.bayes.explain(v["tokens"])}
     return jsonify(data)
 
 
@@ -679,11 +753,11 @@ def zprav(n):
 
 
 def _parse_move(data):
-    """Zprávy a cíl přesunu. Cíl: {type: trash} | {type: ufolder, id} | {type: inbox, view?, account_id?}."""
+    """Zprávy a cíl přesunu. Cíl: {type: trash} | {type: spam} | {type: ufolder, id} | {type: inbox, view?, account_id?}."""
     t = data.get("target") or {}
     kind = t.get("type")
-    if kind == "trash":
-        target = {"type": "trash"}
+    if kind in ("trash", "spam"):
+        target = {"type": kind}
     elif kind == "ufolder":
         f = _folder_or_404(int(t.get("id") or 0))
         if not f["account_id"] or store.get(f["account_id"]) is None:
@@ -701,7 +775,7 @@ def _parse_move(data):
     raw = data.get("items") or []
     if not raw or len(raw) > MAX_BULK:
         abort(400, "Žádné zprávy k přesunu." if not raw else f"Najednou lze přesunout nejvýš {MAX_BULK} zpráv.")
-    trash = database.trash_folders()
+    trash, junk = database.trash_folders(), database.spam_folders()
     items, seen_keys = [], set()
     for it in raw:
         acc_id, folder, uid = it.get("account_id"), it.get("folder"), it.get("uid")
@@ -720,12 +794,14 @@ def _parse_move(data):
                     "seen": bool(it.get("seen")), "snoozed": False, "rec": None}
         if target["type"] == "trash":
             dst = (acc_id, trash.get(acc_id))
+        elif target["type"] == "spam":
+            dst = (acc_id, junk.get(acc_id, "Spam"))  # chybějící složku Spam vytvoří server
         elif target["type"] == "ufolder":
             dst = (target["folder"]["account_id"], target["folder"]["imap_name"])
         else:
             dst = (target["account_id"] or acc_id, "INBOX")
         items.append({"account_id": acc_id, "folder": folder, "uid": uid, "dst": dst,
-                      "stays": dst == (acc_id, folder), **info})
+                      "stays": dst == (acc_id, folder), "from_spam": junk.get(acc_id) == folder, **info})
     if not items:
         abort(400, "Žádné zprávy k přesunu.")
     return items, target
@@ -753,14 +829,8 @@ def _move_warnings(items, target):
     elif view in ("important", "fyi"):
         notify = notify - senders
     arriving = [i for i in items if not i["stays"]]
-    spam = database.spam_senders()
-    to_spam = [i for i in arriving if i["sender"] in spam]
-    if to_spam:
-        n = len(to_spam)
-        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} od odesílatele označeného jako spam – hned by se "
-                        f"{pl(n, 'přesunula', 'přesunuly', 'přesunulo')} do spamu.")
     rules = sorted(database.folder_rules_active(), key=lambda r: db.RULE_KINDS.index(r["kind"]))
-    by_folder, moved_away = {}, {(i["account_id"], i["folder"], i["uid"]) for i in to_spam}
+    by_folder, moved_away = {}, set()
     for i in arriving:
         if i["rec"] is None or (i["account_id"], i["folder"], i["uid"]) in moved_away:
             continue
@@ -811,6 +881,13 @@ def messages_move():
     elif target["type"] == "inbox" and target["view"] in ("important", "fyi"):
         for s in senders:
             database.remove_notify_sender(s)
+    if target["type"] == "spam":
+        for s in senders - own:
+            database.add_spam_rule(s)
+    elif target["type"] == "inbox":  # „Není spam“ / přetažení do doručené pošty – jinak by se zprávy hned vrátily
+        database.remove_spam_senders(senders)
+    else:
+        database.remove_spam_senders({i["sender"] for i in items if i["from_spam"]})
     groups = {}
     for i in items:
         if not i["stays"] or target["type"] == "trash":  # ze Smazaných se maže natrvalo
@@ -820,6 +897,9 @@ def messages_move():
         if target["type"] == "trash":
             syncer.enqueue(acc, folder, uids, "Smazání zpráv",
                            lambda a=acc, f=folder, u=uids: syncer.trash_messages(a, f, u), remove=True, use_conn=False)
+        elif target["type"] == "spam":
+            syncer.enqueue(acc, folder, uids, "Přesun do spamu",
+                           lambda a=acc, f=folder, u=uids: syncer.spam_messages(a, f, u), remove=True, use_conn=False)
         else:
             if target["type"] == "ufolder":
                 f = target["folder"]
@@ -828,8 +908,9 @@ def messages_move():
             else:
                 dest = {"account_id": target["account_id"] or acc_id, "imap_name": "INBOX", "mark_read": False,
                         "name": "Doručená pošta"}
+            ham = database.spam_folders().get(acc_id) == folder  # ze spamu ven = „Není spam“ (učení)
             syncer.enqueue(acc, folder, uids, f"Přesun do složky {dest['name']}",
-                           lambda a=acc, f=folder, u=uids, d=dest: syncer.move_messages(a, f, u, d),
+                           lambda a=acc, f=folder, u=uids, d=dest, h=ham: syncer.move_messages(a, f, u, d, learn_ham=h),
                            remove=True, use_conn=False)
         database.delete_uids(acc_id, folder, uids)
     database.bump()
@@ -856,10 +937,16 @@ def mark_all_read():
         if not f["account_id"] or store.get(f["account_id"]) is None:
             raise ValidationError("Složka nemá platný cílový účet.")
         groups, folder = database.unseen_in(f["imap_name"], acc_id=f["account_id"]), f["imap_name"]
+    elif kind == "spam":
+        groups, folder = {}, None
     else:
         abort(400, "Neznámý cíl.")
+    # [(účet, složka, uid)] – Spam má na každém účtu jinou složku
+    work = [(acc_id, folder, uids) for acc_id, uids in groups.items()]
+    if kind == "spam":
+        work = [(acc_id, name, database.unseen_uids(acc_id, name)) for acc_id, name in database.spam_folders().items()]
     total = 0
-    for acc_id, uids in groups.items():
+    for acc_id, folder, uids in work:
         acc = store.get(acc_id)
         if acc is None or not uids:
             continue
@@ -875,8 +962,17 @@ def mark_all_read():
 @app.get("/api/trash")
 def trash_list():
     """Složka Smazané: koše všech účtů dohromady (z databáze)."""
-    trash = database.trash_folders()
-    locations = {a["id"]: trash[a["id"]] for a in store.all() if a["id"] in trash}
+    return _role_list(database.trash_folders())
+
+
+@app.get("/api/spam")
+def spam_list():
+    """Složka Spam: spam všech účtů dohromady (z databáze)."""
+    return _role_list(database.spam_folders())
+
+
+def _role_list(by_acc):
+    locations = {a["id"]: by_acc[a["id"]] for a in store.all() if a["id"] in by_acc}
     page = max(0, request.args.get("page", 0, type=int))
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
@@ -915,6 +1011,19 @@ def settings_put():
     return jsonify(result)
 
 
+@app.get("/api/bayes")
+def bayes_status():
+    return jsonify(syncer.bayes.status())
+
+
+@app.post("/api/bayes/reset")
+def bayes_reset():
+    """Zapomenout naučené a naučit se znovu z existujících zpráv (spam z pravidel, přečtená doručená pošta)."""
+    syncer.bayes.reset()
+    syncer.start_bayes_bootstrap()
+    return jsonify(syncer.bayes.status())
+
+
 @app.post("/api/notifications/mark-read")
 def notifications_mark_read():
     return jsonify(ok=True, count=syncer.mark_notifications_read())
@@ -948,6 +1057,7 @@ def sync_status():
     """Levný dotaz pro UI: změnila se data? (verze), nepřečtené v doručené poště, chyby synchronizace."""
     return jsonify(version=database.version, unread=database.unread_counts(), views=database.view_unread(),
                    folders=database.folder_unread(), trash=database.trash_total(a["id"] for a in store.all()),
+                   spam=database.role_count("junk", [a["id"] for a in store.all()], unread=True),
                    errors=syncer.errors, notices=syncer.notices)
 
 
@@ -982,6 +1092,7 @@ def message_spam(acc_id, uid):
             jobs[job_id] = {"status": "running", "moved": 0, "errors": [], "sender": sender}
 
     def op(M):
+        syncer.bayes_learn(M, acc, folder, [uid], True)
         mail.spam_message(M, folder, uid)
         if job_id:
             threading.Thread(target=_spam_sender_job, args=(job_id, sender, ts), daemon=True).start()
@@ -1099,11 +1210,3 @@ def send():
     warning = mail.send_message(acc, msg, recipients, pool)
     return jsonify(ok=True, warning=warning)
 
-
-if __name__ == "__main__":
-    url = f"http://{HOST}:{PORT}/"
-    print(f"Mailer běží na {url}  (ukončení: Ctrl+C)")
-    if not os.environ.get("MAILER_NO_BROWSER"):
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    start_background()
-    app.run(host=HOST, port=PORT, threaded=True)

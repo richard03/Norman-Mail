@@ -323,6 +323,9 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
 .action.active { background: var(--active); border-color: var(--accent); }
+.sub-head { margin-top: 22px; }
+dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
+.bayes-actions { margin-top: 10px; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
 dialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); cursor: pointer; }
 dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); flex: none; }
@@ -374,7 +377,7 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 }
 .nav-item.drop-candidate { outline: 1px dashed var(--muted); outline-offset: -1px; }
 .nav-item.drop-over { background: var(--active); outline: 2px solid var(--accent); outline-offset: -2px; }
-.trash-item .folder-ico { color: var(--muted); }
+.trash-item .folder-ico, .spam-item .folder-ico { color: var(--muted); }
 .badge.total { background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .list-footer {
   display: flex; align-items: center; gap: 8px; justify-content: space-between;

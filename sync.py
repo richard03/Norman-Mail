@@ -6,6 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import bayes
 import db as db_module
 import mail
 
@@ -50,6 +51,7 @@ def context_folders(folders, extra_names=()):
 class SyncManager:
     def __init__(self, store, db, pool):
         self.store, self.db, self.pool = store, db, pool
+        self.bayes = bayes.BayesFilter(db)
         self.errors = {}               # acc_id -> poslední chyba synchronizace
         self._wake = threading.Event()
         self._locks = {}
@@ -170,6 +172,8 @@ class SyncManager:
                 self.process_snoozes()
                 self.cleanup_notifications()
                 self.apply_folder_rules()
+                if full:
+                    self.bayes_maintenance()
             except Exception:
                 log.exception("Chyba synchronizace")
             self._wake.wait(BUSY_INTERVAL if busy else INTERVAL)
@@ -228,6 +232,7 @@ class SyncManager:
 
             missing = sorted(server - cached.keys() - self._pending_uids(acc_id, folder), reverse=True)  # nejnovější první
             rules = self.db.spam_senders() if folder == "INBOX" else set()
+            bayes_on = folder == "INBOX" and self.bayes.active()
             # pravidla složek v režimu „ihned“ – nové zprávy přesunout dřív, než se ukážou v seznamu
             order = {k: i for i, k in enumerate(db_module.RULE_KINDS)}  # odesílatel > příjemce > předmět
             frules = sorted((r for r in self.db.folder_rules_active() if not r["after_read"]),
@@ -241,6 +246,8 @@ class SyncManager:
                     records = mail.fetch_header_records(M, chunk)
                 if rules:
                     records = self._apply_spam_rules(acc, folder, records, rules)
+                if bayes_on:
+                    records = self._apply_bayes(acc, records)
                 if frules:
                     records = self._apply_folder_rules_new(acc, records, frules)
                 self.db.insert_messages(acc_id, folder, records)
@@ -281,6 +288,17 @@ class SyncManager:
         if trash and trash != folder:
             self._sync_target(acc, trash)
 
+    def spam_messages(self, acc, folder, uids):
+        """Přesun zpráv do spamu (bez hromadného přesunu starších zpráv odesílatele) a stažení spamu."""
+        with self.pool.get(acc) as M:
+            self.bayes_learn(M, acc, folder, uids, True)
+            mail.move_to_spam(M, folder, uids)
+        if acc["id"] not in self.db.spam_folders():
+            self.refresh_folders(acc)  # složka Spam právě vznikla
+        junk = self.db.spam_folders().get(acc["id"])
+        if junk and junk != folder:
+            self._sync_target(acc, junk)
+
     def empty_trash(self, acc, trash) -> int:
         """Natrvalo smaže všechny zprávy v koši účtu. Pod zámkem složky, ať je synchronizace mezitím nevrátí."""
         with self._folder_lock(acc["id"], trash):
@@ -313,9 +331,74 @@ class SyncManager:
         moved = set(uids)
         return [r for r in records if r["uid"] not in moved]
 
+    # ------------------------------------------------------------------ bayesovský filtr
+
+    def _apply_bayes(self, acc, records):
+        """Čerstvé nepřečtené zprávy posoudí bayesovským filtrem; rozpoznaný spam přesune do spamu.
+        Vrací zbylé záznamy. Lidé, kterým jsem psal, zdroje notifikací a zprávy pro složky se neposuzují."""
+        now = time.time()
+        fresh = [r for r in records if not r.get("deleted") and not r["seen"] and (r["date"] or now) > now - bayes.RECENT]
+        if not fresh:
+            return records
+        sender = lambda r: r["from"][0]["addr"].lower() if r["from"] else ""
+        safe = self.db.safe_senders({sender(r) for r in fresh})
+        frules = self.db.folder_rules_active()
+        cands = [r for r in fresh if sender(r) not in safe and not any(db_module.rule_matches(x, r) for x in frules)]
+        if not cands:
+            return records
+        try:
+            with self.pool.get(acc) as M:
+                mail._select(M, "INBOX", readonly=True)
+                tokens = bayes.fetch_tokens(M, [r["uid"] for r in cands])
+        except Exception as e:
+            log.warning("Bayes: zprávy nejde stáhnout (%s): %s", acc["name"], e)
+            return records
+        threshold, spam = self.bayes.threshold(), []
+        for r in cands:
+            t = tokens.get(r["uid"])
+            if t is None:
+                continue
+            score = self.bayes.score(t)
+            moved = score is not None and score >= threshold
+            self.bayes.remember(bayes.record_key(r), acc["id"], r["message_id"], t, score, moved)
+            if moved:
+                spam.append(r["uid"])
+        if not spam:
+            return records
+        try:
+            with self.pool.get(acc) as M:
+                mail.move_to_spam(M, "INBOX", spam)
+        except Exception as e:
+            self._error(acc, e)
+            return records
+        log.info("Bayes: přesunuto do spamu %d zpráv (účet %s)", len(spam), acc["name"])
+        moved = set(spam)
+        return [r for r in records if r["uid"] not in moved]
+
+    def bayes_learn(self, M, acc, folder, uids, is_spam):
+        """Učení z akce uživatele (Spam / Není spam). Chyba učení nesmí zastavit samotný přesun."""
+        try:
+            self.bayes.learn(M, acc["id"], folder, uids, is_spam)
+        except Exception:
+            log.exception("Bayes: učení selhalo")
+
+    def bayes_maintenance(self):
+        try:
+            self.bayes.mature()
+        except Exception:
+            log.exception("Bayes: údržba selhala")
+        if self.bayes.needs_bootstrap() and self.bayes.bootstrap_state["status"] != "running" \
+                and self.db._q("SELECT 1 FROM messages WHERE folder='INBOX' LIMIT 1"):
+            self.start_bayes_bootstrap()
+
+    def start_bayes_bootstrap(self):
+        self.bayes.bootstrap_state = {"status": "running", "done": 0, "total": 0}
+        threading.Thread(target=self.bayes.bootstrap, args=(self.store, self.pool),
+                         name="bayes-bootstrap", daemon=True).start()
+
     # ------------------------------------------------------------------ uživatelské složky
 
-    def move_messages(self, src_acc, src_folder, uids, target):
+    def move_messages(self, src_acc, src_folder, uids, target, learn_ham=False):
         """Přesune zprávy do cílové složky aplikace. Vrací seznam přesunutých UID.
         Mezi účty: stáhnout ze zdroje → vložit do cíle → teprve pak smazat ze zdroje (do koše).
         Zámky spojení obou účtů se nikdy nedrží současně (žádné uváznutí)."""
@@ -323,6 +406,9 @@ class SyncManager:
         if not uids:
             return []
         imap_name, mark_read = target["imap_name"], bool(target["mark_read"])
+        if learn_ham:  # ze spamu ven = „Není spam“
+            with self.pool.get(src_acc) as M:
+                self.bayes_learn(M, src_acc, src_folder, uids, False)
         if target["account_id"] == src_acc["id"]:
             with self.pool.get(src_acc) as M:
                 mail.move_to_named_folder(M, src_folder, uids, imap_name, mark_read)

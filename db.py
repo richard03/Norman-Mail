@@ -73,7 +73,10 @@ DEFAULT_SETTINGS = {
     "notify_mark_read_on_leave": False,       # po opuštění Notifikací označit všechny za přečtené
     "notify_delete_read_after_week": True,    # mazat přečtené notifikace starší než týden
     "notify_delete_unread_after_week": False,  # mazat nepřečtené notifikace starší než týden
+    "bayes_enabled": True,                    # bayesovský filtr přesouvá rozpoznaný spam
+    "bayes_sensitivity": "medium",            # high / medium / low
 }
+SETTING_CHOICES = {"bayes_sensitivity": ("high", "medium", "low")}
 
 
 def rule_matches(rule, rec) -> bool:
@@ -260,18 +263,32 @@ class Database:
 
     # ------------------------------------------------------------------ koš („Smazané“)
 
-    def trash_folders(self) -> dict:
-        """{account_id: název koše}"""
-        return {r[0]: r[1] for r in self._q("SELECT account_id, name FROM folders WHERE role='trash'")}
+    def role_folders(self, role) -> dict:
+        """{account_id: název složky s danou rolí} (trash = koš, junk = spam)"""
+        return {r[0]: r[1] for r in self._q("SELECT account_id, name FROM folders WHERE role=?", (role,))}
 
-    def trash_total(self, acc_ids) -> int:
-        """Počet zpráv v koších daných účtů (číslo u složky Smazané)."""
+    def role_count(self, role, acc_ids, unread=False) -> int:
+        """Počet (nepřečtených) zpráv ve složkách dané role u daných účtů."""
         acc_ids = list(acc_ids)
         if not acc_ids:
             return 0
+        seen = "AND m.seen=0" if unread else ""
         return self._q(f"""SELECT COUNT(*) FROM messages m JOIN folders f
-                           ON f.account_id=m.account_id AND f.name=m.folder AND f.role='trash'
-                           WHERE m.account_id IN ({",".join("?" * len(acc_ids))})""", acc_ids)[0][0]
+                           ON f.account_id=m.account_id AND f.name=m.folder AND f.role=?
+                           WHERE m.account_id IN ({",".join("?" * len(acc_ids))}) {seen}""",
+                       (role, *acc_ids))[0][0]
+
+    def trash_folders(self) -> dict:
+        """{account_id: název koše}"""
+        return self.role_folders("trash")
+
+    def trash_total(self, acc_ids) -> int:
+        """Počet zpráv v koších daných účtů (číslo u složky Smazané)."""
+        return self.role_count("trash", acc_ids)
+
+    def spam_folders(self) -> dict:
+        """{account_id: název složky Spam}"""
+        return self.role_folders("junk")
 
     def unseen_uids(self, acc_id, folder) -> list:
         return [r[0] for r in self._q("SELECT uid FROM messages WHERE account_id=? AND folder=? AND seen=0",
@@ -327,6 +344,28 @@ class Database:
     def delete_spam_rule(self, rule_id):
         self._q("DELETE FROM spam_rules WHERE id=?", (rule_id,))
 
+    def safe_senders(self, senders) -> set:
+        """Odesílatelé, které bayesovský filtr nikdy nepřesune: vlastní adresy, zdroje notifikací
+        a lidé, kterým jsem někdy psal (jsou v Komu/Kopie odeslané pošty)."""
+        senders = {s.lower() for s in senders if s}
+        own = {r[0].lower() for r in self._q("SELECT email FROM my_addresses")}
+        safe = senders & (own | self.notify_senders())
+        for s in senders - safe:
+            if self._q("""SELECT 1 FROM messages m JOIN folders f ON f.account_id=m.account_id AND f.name=m.folder
+                          AND f.role='sent' WHERE instr(m.to_addrs, ?) > 0 OR instr(m.cc_addrs, ?) > 0 LIMIT 1""",
+                       (f",{s},", f",{s},")):
+                safe.add(s)
+        return safe
+
+    def remove_spam_senders(self, senders) -> int:
+        """Smaže pravidla „odesílatel je spam“ (zpráva vrácená ze spamu). Vrací počet smazaných."""
+        senders = sorted({s.lower() for s in senders if s})
+        if not senders:
+            return 0
+        n = len(self.spam_senders() & set(senders))
+        self._q(f"DELETE FROM spam_rules WHERE kind='sender' AND value IN ({','.join('?' * len(senders))})", senders)
+        return n
+
     def spam_senders(self) -> set:
         return {r[0] for r in self._q("SELECT value FROM spam_rules WHERE kind='sender'")}
 
@@ -342,6 +381,8 @@ class Database:
 
     def update_settings(self, changes: dict) -> dict:
         for k, v in changes.items():
+            if k in SETTING_CHOICES and v not in SETTING_CHOICES[k]:
+                continue
             if k in DEFAULT_SETTINGS and isinstance(v, type(DEFAULT_SETTINGS[k])):
                 self._q("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("setting:" + k, json.dumps(v)))
         return self.settings()

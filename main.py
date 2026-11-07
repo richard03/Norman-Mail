@@ -1,14 +1,17 @@
-"""Mailer – desktopová aplikace. Spustí lokální server a zobrazí ho v nativním okně (Edge WebView2)."""
+"""Mailer – desktopová aplikace v nativním okně (Edge WebView2).
+
+Neběží žádný síťový server: stránka se načítá ze složky static přes virtuální doménu WebView2
+(https://mailer-app.example/) a rozhraní volá Python přes most pywebview (Api.request). Jiný program
+ani jiný uživatel počítače se tak k aplikaci nepřipojí. Jen při přihlášení přes Google krátce běží
+server pro návrat z prohlížeče (app.OAuthListener)."""
 
 import os
 import sys
-import threading
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
 import webview
-from werkzeug.serving import make_server
 
 import app as server_app
 import mail
@@ -16,6 +19,8 @@ import taskbar
 from store import DATA_DIR
 
 SAFE_SCHEMES = {"http", "https", "mailto"}
+APP_HOST = "mailer-app.example"  # virtuální doména (.example nikdy neexistuje na internetu)
+APP_URL = f"https://{APP_HOST}/index.html"
 
 
 def open_external(url) -> bool:
@@ -65,11 +70,37 @@ def disable_tracking_prevention():
         print("Ochranu před sledováním nelze vypnout:", e)
 
 
+def map_static_folder(folder):
+    """Virtuální doména APP_HOST → složka static. WebView2 soubory čte přímo z disku (žádný port).
+    Musí se nastavit dřív, než pywebview načte první stránku."""
+    from webview.platforms import edgechromium
+    from Microsoft.Web.WebView2.Core import CoreWebView2HostResourceAccessKind
+
+    original = edgechromium.EdgeChrome.on_webview_ready
+
+    def on_webview_ready(self, sender, args):
+        if args.IsSuccess:
+            sender.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                APP_HOST, folder, CoreWebView2HostResourceAccessKind.Deny)
+        original(self, sender, args)
+
+    edgechromium.EdgeChrome.on_webview_ready = on_webview_ready
+
+
 class Api:
     """Funkce volatelné z JavaScriptu přes window.pywebview.api.*"""
 
     def __init__(self):
         self._window = None  # podtržítko: pywebview neexportuje do JS
+
+    def request(self, method, path, body=None):
+        """Volání endpointu /api/* uvnitř procesu (Flask test_client – bez sítě). Vrací {status, data}."""
+        if not isinstance(path, str) or not path.startswith("/api/") or method not in ("GET", "POST", "PUT", "DELETE"):
+            return {"status": 400, "data": {"error": "Neplatný požadavek."}}
+        with server_app.app.test_client() as client:
+            r = client.open(path, method=method, json=body, headers={"X-Mailer": "1"})
+        data = r.get_json(silent=True)
+        return {"status": r.status_code, "data": data}
 
     def save_attachment(self, acc_id, folder, uid, index):
         try:
@@ -89,14 +120,6 @@ class Api:
 
     def open_external(self, url):
         return open_external(url)
-
-
-def start_server():
-    port = int(os.environ.get("MAILER_PORT") or 0)  # 0 = libovolný volný port
-    srv = make_server(server_app.HOST, port, server_app.app, threaded=True)
-    server_app.PORT = srv.server_port  # potřebné pro OAuth redirect URI
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return f"http://{server_app.HOST}:{srv.server_port}/"
 
 
 def resource(name):
@@ -120,13 +143,14 @@ def pin_identity(window, icon):
 
 def main():
     taskbar.set_process_app_id()
+    server_app.EMBEDDED = True
     server_app.start_background()
-    url = start_server()
     harden_link_handling()
     disable_tracking_prevention()
+    map_static_folder(resource("static"))
     webview.settings["ALLOW_DOWNLOADS"] = True
     api = Api()
-    window = webview.create_window("Mailer", url, js_api=api, width=1600, height=950,
+    window = webview.create_window("Mailer", APP_URL, js_api=api, width=1600, height=950,
                                    min_size=(1200, 600), text_select=True)
     api._window = window
     icon = resource("assets/mailer.ico")
