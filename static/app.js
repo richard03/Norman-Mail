@@ -987,7 +987,10 @@ async function categorize(cur, cat, btn) {
     // kam zpráva teď patří: odpověď serveru (uložená zpráva v doručené poště), jinak odhad
     const now = res.view || (value ? cat : null);
     cur.category = CATEGORIES[now] ? now : null;
+    const other = value && CATEGORIES[now] && now !== cat ? CATEGORIES[now] : null;
     toast(!value ? `Zpráva vyřazena ${c.from}`
+      : other ? `Pravidlo uloženo, ale zpráva zůstává ${other.title === 'Notifikace' ? 'v Notifikacích' : 'v Nedůležitých'} – `
+                + `odpovídá i jejich pravidlu, které má přednost`
       : scope === 'message' ? `Zpráva zařazena ${c.in}`
       : scope === 'sender' ? `Zprávy od ${res.sender} se teď řadí ${c.in}`
       : `Zprávy s předmětem „${res.subject}“ se teď řadí ${c.in}`);
@@ -2068,7 +2071,7 @@ document.querySelectorAll('#unimportantRules, #notificationsRules').forEach(list
   const cat = btn.dataset.category;
   try {
     await api(`/api/categories/${cat}/rules/${btn.dataset.categoryRule}`, { method: 'DELETE' });
-    toast('Pravidlo smazáno – zprávy se vrátily do Důležité');
+    toast('Pravidlo smazáno');
     if (state.current) { delete state.current.category; updateActions(); }
     await renderCategoryRules(cat);
     if (state.view.type === 'unified') loadList({ quiet: true });

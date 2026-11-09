@@ -672,16 +672,11 @@ class Database:
     # ------------------------------------------------------------------ Notifikace / Nedůležité: pravidla a označení
 
     def add_category_rule(self, category, kind, value):
-        """Pravidlo kategorie (odesílatel / předmět). Stejné pravidlo z druhé kategorie zmizí."""
+        """Pravidlo kategorie (odesílatel / předmět). Stejné pravidlo může být v obou kategoriích –
+        pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
         assert category in CATEGORIES and kind in CATEGORY_RULE_KINDS
-        value = value.lower()
-        other = CATEGORY_TABLES[next(c for c in CATEGORIES if c != category)]
-        table = CATEGORY_TABLES[category]
-
-        def run(c):
-            c.execute(f"DELETE FROM {other} WHERE kind=? AND value=?", (kind, value))
-            c.execute(f"INSERT OR IGNORE INTO {table}(kind, value, created) VALUES(?, ?, ?)", (kind, value, time.time()))
-        self._tx(run)
+        self._q(f"INSERT OR IGNORE INTO {CATEGORY_TABLES[category]}(kind, value, created) VALUES(?, ?, ?)",
+                (kind, value.lower(), time.time()))
 
     def remove_category_rule(self, category, kind, value):
         self._q(f"DELETE FROM {CATEGORY_TABLES[category]} WHERE kind=? AND value=?", (kind, value.lower()))
