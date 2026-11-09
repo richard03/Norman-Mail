@@ -4,7 +4,6 @@ endpointy přes most pywebview uvnitř procesu. Jako skutečný server na 127.0.
 
 import base64
 import io
-import json
 import os
 import threading
 import time
@@ -420,7 +419,7 @@ def unified():
                     return "notifications"
                 direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
                 return "important" if direct else "fyi"
-            result = [m for m in result if (not m["seen"] if view == "unread" else view_of(m) == view)]
+            result = [m for m in result if view_of(m) == view]
         result.sort(key=lambda m: m["date"] or 0, reverse=True)
         return jsonify(messages=result, has_more=has_more, errors=errors)
 
@@ -437,19 +436,8 @@ def unified():
             errors.append(f"{acc['name']}: {syncer.errors[acc['id']]} (zobrazuji uložená data)")
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
-    keep = _keep_arg() if view == "unread" else ()
-    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset, keep=keep)
+    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset)
     return jsonify(messages=res["messages"], has_more=res["has_more"], errors=errors, version=version)
-
-
-def _keep_arg():
-    """Všechny nepřečtené: zprávy, které UI už zobrazilo a mají v seznamu zůstat i po přečtení
-    (dokud uživatel pohled neopustí). JSON [[účet, složka, uid], …]."""
-    try:
-        raw = json.loads(request.args.get("keep") or "[]")
-        return [(str(a), str(f), int(u)) for a, f, u in raw[:2000]]
-    except (ValueError, TypeError):
-        abort(400, "Neplatný parametr keep.")
 
 
 def _mark_seen_in_background(acc, folder, uid):

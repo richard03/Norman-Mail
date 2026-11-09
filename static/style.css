@@ -95,8 +95,6 @@ body.resizing iframe { pointer-events: none; }  /* rámec se zprávou by jinak �
   margin: 16px 10px 4px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
 }
-.account-item .edit { visibility: hidden; }
-.account-item:hover .edit, .account-item.active .edit { visibility: visible; }
 .icon-btn.warn { color: var(--danger); font-weight: 700; }
 .acc-error { color: var(--danger); font-size: 12px; padding: 4px 10px 4px 26px; }
 

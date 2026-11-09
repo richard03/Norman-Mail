@@ -32,7 +32,6 @@ const state = {
   userFolders: [],        // uživatelské složky (z /api/user-folders)
   editingFolder: null,    // id složky v dialogu konfigurace
   messages: [], page: 0, hasMore: false, query: '', listErrors: [], listLoading: false,
-  keepRead: new Map(),    // Všechny nepřečtené: zprávy přečtené během návštěvy pohledu zůstávají v seznamu
   selected: new Set(),    // klíče vybraných zpráv (Ctrl/Shift + klik) – pro drag & drop a hromadné mazání
   anchor: null,           // klíč zprávy, od které se počítá výběr se Shiftem
   dragItems: null,        // právě přetahované zprávy
@@ -46,8 +45,8 @@ const state = {
 };
 let listToken = 0;
 
-const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['notifications', 'Notifikace'],
-                       ['unread', 'Všechny nepřečtené'], ['all', 'Všechny doručené']];
+// Každá zpráva doručené pošty patří právě do jednoho z těchto pohledů (žádný souhrnný seznam navíc).
+const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['notifications', 'Notifikace']];
 const UNIFIED_TITLE = Object.fromEntries(UNIFIED_VIEWS);
 
 // ------------------------------------------------------------------ utility
@@ -151,11 +150,9 @@ async function loadFolders(id) {
 }
 
 function renderSidebar() {
-  const unread = state.accounts.reduce(
-    (s, a) => s + ((state.folders[a.id] || []).find(f => f.role === 'inbox')?.unseen || 0), 0);
   let h = '';
   if (state.accounts.length) {
-    const vu = state.viewUnread || { all: unread, unread };
+    const vu = state.viewUnread || {};
     for (const [filter, label] of UNIFIED_VIEWS) {
       const active = state.view.type === 'unified' && state.view.filter === filter;
       h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
@@ -189,24 +186,20 @@ function renderSidebar() {
   if (state.dragItems) setTimeout(markDropCandidates, 0);  // překreslení během přetahování
   if (state.accounts.length) h += '<div class="nav-section">Účty</div>';
   for (const a of state.accounts) {
-    // Každý účet = jedna položka vedoucí do jeho doručené pošty.
-    const inbox = (state.folders[a.id] || []).find(f => f.role === 'inbox');
-    const active = state.view.type === 'folder' && state.view.accountId === a.id;
+    // Účet není seznam zpráv (ty jsou v pohledech a složkách nahoře) – kliknutí otevře jeho nastavení.
     const error = state.folderErrors[a.id];
-    h += `<div class="nav-item account-item ${active ? 'active' : ''}" data-acc="${a.id}"
-            title="${esc(error ? error : a.email)}">
+    h += `<div class="nav-item account-item" data-acc="${a.id}"
+            title="${esc(error ? error : `${a.email} – nastavení účtu`)}">
         <span class="dot" style="background:${accColor(a.id)}"></span>
         <span class="label">${esc(a.name || a.email)}</span>
-        ${error ? `<button class="icon-btn small warn" data-retry="${a.id}" title="Chyba: ${esc(error)} – kliknutím zkusit znovu">!</button>`
-                : badge(inbox?.unseen)}
-        <button class="icon-btn small edit" data-edit="${a.id}" title="Nastavení účtu">⚙</button>
+        ${error ? `<button class="icon-btn small warn" data-retry="${a.id}" title="Chyba: ${esc(error)} – kliknutím zkusit znovu">!</button>` : ''}
       </div>`;
   }
   $('#accounts').innerHTML = h;
 }
 
 $('#accounts').addEventListener('click', e => {
-  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-edit],[data-retry],[data-trash],[data-spam],[data-unified],[data-acc]');
+  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-retry],[data-trash],[data-spam],[data-unified],[data-acc]');
   if (!el) return;
   if (el.hasAttribute('data-trash')) return setView({ type: 'trash' });
   if (el.hasAttribute('data-spam')) return setView({ type: 'spam' });
@@ -216,13 +209,12 @@ $('#accounts').addEventListener('click', e => {
     const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
     return setView({ type: 'ufolder', id: +el.dataset.ufolder, title: f?.name || 'Složka' });
   }
-  if (el.dataset.edit) return openAccountDialog(el.dataset.edit);
   if (el.dataset.retry) {
     api('/api/sync', { method: 'POST' }).catch(() => {});
     return loadFolders(el.dataset.retry);
   }
   if (el.dataset.unified) return setView({ type: 'unified', filter: el.dataset.unified });
-  setView({ type: 'folder', accountId: el.dataset.acc, folder: 'INBOX', title: 'Doručená pošta' });
+  openAccountDialog(el.dataset.acc);
 });
 
 // --- kontextové menu položek levého panelu (pravé tlačítko myši)
@@ -301,11 +293,7 @@ async function markAllRead(info) {
     || (t.type === 'ufolder' && v.type === 'ufolder' && v.id === t.id)
     || (t.type === 'spam' && v.type === 'spam')
     || (t.type === 'account' && v.type === 'folder' && v.accountId === t.account_id && v.folder === 'INBOX');
-  if (isCurrent && t.view === 'unread') {  // Všechny nepřečtené: po označení nezbude nic
-    state.keepRead = new Map();
-    state.messages = [];
-    renderList();
-  } else if (isCurrent) {  // zobrazený seznam hned
+  if (isCurrent) {  // zobrazený seznam hned
     state.messages.forEach(m => { m.seen = true; });
     renderList();
   }
@@ -321,8 +309,7 @@ async function markAllRead(info) {
 function markNotificationsRead() {
   const vu = state.viewUnread;
   if (vu && vu.notifications) {
-    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu.notifications),
-                         unread: Math.max(0, (vu.unread ?? vu.all) - vu.notifications), notifications: 0 };
+    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu.notifications), notifications: 0 };
     renderSidebar();
   }
   api('/api/notifications/mark-read', { method: 'POST' })
@@ -337,7 +324,6 @@ function setView(view, reveal = null) {
   if (isNotifView(state.view) && !isNotifView(view) && state.settings?.notify_mark_read_on_leave)
     markNotificationsRead();
   state.view = view;
-  state.keepRead = new Map();
   state.selected = reveal ? new Set([reveal.key]) : new Set();
   state.anchor = reveal ? reveal.key : null;
   state.query = '';
@@ -395,10 +381,6 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
     else if (reveal) { qs.set('offset', 0); qs.set('limit', reveal.position + 20); }  // rovnou po hledanou zprávu
     else if (keepLoaded && loaded) { qs.set('offset', 0); qs.set('limit', loaded); }  // obnovit vše zobrazené
     let res;
-    if (v.type === 'unified' && v.filter === 'unread' && !state.query) {  // přečtené zprávy zatím nechat v seznamu
-      for (const m of state.messages) if (m.seen) state.keepRead.set(keyOf(m), [m.account_id, m.folder, m.uid]);
-      if (state.keepRead.size) qs.set('keep', JSON.stringify([...state.keepRead.values()]));
-    }
     if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
@@ -921,7 +903,7 @@ function leavesView(m, target) {
   if (target.type !== 'inbox') return true;                      // Smazané, složka
   if (target.account_id && target.account_id !== m.account_id) return v.type !== 'unified';
   if (m.folder !== 'INBOX') return true;                         // ze složky / Smazaných do doručené
-  if (v.type === 'unified' && target.view === 'notifications') return !['notifications', 'unread', 'all'].includes(v.filter);
+  if (v.type === 'unified' && target.view === 'notifications') return v.filter !== 'notifications';
   if (v.type === 'unified' && ['important', 'fyi'].includes(target.view)) return v.filter === 'notifications';
   return false;
 }
@@ -998,8 +980,6 @@ function dropTarget(el) {
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     if (v.type === 'unified' && v.filter === view) return null;
-    if (view === 'unread') return null;  // jen pohled, přesunout se sem nedá
-    if (view === 'all' && items.every(m => m.folder === 'INBOX')) return null;  // nic by se nezměnilo
     return { type: 'inbox', view };
   }
   if (el.dataset.acc) {

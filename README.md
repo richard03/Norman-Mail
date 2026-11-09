@@ -30,7 +30,7 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
 
 - **Pravidla pro spam:** označením zprávy jako *Spam* vznikne pravidlo „odesílatel je spam“. Nové zprávy od tohoto odesílatele synchronizace ve všech účtech přesune do spamu dřív, než se objeví v seznamu. Pravidla jsou přehledně v **Nastavení** (dole v levém sloupci), kde je lze mazat. Pro vlastní adresy pravidla nevznikají.
 - **Vzít na vědomí:** zprávy z doručené pošty, ve kterých nejste v poli Komu, tedy jste v kopii nebo ve skryté kopii. Tyto zprávy se nezobrazují v **Důležité**. Notifikace mají přednost.
-- **Důležité / Notifikace:** tlačítko *Notifikace* u zprávy označí jejího odesílatele za zdroj notifikací. Všechny jeho dosavadní i budoucí zprávy se pak zobrazují ve složce **Notifikace** a ne v **Důležité** (výchozí pohled po startu). **Všechny doručené** ukazuje obojí. **Všechny nepřečtené** ukazuje nepřečtené zprávy z doručené pošty všech účtů, notifikace nevyjímaje. Zpráva přečtená během prohlížení této složky v ní zůstane, dokud složku neopustíte. Zprávy zůstávají na serveru v doručené poště, jde jen o lokální třídění. U zprávy, která už notifikací je, se tlačítko změní na *Není notifikace*. Pravidla lze mazat v **Nastavení**.
+- **Důležité / Notifikace:** tlačítko *Notifikace* u zprávy označí jejího odesílatele za zdroj notifikací. Všechny jeho dosavadní i budoucí zprávy se pak zobrazují ve složce **Notifikace** a ne v **Důležité** (výchozí pohled po startu). Každá zpráva je v levém sloupci vidět právě v jednom seznamu, souhrnné pohledy typu „Všechny doručené“ záměrně nejsou. Zprávy zůstávají na serveru v doručené poště, jde jen o lokální třídění. U zprávy, která už notifikací je, se tlačítko změní na *Není notifikace*. Pravidla lze mazat v **Nastavení**.
 - **Nastavení notifikací** (v Nastavení pod pravidly):
   - *Když opustím sekci Notifikace, označit všechny notifikace jako přečtené* (výchozí: vypnuto). Uplatní se při přepnutí na jiný pohled.
   - *Mazat přečtené notifikace starší než týden* (výchozí: zapnuto).
@@ -75,7 +75,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 
 ## Co umí
 
-- Libovolný počet účtů a společnou složku **Všechny doručené**, která slučuje doručenou poštu ze všech účtů (účty se načítají paralelně a jsou barevně odlišené).
+- Libovolný počet účtů, jejichž doručená pošta se slučuje do pohledů **Důležité**, **Vzít na vědomí** a **Notifikace** (účty se načítají paralelně a jsou barevně odlišené). Kliknutí na účet v levém sloupci otevře jeho nastavení.
 - Nastavitelnou šířku sloupců: levý panel, seznam zpráv a kontext se dají rozšířit nebo zúžit tažením za okraj. Dvojklik na okraj vrátí výchozí šířku. Sloupec s tlačítky má pevnou šířku, čtení zprávy vyplní zbytek okna. Šířky se pamatují i po restartu.
 - Procházení všech složek každého účtu s počtem nepřečtených zpráv.
 - Čtení HTML i textových zpráv a stahování příloh. Vložené obrázky (`cid:`) se zobrazí přímo ve zprávě.

@@ -58,7 +58,6 @@ VIEW_FILTERS = {
     "important": f"NOT {IS_NOTIFICATION} AND {IS_DIRECT}",
     "fyi": f"NOT {IS_NOTIFICATION} AND NOT {IS_DIRECT}",   # Vzít na vědomí: jsem v kopii / skryté kopii
     "notifications": IS_NOTIFICATION,
-    "unread": "m.seen=0",                                    # Všechny nepřečtené
     "all": "1",
 }
 
@@ -233,15 +232,14 @@ class Database:
         rows = self._q(self._SELECT + " WHERE m.account_id=? AND m.folder=? AND m.uid=?", (acc_id, folder, uid))
         return self._to_dict(rows[0]) if rows else None
 
-    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None, keep=()) -> dict:
+    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None) -> dict:
         """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
-        nic nepřeskočí, ani když mezitím nějaké zprávy zmizely. keep = [(účet, složka, uid)], které
-        v seznamu zůstanou, i když už podmínce pohledu nevyhovují (přečtené ve Všech nepřečtených)."""
+        nic nepřeskočí, ani když mezitím nějaké zprávy zmizely."""
         if offset is None:
             offset = page * page_size
         if isinstance(folder, dict) and not folder:
             return {"messages": [], "total": 0, "has_more": False}
-        where, params = self._list_where(acc_ids, folder, view, keep)
+        where, params = self._list_where(acc_ids, folder, view)
         if search:
             where += " AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ?)"
             params += [f"%{search}%"] * 3
@@ -252,7 +250,7 @@ class Database:
                 "has_more": offset + page_size < total}
 
     @staticmethod
-    def _list_where(acc_ids, folder, view="all", keep=()):
+    def _list_where(acc_ids, folder, view="all"):
         """Podmínka seznamu: účty + složka, nebo {account_id: složka} (např. koše všech účtů)."""
         if isinstance(folder, dict):
             where = "WHERE (" + " OR ".join(["(m.account_id=? AND m.folder=?)"] * len(folder)) + ")"
@@ -260,11 +258,7 @@ class Database:
         else:
             where = f"WHERE m.account_id IN ({','.join('?' * len(acc_ids))}) AND m.folder=?"
             params = [*acc_ids, folder]
-        cond = VIEW_FILTERS[view]
-        if keep:
-            cond = f"({cond} OR " + " OR ".join(["(m.account_id=? AND m.folder=? AND m.uid=?)"] * len(keep)) + ")"
-            params += [x for k in keep for x in k]
-        return where + f" AND {cond}", params
+        return where + f" AND {VIEW_FILTERS[view]}", params
 
     def list_position(self, acc_ids, folder, view, acc_id, msg_folder, uid):
         """Pořadí zprávy (od 0) v seznamu se stejným řazením jako list_messages; None = v seznamu není."""
