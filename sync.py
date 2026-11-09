@@ -170,7 +170,7 @@ class SyncManager:
                                 break
                     self._last_full = time.time()
                 self.process_snoozes()
-                self.cleanup_notifications()
+                self.cleanup_categories()
                 self.apply_folder_rules()
                 if full:
                     self.bayes_maintenance()
@@ -335,7 +335,7 @@ class SyncManager:
 
     def _apply_bayes(self, acc, records):
         """Čerstvé nepřečtené zprávy posoudí bayesovským filtrem; rozpoznaný spam přesune do spamu.
-        Vrací zbylé záznamy. Lidé, kterým jsem psal, zdroje notifikací a zprávy pro složky se neposuzují."""
+        Vrací zbylé záznamy. Lidé, kterým jsem psal, zdroje notifikací a nedůležitých zpráv a zprávy pro složky se neposuzují."""
         now = time.time()
         fresh = [r for r in records if not r.get("deleted") and not r["seen"] and (r["date"] or now) > now - bayes.RECENT]
         if not fresh:
@@ -514,38 +514,42 @@ class SyncManager:
         folders = context_folders(self.db.folders(acc_id), self.db.user_folder_names(acc_id))
         return bool(folders) and all(f["complete"] and f["last_sync"] for f in folders)
 
-    # ------------------------------------------------------------------ úklid notifikací
+    # ------------------------------------------------------------------ úklid Notifikací a Nedůležitých
 
-    def cleanup_notifications(self):
-        """Podle nastavení smaže (do koše) notifikace starší než týden."""
+    CATEGORY_SETTINGS = {"notifications": "notify", "unimportant": "unimp"}  # předpona klíčů nastavení
+    CATEGORY_LOG = {"notifications": "notifikací", "unimportant": "nedůležitých zpráv"}
+
+    def cleanup_categories(self):
+        """Podle nastavení smaže (do koše) notifikace a nedůležité zprávy starší než týden."""
         settings = self.db.settings()
-        targets = []
-        if settings["notify_delete_read_after_week"]:
-            targets.append(True)
-        if settings["notify_delete_unread_after_week"]:
-            targets.append(False)
         cutoff = time.time() - db_module.WEEK
-        for seen in targets:
-            for acc_id, uids in self.db.notification_uids(seen=seen, older_than=cutoff).items():
-                acc = self.store.get(acc_id)
-                if acc is None:
-                    continue
-                try:
-                    with self.pool.get(acc) as M:
-                        mail.trash_uids(M, "INBOX", uids)
-                        self.db.delete_uids(acc_id, "INBOX", uids)
-                except Exception as e:
-                    self._error(acc, e)
-                    continue
-                log.info("Smazáno %d %s notifikací starších než týden (účet %s)",
-                         len(uids), "přečtených" if seen else "nepřečtených", acc["name"])
-                self.db.bump()
+        for cat, prefix in self.CATEGORY_SETTINGS.items():
+            targets = []
+            if settings[f"{prefix}_delete_read_after_week"]:
+                targets.append(True)
+            if settings[f"{prefix}_delete_unread_after_week"]:
+                targets.append(False)
+            for seen in targets:
+                for acc_id, uids in self.db.category_uids(cat, seen=seen, older_than=cutoff).items():
+                    acc = self.store.get(acc_id)
+                    if acc is None:
+                        continue
+                    try:
+                        with self.pool.get(acc) as M:
+                            mail.trash_uids(M, "INBOX", uids)
+                            self.db.delete_uids(acc_id, "INBOX", uids)
+                    except Exception as e:
+                        self._error(acc, e)
+                        continue
+                    log.info("Smazáno %d %s %s starších než týden (účet %s)", len(uids),
+                             "přečtených" if seen else "nepřečtených", self.CATEGORY_LOG[cat], acc["name"])
+                    self.db.bump()
 
-    def mark_notifications_read(self):
-        """Označí všechny notifikace jako přečtené – na serveru i v databázi. Zápis na server běží pod zámkem
-        spojení synchronizace, aby ho souběžná kontrola příznaků nepřepsala starým stavem."""
+    def mark_category_read(self, category):
+        """Označí všechny zprávy kategorie jako přečtené – na serveru i v databázi. Zápis na server běží pod
+        zámkem spojení synchronizace, aby ho souběžná kontrola příznaků nepřepsala starým stavem."""
         total = 0
-        for acc_id, uids in self.db.notification_uids(seen=False).items():
+        for acc_id, uids in self.db.category_uids(category, seen=False).items():
             acc = self.store.get(acc_id)
             if acc is None:
                 continue

@@ -65,8 +65,9 @@
     <button class="action" data-act="archive" disabled>
       <svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4"/></svg>Archivovat</button>
     <div class="col-title">Třídění</div>
-    <button class="action" data-act="notification" disabled
-            title="Označí tuto i všechny ostatní zprávy od stejného odesílatele jako notifikace">
+    <button class="action" data-act="unimportant" disabled>
+      <svg viewBox="0 0 24 24"><path d="M12 4v14M6 12l6 6 6-6"/></svg><span class="label">Nedůležité</span></button>
+    <button class="action" data-act="notification" disabled>
       <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span class="label">Notifikace</span></button>
     <button class="action" data-act="spam" disabled>
       <svg viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg><span class="label">Spam</span></button>
@@ -116,6 +117,26 @@
       <span class="spacer"></span>
       <button type="button" class="btn" id="ruleCancel">Zrušit</button>
       <button type="submit" class="btn primary" id="ruleSave">Zatřídit a uložit pravidlo</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Nedůležité / Notifikace: jen tato zpráva, nebo pravidlo podle odesílatele / předmětu -->
+<dialog id="categoryDialog" class="confirm category-dialog">
+  <form method="dialog">
+    <h2 id="categoryTitle">Nedůležité</h2>
+    <p id="categoryMessage" class="note"></p>
+    <div class="category-choices">
+      <button value="message" class="btn">Jen tento email
+        <span class="muted small">zařadí jen tuto zprávu, pravidlo nevznikne</span></button>
+      <button value="sender" class="btn" id="categorySender">Vše od tohoto odesílatele
+        <span class="muted small" id="categorySenderNote"></span></button>
+      <button value="subject" class="btn" id="categorySubject">Vše s tímto subjektem
+        <span class="muted small" id="categorySubjectNote"></span></button>
+    </div>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button value="cancel" class="btn">Zrušit</button>
     </div>
   </form>
 </dialog>
@@ -208,6 +229,7 @@
   </div>
   <div class="settings-body">
     <nav class="settings-nav">
+      <button type="button" data-section="unimportant">Nedůležité</button>
       <button type="button" data-section="spam">Spam</button>
       <button type="button" data-section="notifications">Notifikace</button>
       <div class="settings-nav-section">Složky</div>
@@ -216,6 +238,21 @@
     </nav>
 
     <section class="settings-main">
+      <div data-panel="unimportant">
+        <h3>Nedůležité</h3>
+        <p class="note">Zprávy odpovídající pravidlům (odesílatel nebo předmět) se zobrazují ve složce
+          <b>Nedůležité</b> místo <b>Důležité</b>. Pravidla vznikají tlačítkem <b>Nedůležité</b> u zprávy;
+          volba <b>Jen tento email</b> pravidlo nevytváří.</p>
+        <div class="options">
+          <label class="option"><input type="checkbox" data-setting="unimp_mark_read_on_leave">
+            Když opustím sekci Nedůležité, označit všechny nedůležité zprávy jako přečtené</label>
+          <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_week">
+            Mazat přečtené nedůležité zprávy starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="unimp_delete_unread_after_week">
+            Mazat nepřečtené nedůležité zprávy starší než týden</label>
+        </div>
+        <p class="note">Mazáním se zprávy přesouvají do koše. Odložené zprávy se nemažou.</p>
+      </div>
       <div data-panel="spam">
         <h3>Spam</h3>
         <p class="note">Pravidla vznikají označením zprávy jako <b>Spam</b>. Nové zprávy od těchto odesílatelů se
@@ -242,8 +279,9 @@
       </div>
       <div data-panel="notifications">
         <h3>Notifikace</h3>
-        <p class="note">Zprávy od odesílatelů z pravidel se zobrazují ve složce <b>Notifikace</b> místo
-          <b>Důležité</b>. Pravidla vznikají tlačítkem <b>Notifikace</b> u zprávy.</p>
+        <p class="note">Zprávy odpovídající pravidlům (odesílatel nebo předmět) se zobrazují ve složce
+          <b>Notifikace</b> místo <b>Důležité</b>. Pravidla vznikají tlačítkem <b>Notifikace</b> u zprávy;
+          volba <b>Jen tento email</b> pravidlo nevytváří.</p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="notify_mark_read_on_leave">
             Když opustím sekci Notifikace, označit všechny notifikace jako přečtené</label>
@@ -288,13 +326,17 @@
     </section>
 
     <aside class="settings-rules">
+      <div data-panel="unimportant">
+        <h3>Pravidla <span id="unimportantRulesCount" class="muted"></span></h3>
+        <ul id="unimportantRules" class="rules"></ul>
+      </div>
       <div data-panel="spam">
         <h3>Pravidla <span id="spamRulesCount" class="muted"></span></h3>
         <ul id="spamRules" class="rules"></ul>
       </div>
       <div data-panel="notifications">
-        <h3>Pravidla <span id="notifyRulesCount" class="muted"></span></h3>
-        <ul id="notifyRules" class="rules"></ul>
+        <h3>Pravidla <span id="notificationsRulesCount" class="muted"></span></h3>
+        <ul id="notificationsRules" class="rules"></ul>
       </div>
       <div data-panel="folder" id="folderRulesSection">
         <h3>Pravidla <span id="folderRulesCount" class="muted"></span></h3>

@@ -457,8 +457,12 @@ def message(acc_id, uid):
     database.set_flag(acc_id, folder, uid, "seen", True)
     data = mail.parse_message(raw, uid, folder, flags)
     data["snoozed_until"] = row["snoozed_until"] if row else None
-    senders = database.notify_senders()
-    data["notification"] = any(a["addr"].lower() in senders for a in data["from"])
+    if row:
+        data["notification"], data["unimportant"] = row["notification"], row["unimportant"]
+    else:
+        cat = database.categorizer()({**data, "account_id": acc_id,
+                                      "base_subject": mail.base_subject(data["subject"]).lower()})
+        data["notification"], data["unimportant"] = cat == "notifications", cat == "unimportant"
     data["bayes"] = None
     if row and database.spam_folders().get(acc_id) == folder:  # proč to filtr dal do spamu
         v = syncer.bayes.verdict(bayes.record_key(row))
@@ -549,29 +553,41 @@ def message_unsnooze(acc_id, uid):
     return jsonify(ok=True)
 
 
-@app.post("/api/accounts/<acc_id>/messages/<int:uid>/notification")
-def message_notification(acc_id, uid):
-    """Označí (value=true) / odznačí odesílatele zprávy jako zdroj notifikací – platí pro všechny jeho zprávy."""
+@app.post("/api/accounts/<acc_id>/messages/<int:uid>/categorize")
+def message_categorize(acc_id, uid):
+    """Notifikace / Nedůležité. scope: message = jen tato zpráva (bez pravidla), sender / subject = pravidlo
+    pro všechny zprávy od odesílatele / se stejným předmětem; value=false zprávu z kategorie vyřadí
+    (zruší i pravidla, která jí odpovídají)."""
     acc = account_or_404(acc_id)
     data = request.get_json(force=True)
     folder = folder_arg(data)
-    row = database.message(acc_id, folder, uid)
-    if row:
-        sender = row["from"][0]["addr"] if row["from"] else ""
-    else:
+    category, scope = data.get("category"), data.get("scope") or "message"
+    if category not in db.CATEGORIES or scope not in ("message", "sender", "subject"):
+        abort(400, "Neznámá kategorie.")
+    rec = database.message(acc_id, folder, uid)
+    if rec is None:
         with pool.get(acc) as M:
             mail._select(M, folder, readonly=True)
             recs = mail.fetch_header_records(M, [uid])
-        sender = recs[0]["from"][0]["addr"] if recs and recs[0]["from"] else ""
-    if not sender:
-        raise mail.MailError("Zpráva nemá adresu odesílatele.")
-    value = bool(data.get("value", True))
-    if value:
-        database.add_notify_rule(sender)
+        if not recs:
+            raise mail.MailError("Zpráva na serveru už není.")
+        rec = {**recs[0], "account_id": acc_id, "folder": folder}
+    sender = (rec["from"][0]["addr"] if rec["from"] else "").lower()
+    subject = rec.get("base_subject") or ""
+    other = next(c for c in db.CATEGORIES if c != category)
+    if not data.get("value", True):
+        database.uncategorize(rec, category)
+    elif scope == "message":
+        database.mark_message(rec, category)
     else:
-        database.remove_notify_sender(sender)
+        value = sender if scope == "sender" else subject
+        if not value:
+            raise mail.MailError("Zpráva nemá adresu odesílatele." if scope == "sender" else "Zpráva nemá předmět.")
+        database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
+        database.add_category_rule(category, scope, value)
     database.bump()
-    return jsonify(ok=True, sender=sender.lower(), notification=value)
+    view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
+    return jsonify(ok=True, sender=sender, subject=subject, view=view)
 
 
 # --------------------------------------------------------------------------
@@ -739,7 +755,8 @@ def message_to_folder(acc_id, uid):
 # --------------------------------------------------------------------------
 
 MAX_BULK = 5000
-INBOX_VIEWS = ("important", "fyi", "notifications", "all")
+INBOX_VIEWS = ("important", "fyi", "unimportant", "notifications", "all")
+CATEGORY_SETTING = {"notifications": "notify", "unimportant": "unimp"}  # předpona klíčů nastavení
 
 
 def pl(n, one, few, many):
@@ -820,13 +837,16 @@ def _move_warnings(items, target):
         return warnings
     view = target["view"]
     senders = {i["sender"] for i in items if i["sender"]}
-    notify = database.notify_senders()
-    new_senders = set()
-    if view == "notifications":
-        new_senders = senders - notify
-        notify = notify | senders
-    elif view in ("important", "fyi"):
-        notify = notify - senders
+    new_senders = senders - database.category_senders(view) if view in db.CATEGORIES else set()
+    category_of = database.categorizer()
+
+    def category_after(i):
+        """Kategorie zprávy po přesunu (přesun do pohledu Notifikace / Nedůležité / Důležité ji mění)."""
+        if view in db.CATEGORIES:
+            return view
+        if view in ("important", "fyi"):
+            return None
+        return category_of(i["rec"]) if i["rec"] else None
     arriving = [i for i in items if not i["stays"]]
     rules = sorted(database.folder_rules_active(), key=lambda r: db.RULE_KINDS.index(r["kind"]))
     by_folder, moved_away = {}, set()
@@ -843,19 +863,24 @@ def _move_warnings(items, target):
     settings = database.settings()
     cutoff = time.time() - db.WEEK
 
-    def doomed(seen, date, snoozed):
-        return (not snoozed and date and date < cutoff
-                and (settings["notify_delete_read_after_week"] if seen else settings["notify_delete_unread_after_week"]))
-    dragged = [i for i in items if (i["account_id"], i["folder"], i["uid"]) not in moved_away
-               and i["sender"] in notify and doomed(i["seen"], i["date"], i["snoozed"])]
-    if dragged:
-        n = len(dragged)
-        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než týden – jako notifikace by se podle "
+    def doomed(cat, seen, date, snoozed):
+        if cat not in db.CATEGORIES or snoozed or not date or date >= cutoff:
+            return False
+        return settings[f"{CATEGORY_SETTING[cat]}_delete_{'read' if seen else 'unread'}_after_week"]
+    dragged = {}
+    for i in items:
+        cat = category_after(i)
+        if (i["account_id"], i["folder"], i["uid"]) not in moved_away and doomed(cat, i["seen"], i["date"], i["snoozed"]):
+            dragged[cat] = dragged.get(cat, 0) + 1
+    for cat, n in dragged.items():
+        what = "notifikace" if cat == "notifications" else "nedůležité"
+        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než týden – jako {what} by se podle "
                         f"nastavení hned {pl(n, 'smazala', 'smazaly', 'smazalo')} (do Smazaných).")
     if new_senders:
         keys = {(i["account_id"], i["folder"], i["uid"]) for i in items}
         others = {(r["account_id"], r["uid"]) for r in database.inbox_from_senders(new_senders)
-                  if (r["account_id"], "INBOX", r["uid"]) not in keys and doomed(r["seen"], r["date"], r["snoozed"])}
+                  if (r["account_id"], "INBOX", r["uid"]) not in keys
+                  and doomed(view, r["seen"], r["date"], r["snoozed"])}
         if others:
             warnings.append("Kromě toho by se hned smazaly i starší zprávy od stejných odesílatelů, které už "
                             f"v doručené poště máte: {zprav(len(others))}.")
@@ -874,12 +899,20 @@ def messages_move():
     items, target = _parse_move(request.get_json(force=True))
     senders = {i["sender"] for i in items if i["sender"]}
     own = {a["email"].lower() for a in store.list_public()}
-    if target["type"] == "inbox" and target["view"] == "notifications":
+    if target["type"] == "inbox" and target["view"] in db.CATEGORIES:
+        other = next(c for c in db.CATEGORIES if c != target["view"])
         for s in senders - own:
-            database.add_notify_rule(s)
+            database.add_category_rule(target["view"], "sender", s)
+        for i in items:  # označení „jen tento email“ v druhé kategorii by mělo před pravidlem přednost
+            if i["rec"]:
+                database.unmark_message(i["rec"], other)
     elif target["type"] == "inbox" and target["view"] in ("important", "fyi"):
-        for s in senders:
-            database.remove_notify_sender(s)
+        for i in items:
+            for cat in db.CATEGORIES:
+                if i["rec"]:
+                    database.uncategorize(i["rec"], cat)
+                elif i["sender"]:
+                    database.remove_category_rule(cat, "sender", i["sender"])
     if target["type"] == "spam":
         for s in senders - own:
             database.add_spam_rule(s)
@@ -1023,19 +1056,26 @@ def bayes_reset():
     return jsonify(syncer.bayes.status())
 
 
-@app.post("/api/notifications/mark-read")
-def notifications_mark_read():
-    return jsonify(ok=True, count=syncer.mark_notifications_read())
+def _category_or_404(category):
+    if category not in db.CATEGORIES:
+        abort(404, "Neznámá kategorie.")
+    return category
 
 
-@app.get("/api/notification-rules")
-def notification_rules():
-    return jsonify(database.notify_rules())
+@app.post("/api/categories/<category>/mark-read")
+def category_mark_read(category):
+    """Po opuštění Notifikací / Nedůležitých (podle nastavení): vše označit jako přečtené."""
+    return jsonify(ok=True, count=syncer.mark_category_read(_category_or_404(category)))
 
 
-@app.delete("/api/notification-rules/<int:rule_id>")
-def notification_rule_delete(rule_id):
-    database.delete_notify_rule(rule_id)
+@app.get("/api/categories/<category>/rules")
+def category_rules(category):
+    return jsonify(database.category_rules(_category_or_404(category)))
+
+
+@app.delete("/api/categories/<category>/rules/<int:rule_id>")
+def category_rule_delete(category, rule_id):
+    database.delete_category_rule(_category_or_404(category), rule_id)
     database.bump()
     return jsonify(ok=True)
 
@@ -1233,13 +1273,14 @@ def search_remote():
         seq = search_seq["n"]
     is_stale = lambda: search_seq["n"] != seq
     if view not in (None, "all"):
-        senders, mine = database.notify_senders(), database.my_addresses()
+        category_of, mine = database.categorizer(), database.my_addresses()
 
     def in_view(m):
         if view in (None, "all"):
             return True
-        if any(a["addr"].lower() in senders for a in m["from"]):
-            return view == "notifications"
+        cat = category_of(m)
+        if cat:
+            return view == cat
         direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
         return view == ("important" if direct else "fyi")
 
@@ -1264,7 +1305,7 @@ def search_remote():
                     for r in mail.fetch_header_records(M, unknown):
                         if r.get("deleted"):
                             continue
-                        m = {k: v for k, v in r.items() if k in mail.LIST_FIELDS or k == "message_id"}
+                        m = {k: v for k, v in r.items() if k in mail.LIST_FIELDS or k in ("message_id", "base_subject")}
                         m.update(account_id=acc_id, folder=folder, folder_label=label, cc=r.get("cc", []),
                                  prio=0 if folder == "INBOX" else 1)
                         out.append(m)

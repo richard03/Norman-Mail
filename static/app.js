@@ -47,8 +47,16 @@ const state = {
 let listToken = 0;
 
 // Každá zpráva doručené pošty patří právě do jednoho z těchto pohledů (žádný souhrnný seznam navíc).
-const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['notifications', 'Notifikace']];
+const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['unimportant', 'Nedůležité'],
+                       ['notifications', 'Notifikace']];
 const UNIFIED_TITLE = Object.fromEntries(UNIFIED_VIEWS);
+// Kategorie, které určuje uživatel (tlačítka v Třídění, pravidla v Nastavení)
+const CATEGORIES = {
+  unimportant: { act: 'unimportant', title: 'Nedůležité', flag: 'unimportant', setting: 'unimp',
+                 off: 'Není nedůležité', in: 'do Nedůležitých', from: 'z Nedůležitých' },
+  notifications: { act: 'notification', title: 'Notifikace', flag: 'notification', setting: 'notify',
+                   off: 'Není notifikace', in: 'do Notifikací', from: 'z Notifikací' },
+};
 
 // ------------------------------------------------------------------ utility
 
@@ -230,8 +238,8 @@ function navItemInfo(el) {
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     return { label: UNIFIED_TITLE[view], target: { type: 'unified', view }, unread: state.viewUnread?.[view] || 0,
-             settings: view === 'notifications' ? () => openSettings('notifications') : null,
-             settingsNote: view === 'notifications' ? '' : 'Tento pohled nemá žádné nastavení' };
+             settings: CATEGORIES[view] ? () => openSettings(view) : null,
+             settingsNote: CATEGORIES[view] ? '' : 'Tento pohled nemá žádné nastavení' };
   }
   if (el.dataset.ufolder) {
     const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
@@ -306,24 +314,25 @@ async function markAllRead(info) {
   loadList({ quiet: true, keepLoaded: true });         // seznam z databáze (může se překrývat s cílem)
 }
 
-/** Po opuštění Notifikací: vše označit jako přečtené (počty hned, server na pozadí). */
-function markNotificationsRead() {
+/** Po opuštění Notifikací / Nedůležitých: vše označit jako přečtené (počty hned, server na pozadí). */
+function markCategoryRead(cat) {
   const vu = state.viewUnread;
-  if (vu && vu.notifications) {
-    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu.notifications), notifications: 0 };
+  if (vu && vu[cat]) {
+    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu[cat]), [cat]: 0 };
     renderSidebar();
   }
-  api('/api/notifications/mark-read', { method: 'POST' })
+  api(`/api/categories/${cat}/mark-read`, { method: 'POST' })
     .then(() => pollSync())
-    .catch(err => toast('Označení notifikací jako přečtených selhalo: ' + err.message, true));
+    .catch(err => toast(`Označení složky ${CATEGORIES[cat].title} jako přečtené selhalo: ` + err.message, true));
 }
 
-const isNotifView = v => v.type === 'unified' && v.filter === 'notifications';
+const viewCategory = v => (v.type === 'unified' && CATEGORIES[v.filter]) ? v.filter : null;
 
 /** reveal = otevřená zpráva, kterou má nový seznam obsahovat a nalistovat (pořadí od serveru). */
 function setView(view, reveal = null) {
-  if (isNotifView(state.view) && !isNotifView(view) && state.settings?.notify_mark_read_on_leave)
-    markNotificationsRead();
+  const left = viewCategory(state.view);
+  if (left && left !== viewCategory(view) && state.settings?.[`${CATEGORIES[left].setting}_mark_read_on_leave`])
+    markCategoryRead(left);
   state.view = view;
   setUnreadOnly(false);
   state.selected = reveal ? new Set([reveal.key]) : new Set();
@@ -672,7 +681,6 @@ async function openMessage(m) {
   try {
     const data = await cur.loading;
     if (cur.snoozedUntil !== undefined) data.snoozed_until = cur.snoozedUntil;   // odloženo během načítání
-    if (cur.notification !== undefined) data.notification = cur.notification;   // přepnuto během načítání
     cur.data = data;
     if (state.current !== cur) return;
     if (!m.seen) { m.seen = true; adjustUnseen(m.account_id, m.folder, -1); renderList(); }
@@ -809,20 +817,23 @@ function updateActions() {
   sb.querySelector('.label').textContent = inSpam ? 'Není spam' : 'Spam';
   sb.title = inSpam ? 'Vrátí zprávu do doručené pošty a odesílatel přestane být označený jako spam'
                     : 'Přesune zprávu do spamu; další zprávy od odesílatele půjdou rovnou do spamu';
-  const nb = $('#actions [data-act="notification"]');
-  const isNotif = !!state.current && isNotification(state.current);
-  nb.classList.toggle('active', isNotif);
-  nb.querySelector('.label').textContent = isNotif ? 'Není notifikace' : 'Notifikace';
-  nb.title = isNotif ? 'Odesílatel přestane být zdrojem notifikací (jeho zprávy se vrátí do Důležité)'
-                     : 'Označí tuto i všechny ostatní zprávy od stejného odesílatele jako notifikace';
+  for (const [cat, c] of Object.entries(CATEGORIES)) {
+    const b = $(`#actions [data-act="${c.act}"]`);
+    const on = !!state.current && inCategory(state.current, cat);
+    b.classList.toggle('active', on);
+    b.querySelector('.label').textContent = on ? c.off : c.title;
+    b.title = on ? `Vrátí zprávu do Důležité; zruší i pravidla, podle kterých se řadila ${c.in}`
+                 : `Zařadí tuto zprávu (nebo všechny od odesílatele / se stejným předmětem) ${c.in}`;
+  }
 }
 
 const MOVE_DONE = { archive: 'Zpráva archivována', spam: 'Zpráva přesunuta do spamu', delete: 'Zpráva přesunuta do Smazaných' };
 
-/** Je odesílatel zprávy zdroj notifikací? (z načtené zprávy, jinak z položky seznamu) */
-function isNotification(cur) {
-  if (cur.notification !== undefined) return cur.notification;
-  return !!(cur.data ? cur.data.notification : cur.item?.notification);
+/** Patří zpráva do kategorie? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
+function inCategory(cur, cat) {
+  if (cur.category !== undefined) return cur.category === cat;
+  const flag = CATEGORIES[cat].flag;
+  return !!(cur.data ? cur.data[flag] : cur.item?.[flag]);
 }
 
 /** Odpověď/přeposlání potřebují obsah zprávy – počkáme na jeho načtení. */
@@ -847,7 +858,8 @@ async function doAction(act, btn) {
     return moveItems([cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid }], { type: 'trash' });
   if (act === 'replyAll') return withLoadedMessage(cur, () => reply(true));
   if (act === 'forward') return withLoadedMessage(cur, forward);
-  if (act === 'notification') return toggleNotification(cur, btn);
+  if (act === 'notification') return categorize(cur, 'notifications', btn);
+  if (act === 'unimportant') return categorize(cur, 'unimportant', btn);
   if (act === 'rule') return openRuleDialog(cur);
   if (act === 'snoozeDay' || act === 'snoozeWeek') return snooze(cur, act === 'snoozeDay' ? 1 : 7, btn);
   if (!MOVE_DONE[act]) return;
@@ -935,21 +947,59 @@ function removeAndAdvance(cur, alsoRemove = null) {
   else clearCurrent('Žádná další zpráva');
 }
 
-/** Odesílatel zprávy = zdroj notifikací (nebo už ne). Platí pro všechny jeho zprávy. */
-async function toggleNotification(cur, btn) {
-  const value = !isNotification(cur);
+// Předmět bez Re:/Fw:/Odp: apod. – stejně jako mail.base_subject (podle něj se pravidlo pozná)
+const SUBJECT_PREFIX_RE = /^\s*(?:\[[^\]]{0,40}\]\s*)*(?:re|fw|fwd|odp|př|aw|wg|tr|sv|vs|rv|antw|ref|réf)\s*(?:\[\d+\]|\(\d+\))?\s*[:：]\s*/i;
+function baseSubject(s) {
+  for (let prev = null; prev !== s;) { prev = s; s = s.replace(SUBJECT_PREFIX_RE, ''); }
+  return s.split(/\s+/).filter(Boolean).join(' ');
+}
+
+/** Dialog „Jen tento email / Vše od tohoto odesílatele / Vše s tímto subjektem“; vrací volbu nebo null. */
+function askCategoryScope(cur, cat) {
+  const m = cur.data || cur.item || {};
+  const sender = m.from?.[0]?.addr || '';
+  const subject = m.subject && m.subject !== '(bez předmětu)' ? baseSubject(m.subject) : '';
+  $('#categoryTitle').textContent = CATEGORIES[cat].title;
+  $('#categoryMessage').textContent = [sender, subject].filter(Boolean).join(' – ');
+  $('#categorySender').disabled = !sender;
+  $('#categorySenderNote').textContent = sender ? `pravidlo pro všechny zprávy od ${sender}` : 'zpráva nemá odesílatele';
+  $('#categorySubject').disabled = !subject;
+  $('#categorySubjectNote').textContent = subject ? `pravidlo pro všechny zprávy s předmětem „${subject}“`
+                                                  : 'zpráva nemá předmět';
+  const dlg = $('#categoryDialog');
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.querySelector('button[value="message"]').focus();
+  return new Promise(resolve => dlg.addEventListener('close', () =>
+    resolve(['message', 'sender', 'subject'].includes(dlg.returnValue) ? dlg.returnValue : null), { once: true }));
+}
+
+/** Nedůležité / Notifikace: zařadit (jen zprávu, nebo pravidlem) – nebo, je-li už zařazená, vyřadit. */
+async function categorize(cur, cat, btn) {
+  const value = !inCategory(cur, cat);
+  const scope = value ? await askCategoryScope(cur, cat) : 'message';
+  if (!scope || state.current !== cur) return;
+  const c = CATEGORIES[cat];
   btn.classList.add('busy');
   try {
-    const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/notification`,
-      { method: 'POST', body: { folder: cur.folder, value } });
-    cur.notification = value;
-    if (cur.data) cur.data.notification = value;
-    toast(value ? `Zprávy od ${res.sender} se teď řadí do Notifikací` : `Zprávy od ${res.sender} se vrátily do Důležité`);
+    const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/categorize`,
+      { method: 'POST', body: { folder: cur.folder, category: cat, scope, value } });
+    // kam zpráva teď patří: odpověď serveru (uložená zpráva v doručené poště), jinak odhad
+    const now = res.view || (value ? cat : null);
+    cur.category = CATEGORIES[now] ? now : null;
+    toast(!value ? `Zpráva vyřazena ${c.from}`
+      : scope === 'message' ? `Zpráva zařazena ${c.in}`
+      : scope === 'sender' ? `Zprávy od ${res.sender} se teď řadí ${c.in}`
+      : `Zprávy s předmětem „${res.subject}“ se teď řadí ${c.in}`);
     const v = state.view;
-    const leavesView = v.type === 'unified'
-      && ((value && v.filter === 'important') || (!value && v.filter === 'notifications'));
-    if (leavesView) removeAndAdvance(cur, m => m.from.some(a => a.addr.toLowerCase() === res.sender));
-    else updateActions();
+    const leaves = v.type === 'unified' && cur.folder === 'INBOX' && (now ? now !== v.filter : v.filter === cat);
+    if (leaves) {
+      const also = !value ? null
+        : scope === 'sender' ? m => m.from.some(a => a.addr.toLowerCase() === res.sender)
+        : scope === 'subject' ? m => m.base_subject === res.subject : null;
+      removeAndAdvance(cur, also);
+    } else updateActions();
+    if (v.type === 'unified') loadList({ quiet: true, keepLoaded: true });  // další zprávy podle pravidla
     pollSync();  // počty v levém sloupci
   } catch (err) {
     toast(err.message, true);
@@ -1024,8 +1074,8 @@ function leavesView(m, target) {
   if (target.type !== 'inbox') return true;                      // Smazané, složka
   if (target.account_id && target.account_id !== m.account_id) return v.type !== 'unified';
   if (m.folder !== 'INBOX') return true;                         // ze složky / Smazaných do doručené
-  if (v.type === 'unified' && target.view === 'notifications') return v.filter !== 'notifications';
-  if (v.type === 'unified' && ['important', 'fyi'].includes(target.view)) return v.filter === 'notifications';
+  if (v.type === 'unified' && CATEGORIES[target.view]) return v.filter !== target.view;
+  if (v.type === 'unified' && ['important', 'fyi'].includes(target.view)) return !!CATEGORIES[v.filter];
   return false;
 }
 
@@ -1050,7 +1100,7 @@ function targetLabel(target) {
   if (state.view.type === 'spam' && target.view === 'all' && !target.account_id) return 'Není spam – vráceno do doručené pošty';
   if (target.type === 'ufolder') return `Přesunuto do složky ${state.userFolders.find(f => f.id === target.id)?.name || ''}`;
   if (target.account_id) { const a = accById(target.account_id); return `Přesunuto do doručené pošty účtu ${a?.name || a?.email || ''}`; }
-  return `Přesunuto do ${{ important: 'Důležité', fyi: 'Vzít na vědomí', notifications: 'Notifikací',
+  return `Přesunuto do ${{ important: 'Důležité', fyi: 'Vzít na vědomí', unimportant: 'Nedůležitých', notifications: 'Notifikací',
                            all: 'doručené pošty' }[target.view]}`;
 }
 
@@ -1863,15 +1913,15 @@ $('#folderDeletePanel').addEventListener('click', async e => {
     state.editingFolder = null;
     await loadUserFolders();
     if (state.userFolders.length) openFolderDialog(state.userFolders[0].id);
-    else showSettingsSection('spam');
+    else showSettingsSection('unimportant');
   } catch (err) { $('#folderError').textContent = err.message; }
 });
 
 // ------------------------------------------------------------------ nastavení
 
-const RULE_KINDS = { sender: 'Odesílatel' };
+const RULE_KINDS = { sender: 'Odesílatel', subject: 'Předmět' };
 
-let settingsSection = 'spam';
+let settingsSection = 'unimportant';
 
 /** Přepne téma v levém sloupci nastavení (prostřední a pravý sloupec ukážou jeho obsah). */
 function showSettingsSection(section) {
@@ -1905,14 +1955,16 @@ function markSettingsNav() {
 
 /** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil. */
 async function openSettings(section = settingsSection, folderId = state.editingFolder) {
-  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'spam';
-  $('#spamRules').innerHTML = $('#notifyRules').innerHTML = '<li class="empty-rules">Načítám…</li>';
+  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'unimportant';
+  $('#spamRules').innerHTML = $('#notificationsRules').innerHTML = $('#unimportantRules').innerHTML =
+    '<li class="empty-rules">Načítám…</li>';
   renderSettingsFolders();
   renderSettingOptions();
   if (section !== 'folder') showSettingsSection(section);
   $('#settingsDialog').showModal();
   if (section === 'folder') openFolderDialog(folderId);
-  await Promise.all([renderSpamRules(), renderNotifyRules(), renderBayesStatus(), loadSettings().then(renderSettingOptions)]);
+  await Promise.all([renderSpamRules(), ...Object.keys(CATEGORIES).map(renderCategoryRules), renderBayesStatus(),
+                     loadSettings().then(renderSettingOptions)]);
 }
 
 $('#settingsDialog .settings-nav').addEventListener('click', e => {
@@ -1988,44 +2040,41 @@ document.querySelectorAll('[data-setting]').forEach(cb => cb.addEventListener('c
   renderSettingOptions();
 }));
 
-async function renderNotifyRules() {
+/** Pravidla Nedůležitých / Notifikací v Nastavení (seznam #unimportantRules / #notificationsRules). */
+async function renderCategoryRules(cat) {
+  const list = $(`#${cat}Rules`);
   let rules;
-  try { rules = await api('/api/notification-rules'); } catch (e) {
-    $('#notifyRules').innerHTML = `<li class="empty-rules error">${esc(e.message)}</li>`;
+  try { rules = await api(`/api/categories/${cat}/rules`); } catch (e) {
+    list.innerHTML = `<li class="empty-rules error">${esc(e.message)}</li>`;
     return;
   }
-  $('#notifyRulesCount').textContent = rules.length ? `(${rules.length})` : '';
-  $('#notifyRules').innerHTML = rules.length ? rules.map(r => `
+  $(`#${cat}RulesCount`).textContent = rules.length ? `(${rules.length})` : '';
+  list.innerHTML = rules.length ? rules.map(r => `
     <li class="rule">
       <div class="rule-main">
         <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
         <div class="rule-meta">${RULE_KINDS[r.kind] || r.kind} · přidáno ${new Date(r.created * 1000).toLocaleDateString('cs-CZ')}
-          · ${r.messages} ${r.messages === 1 ? 'zpráva' : (r.messages >= 2 && r.messages <= 4 ? 'zprávy' : 'zpráv')} v doručené poště</div>
+          · ${zprav(r.messages)} v doručené poště</div>
       </div>
-      <button type="button" class="btn danger" data-notify-rule="${r.id}" data-value="${esc(r.value)}" title="Smazat pravidlo">Smazat</button>
+      <button type="button" class="btn danger" data-category-rule="${r.id}" data-category="${cat}" title="Smazat pravidlo">Smazat</button>
     </li>`).join('')
-    : '<li class="empty-rules">Zatím žádná pravidla. Vzniknou tlačítkem Notifikace u zprávy.</li>';
+    : `<li class="empty-rules">Zatím žádná pravidla. Vzniknou tlačítkem ${CATEGORIES[cat].title} u zprávy.</li>`;
 }
 
-$('#notifyRules').addEventListener('click', async e => {
-  const btn = e.target.closest('[data-notify-rule]');
+document.querySelectorAll('#unimportantRules, #notificationsRules').forEach(list => list.addEventListener('click', async e => {
+  const btn = e.target.closest('[data-category-rule]');
   if (!btn) return;
   btn.disabled = true;
+  const cat = btn.dataset.category;
   try {
-    await api('/api/notification-rules/' + btn.dataset.notifyRule, { method: 'DELETE' });
+    await api(`/api/categories/${cat}/rules/${btn.dataset.categoryRule}`, { method: 'DELETE' });
     toast('Pravidlo smazáno – zprávy se vrátily do Důležité');
-    const cur = state.current;
-    const from = cur ? (cur.data || cur.item)?.from || [] : [];
-    if (from.some(a => a.addr.toLowerCase() === btn.dataset.value)) {
-      cur.notification = false;
-      if (cur.data) cur.data.notification = false;
-      updateActions();
-    }
-    await renderNotifyRules();
+    if (state.current) { delete state.current.category; updateActions(); }
+    await renderCategoryRules(cat);
     if (state.view.type === 'unified') loadList({ quiet: true });
     pollSync();
   } catch (err) { toast(err.message, true); btn.disabled = false; }
-});
+}));
 
 async function renderSpamRules() {
   let rules;

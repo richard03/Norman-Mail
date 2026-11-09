@@ -46,17 +46,46 @@ CREATE TABLE IF NOT EXISTS my_addresses(
 CREATE TABLE IF NOT EXISTS notify_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
     created REAL, UNIQUE(kind, value));
+CREATE TABLE IF NOT EXISTS unimportant_rules(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
+    created REAL, UNIQUE(kind, value));
+CREATE TABLE IF NOT EXISTS message_marks(
+    key TEXT PRIMARY KEY, category TEXT NOT NULL, created REAL);
 """
 
-# Zpráva je notifikace, pokud její odesílatel odpovídá některému pravidlu (přesná shoda adresy).
-IS_NOTIFICATION = ("EXISTS (SELECT 1 FROM notify_rules r WHERE r.kind='sender' "
-                   "AND instr(m.from_addrs, ',' || r.value || ',') > 0)")
+# Kategorie doručené pošty, které určuje uživatel: pravidla (odesílatel / předmět) nebo označení jedné zprávy.
+CATEGORIES = ("notifications", "unimportant")
+CATEGORY_TABLES = {"notifications": "notify_rules", "unimportant": "unimportant_rules"}
+CATEGORY_RULE_KINDS = ("sender", "subject")
+# Klíč zprávy pro označení „jen tento email“ – Message-ID (přežije přesun), jinak umístění zprávy.
+MSG_KEY = "COALESCE(NULLIF(m.message_id, ''), m.account_id || '|' || m.folder || '|' || m.uid)"
+
+
+def message_key(rec) -> str:
+    return rec.get("message_id") or f"{rec['account_id']}|{rec['folder']}|{rec['uid']}"
+
+
+def _category_rule(cat):
+    return (f"EXISTS (SELECT 1 FROM {CATEGORY_TABLES[cat]} r WHERE "
+            "(r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0) "
+            "OR (r.kind='subject' AND m.base_subject = r.value))")
+
+
+# Kategorie zprávy (jediný výraz, vyhodnotí se jednou): označení jedné zprávy má přednost před pravidly;
+# když zprávě odpovídají pravidla obou kategorií, vyhrávají Notifikace. NULL = žádná kategorie.
+CATEGORY = (f"COALESCE((SELECT k.category FROM message_marks k WHERE k.key={MSG_KEY}), "
+            f"CASE WHEN {_category_rule('notifications')} THEN 'notifications' "
+            f"WHEN {_category_rule('unimportant')} THEN 'unimportant' END)")
+IS_NOTIFICATION = f"({CATEGORY}) IS 'notifications'"
+IS_UNIMPORTANT = f"({CATEGORY}) IS 'unimportant'"
+CATEGORY_FILTERS = {"notifications": IS_NOTIFICATION, "unimportant": IS_UNIMPORTANT}
 # Zpráva je přímo pro mě, pokud je některá z mých adres (daného účtu) v poli Komu.
 IS_DIRECT = ("EXISTS (SELECT 1 FROM my_addresses a WHERE a.account_id=m.account_id "
              "AND instr(m.to_addrs, ',' || a.email || ',') > 0)")
 VIEW_FILTERS = {
-    "important": f"NOT {IS_NOTIFICATION} AND {IS_DIRECT}",
-    "fyi": f"NOT {IS_NOTIFICATION} AND NOT {IS_DIRECT}",   # Vzít na vědomí: jsem v kopii / skryté kopii
+    "important": f"({CATEGORY}) IS NULL AND {IS_DIRECT}",
+    "fyi": f"({CATEGORY}) IS NULL AND NOT {IS_DIRECT}",  # Vzít na vědomí: jsem v kopii / skryté kopii
+    "unimportant": IS_UNIMPORTANT,
     "notifications": IS_NOTIFICATION,
     "all": "1",
 }
@@ -73,6 +102,9 @@ DEFAULT_SETTINGS = {
     "notify_mark_read_on_leave": False,       # po opuštění Notifikací označit všechny za přečtené
     "notify_delete_read_after_week": True,    # mazat přečtené notifikace starší než týden
     "notify_delete_unread_after_week": False,  # mazat nepřečtené notifikace starší než týden
+    "unimp_mark_read_on_leave": False,        # totéž pro Nedůležité
+    "unimp_delete_read_after_week": True,
+    "unimp_delete_unread_after_week": False,
     "bayes_enabled": True,                    # bayesovský filtr přesouvá rozpoznaný spam
     "bayes_sensitivity": "medium",            # high / medium / low
 }
@@ -228,10 +260,12 @@ class Database:
             "date": r["date"], "seen": bool(r["seen"]), "flagged": bool(r["flagged"]),
             "has_attachments": bool(r["has_attachments"]), "size": r["size"],
             "snoozed_until": r["snoozed_until"] if "snoozed_until" in r.keys() else None,
-            "notification": bool(r["is_notification"]) if "is_notification" in r.keys() else False,
+            "notification": "category" in r.keys() and r["category"] == "notifications",
+            "unimportant": "category" in r.keys() and r["category"] == "unimportant",
         }
 
-    _SELECT = f"""SELECT m.*, s.until AS snoozed_until, {IS_NOTIFICATION} AS is_notification FROM messages m
+    _CATS = f"{CATEGORY} AS category"
+    _SELECT = f"""SELECT m.*, s.until AS snoozed_until, {_CATS} FROM messages m
                  LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid"""
 
     def message(self, acc_id, folder, uid):
@@ -242,10 +276,11 @@ class Database:
 
     # Kde zprávu v aplikaci uvidíte: složka aplikace, pohled doručené pošty, Spam, Smazané, jinak název složky.
     # Priorita pro odstranění duplicit (Gmail: zpráva je v doručené poště i ve „Všech zprávách“).
-    _LABELED = f"""SELECT m.*, s.until AS snoozed_until, {IS_NOTIFICATION} AS is_notification,
+    _LABELED = f"""SELECT m.*, s.until AS snoozed_until, {_CATS},
             CASE WHEN u.name IS NOT NULL THEN u.name
-                 WHEN m.folder='INBOX' THEN CASE WHEN {IS_NOTIFICATION} THEN 'Notifikace'
-                                                 WHEN {IS_DIRECT} THEN 'Důležité' ELSE 'Vzít na vědomí' END
+                 WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN 'Notifikace'
+                                                 WHEN 'unimportant' THEN 'Nedůležité'
+                                                 ELSE CASE WHEN {IS_DIRECT} THEN 'Důležité' ELSE 'Vzít na vědomí' END END
                  WHEN f.role='trash' THEN 'Smazané' WHEN f.role='junk' THEN 'Spam'
                  ELSE COALESCE(f.display, m.folder) END AS folder_label,
             CASE WHEN m.folder='INBOX' OR u.name IS NOT NULL THEN 0 WHEN f.role='all' THEN 2 ELSE 1 END AS prio
@@ -355,18 +390,23 @@ class Database:
             WHERE account_id=? AND folder=? AND uid=?""", (*params, acc_id, msg_folder, uid))
         return rows[0][0] if rows else None
 
+    # pohled doručené pošty, do kterého zpráva patří
+    _VIEW = f"COALESCE({CATEGORY}, CASE WHEN {IS_DIRECT} THEN 'important' ELSE 'fyi' END)"
+
     def view_of(self, acc_id, folder, uid):
-        """Pohled sloučené doručené pošty (important / fyi / notifications), do kterého zpráva patří."""
-        for view in ("notifications", "important", "fyi"):
-            if self._q(f"SELECT 1 FROM messages m WHERE m.account_id=? AND m.folder=? AND m.uid=? AND {VIEW_FILTERS[view]}",
-                       (acc_id, folder, uid)):
-                return view
-        return "all"
+        """Pohled sloučené doručené pošty (important / fyi / unimportant / notifications), kam zpráva patří."""
+        rows = self._q(f"SELECT {self._VIEW} FROM messages m WHERE m.account_id=? AND m.folder=? AND m.uid=?",
+                       (acc_id, folder, uid))
+        return rows[0][0] if rows else "all"
 
     def view_unread(self, folder="INBOX") -> dict:
-        """Počty nepřečtených pro pohledy Důležité / Notifikace / Všechny doručené."""
-        return {view: self._q(f"SELECT COALESCE(SUM(1 - seen), 0) FROM messages m WHERE m.folder=? AND {cond}",
-                              (folder,))[0][0] for view, cond in VIEW_FILTERS.items()}
+        """Počty nepřečtených pro pohledy doručené pošty (jedním průchodem)."""
+        out = {view: 0 for view in VIEW_FILTERS}
+        for view, n in self._q(f"SELECT {self._VIEW} AS v, COUNT(*) FROM messages m WHERE m.folder=? AND m.seen=0 "
+                               "GROUP BY v", (folder,)):
+            out[view] = n
+        out["all"] = sum(n for v, n in out.items() if v != "all")
+        return out
 
     # ------------------------------------------------------------------ koš („Smazané“)
 
@@ -456,7 +496,7 @@ class Database:
         a lidé, kterým jsem někdy psal (jsou v Komu/Kopie odeslané pošty)."""
         senders = {s.lower() for s in senders if s}
         own = {r[0].lower() for r in self._q("SELECT email FROM my_addresses")}
-        safe = senders & (own | self.notify_senders())
+        safe = senders & (own | self.category_senders("notifications") | self.category_senders("unimportant"))
         for s in senders - safe:
             if self._q("""SELECT 1 FROM messages m JOIN folders f ON f.account_id=m.account_id AND f.name=m.folder
                           AND f.role='sent' WHERE instr(m.to_addrs, ?) > 0 OR instr(m.cc_addrs, ?) > 0 LIMIT 1""",
@@ -494,13 +534,13 @@ class Database:
                 self._q("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("setting:" + k, json.dumps(v)))
         return self.settings()
 
-    # ------------------------------------------------------------------ hromadné operace s notifikacemi
+    # ------------------------------------------------------------------ hromadné operace s Notifikacemi / Nedůležitými
 
-    def notification_uids(self, seen=None, older_than=None) -> dict:
-        """{account_id: [uid, ...]} notifikací v doručené poště. Odložené zprávy se vynechávají."""
+    def category_uids(self, category, seen=None, older_than=None) -> dict:
+        """{account_id: [uid, ...]} zpráv kategorie v doručené poště. Odložené zprávy se vynechávají."""
         sql = f"""SELECT m.account_id, m.uid FROM messages m
                   LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
-                  WHERE m.folder='INBOX' AND {IS_NOTIFICATION} AND s.uid IS NULL"""
+                  WHERE m.folder='INBOX' AND {CATEGORY_FILTERS[category]} AND s.uid IS NULL"""
         params = []
         if seen is not None:
             sql += " AND m.seen=?"
@@ -629,28 +669,74 @@ class Database:
                            WHERE m.account_id=f.account_id AND m.folder=f.imap_name)
             FROM user_folders f""")}
 
-    # ------------------------------------------------------------------ pravidla pro notifikace
+    # ------------------------------------------------------------------ Notifikace / Nedůležité: pravidla a označení
 
-    def add_notify_rule(self, sender):
-        sender = sender.lower()
-        self._q("INSERT OR IGNORE INTO notify_rules(kind, value, created) VALUES('sender', ?, ?)", (sender, time.time()))
-        return self._q("SELECT id FROM notify_rules WHERE kind='sender' AND value=?", (sender,))[0][0]
+    def add_category_rule(self, category, kind, value):
+        """Pravidlo kategorie (odesílatel / předmět). Stejné pravidlo z druhé kategorie zmizí."""
+        assert category in CATEGORIES and kind in CATEGORY_RULE_KINDS
+        value = value.lower()
+        other = CATEGORY_TABLES[next(c for c in CATEGORIES if c != category)]
+        table = CATEGORY_TABLES[category]
 
-    def remove_notify_sender(self, sender):
-        self._q("DELETE FROM notify_rules WHERE kind='sender' AND value=?", (sender.lower(),))
+        def run(c):
+            c.execute(f"DELETE FROM {other} WHERE kind=? AND value=?", (kind, value))
+            c.execute(f"INSERT OR IGNORE INTO {table}(kind, value, created) VALUES(?, ?, ?)", (kind, value, time.time()))
+        self._tx(run)
 
-    def delete_notify_rule(self, rule_id):
-        self._q("DELETE FROM notify_rules WHERE id=?", (rule_id,))
+    def remove_category_rule(self, category, kind, value):
+        self._q(f"DELETE FROM {CATEGORY_TABLES[category]} WHERE kind=? AND value=?", (kind, value.lower()))
 
-    def notify_senders(self) -> set:
-        return {r[0] for r in self._q("SELECT value FROM notify_rules WHERE kind='sender'")}
+    def delete_category_rule(self, category, rule_id):
+        self._q(f"DELETE FROM {CATEGORY_TABLES[category]} WHERE id=?", (rule_id,))
 
-    def notify_rules(self):
+    def category_senders(self, category) -> set:
+        return {r[0] for r in self._q(f"SELECT value FROM {CATEGORY_TABLES[category]} WHERE kind='sender'")}
+
+    def category_rules(self, category):
         """Pravidla s počtem zpráv, které jim v doručené poště odpovídají."""
-        return [dict(r) for r in self._q("""
+        return [dict(r) for r in self._q(f"""
             SELECT r.*, (SELECT COUNT(*) FROM messages m WHERE m.folder='INBOX'
-                         AND instr(m.from_addrs, ',' || r.value || ',') > 0) AS messages
-            FROM notify_rules r ORDER BY r.created DESC""")]
+                         AND ((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0)
+                              OR (r.kind='subject' AND m.base_subject = r.value))) AS messages
+            FROM {CATEGORY_TABLES[category]} r ORDER BY r.created DESC""")]
+
+    def mark_message(self, rec, category):
+        """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
+        assert category in CATEGORIES
+        self._q("INSERT OR REPLACE INTO message_marks VALUES(?, ?, ?)", (message_key(rec), category, time.time()))
+
+    def unmark_message(self, rec, category=None):
+        if category:
+            self._q("DELETE FROM message_marks WHERE key=? AND category=?", (message_key(rec), category))
+        else:
+            self._q("DELETE FROM message_marks WHERE key=?", (message_key(rec),))
+
+    def uncategorize(self, rec, category):
+        """Zpráva přestane patřit do kategorie: zruší se její označení i pravidla, která jí odpovídají
+        (odesílatel, předmět) – ta platila i pro ostatní zprávy."""
+        self.unmark_message(rec, category)
+        for a in rec["from"]:
+            if a.get("addr"):
+                self.remove_category_rule(category, "sender", a["addr"])
+        if rec.get("base_subject"):
+            self.remove_category_rule(category, "subject", rec["base_subject"])
+
+    def categorizer(self):
+        """Funkce zpráva → "notifications" / "unimportant" / None (stejná logika jako IS_NOTIFICATION
+        a IS_UNIMPORTANT v SQL) – pro zprávy, které nejsou v databázi."""
+        marks = dict(self._q("SELECT key, category FROM message_marks"))
+        rules = {cat: {(r[0], r[1]) for r in self._q(f"SELECT kind, value FROM {CATEGORY_TABLES[cat]}")}
+                 for cat in CATEGORIES}
+
+        def category(rec):
+            mark = marks.get(message_key(rec))
+            if mark:
+                return mark
+            keys = {("sender", a["addr"].lower()) for a in rec["from"] if a.get("addr")}
+            if rec.get("base_subject"):
+                keys.add(("subject", rec["base_subject"]))
+            return next((cat for cat in CATEGORIES if keys & rules[cat]), None)
+        return category
 
     # ------------------------------------------------------------------ kontext
 

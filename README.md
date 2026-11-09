@@ -25,19 +25,24 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
 - **Seznamy zpráv se zobrazují okamžitě z databáze.** Synchronizace na pozadí (vlastní IMAP spojení, každou minutu a po každé akci) ze serveru jen doplňuje rozdíly: nové zprávy, smazané zprávy a změny příznaků provedené v jiných klientech. Nejdřív se synchronizuje doručená pošta všech účtů, potom ostatní složky. Historie velkých složek se dohrává po dávkách od nejnovějších zpráv.
 - **Otevřené zprávy** (včetně příloh) se uloží celé, takže se podruhé otevřou bez stahování a jdou přečíst i offline. Výjimkou jsou zprávy větší než 25 MB.
 - **Kontext** (související zprávy) se po dosynchronizování složek počítá přímo z databáze. Do té doby se dohledává na serveru.
-  Kliknutím na zprávu v kontextu se zpráva otevře a zároveň se nalistuje v seznamu vlevo. Mailer ji hledá v tomto pořadí: složka aplikace → Důležité / Vzít na vědomí / Notifikace → Spam / Smazané. Zprávu z ostatních složek (Odeslané, Archiv…) ukáže v dané složce účtu.
+  Kliknutím na zprávu v kontextu se zpráva otevře a zároveň se nalistuje v seznamu vlevo. Mailer ji hledá v tomto pořadí: složka aplikace → Důležité / Vzít na vědomí / Nedůležité / Notifikace → Spam / Smazané. Zprávu z ostatních složek (Odeslané, Archiv…) ukáže v dané složce účtu.
 - **Odložené zprávy:** akce *Odložit o den* / *Odložit o týden* označí zprávu jako přečtenou a zítra, resp. za týden v 8:00, ji zase označí jako nepřečtenou. Pokud aplikace v tu chvíli neběží, stane se to hned po dalším spuštění.
 
 - **Pravidla pro spam:** označením zprávy jako *Spam* vznikne pravidlo „odesílatel je spam“. Nové zprávy od tohoto odesílatele synchronizace ve všech účtech přesune do spamu dřív, než se objeví v seznamu. Pravidla jsou přehledně v **Nastavení** (dole v levém sloupci), kde je lze mazat. Pro vlastní adresy pravidla nevznikají.
-- **Vzít na vědomí:** zprávy z doručené pošty, ve kterých nejste v poli Komu, tedy jste v kopii nebo ve skryté kopii. Tyto zprávy se nezobrazují v **Důležité**. Notifikace mají přednost.
-- **Důležité / Notifikace:** tlačítko *Notifikace* u zprávy označí jejího odesílatele za zdroj notifikací. Všechny jeho dosavadní i budoucí zprávy se pak zobrazují ve složce **Notifikace** a ne v **Důležité** (výchozí pohled po startu). Každá zpráva je v levém sloupci vidět právě v jednom seznamu, souhrnné pohledy typu „Všechny doručené“ záměrně nejsou. Zprávy zůstávají na serveru v doručené poště, jde jen o lokální třídění. U zprávy, která už notifikací je, se tlačítko změní na *Není notifikace*. Pravidla lze mazat v **Nastavení**.
-- **Nastavení notifikací** (v Nastavení pod pravidly):
-  - *Když opustím sekci Notifikace, označit všechny notifikace jako přečtené* (výchozí: vypnuto). Uplatní se při přepnutí na jiný pohled.
-  - *Mazat přečtené notifikace starší než týden* (výchozí: zapnuto).
-  - *Mazat nepřečtené notifikace starší než týden* (výchozí: vypnuto).
+- **Vzít na vědomí:** zprávy z doručené pošty, ve kterých nejste v poli Komu, tedy jste v kopii nebo ve skryté kopii. Tyto zprávy se nezobrazují v **Důležité**. Nedůležité a Notifikace mají přednost.
+- **Nedůležité / Notifikace:** tlačítka *Nedůležité* a *Notifikace* (sloupec s tlačítky, sekce *Třídění*) nabídnou, co zařadit:
+  - *Jen tento email*: zařadí jen tuto zprávu, pravidlo nevzniká;
+  - *Vše od tohoto odesílatele*: pravidlo pro všechny dosavadní i budoucí zprávy od odesílatele;
+  - *Vše s tímto subjektem*: pravidlo pro všechny zprávy se stejným předmětem (bez předpon Re:/Fw:, bez ohledu na velikost písmen).
+
+  Zprávy se pak zobrazují ve složce **Nedůležité**, resp. **Notifikace**, a ne v **Důležité** (výchozí pohled po startu). Každá zpráva je v levém sloupci vidět právě v jednom seznamu, souhrnné pohledy typu „Všechny doručené“ záměrně nejsou. Zprávy zůstávají na serveru v doručené poště, jde jen o lokální třídění. Zařazení jedné zprávy má přednost před pravidly; když zprávě odpovídají pravidla obou složek, vyhrají Notifikace. Stejné pravidlo (odesílatel nebo předmět) může být jen v jedné z nich. U zprávy, která už nedůležitá / notifikací je, se tlačítko změní na *Není nedůležité* / *Není notifikace*: zpráva se vrátí do Důležité a zruší se i pravidla, podle kterých se tam řadila. Pravidla lze mazat v **Nastavení** (sekce Nedůležité je první, Notifikace pod Spamem).
+- **Nastavení Nedůležitých a Notifikací** (každá složka zvlášť):
+  - *Když opustím sekci …, označit všechny zprávy jako přečtené* (výchozí: vypnuto). Uplatní se při přepnutí na jiný pohled.
+  - *Mazat přečtené zprávy starší než týden* (výchozí: zapnuto).
+  - *Mazat nepřečtené zprávy starší než týden* (výchozí: vypnuto).
 
   Mazání probíhá v rámci synchronizace (přesun do koše). Odložené zprávy se nemažou.
-- **Složky** (levý sloupec, *+ Přidat složku*): každá složka v aplikaci míří na **jednu konkrétní složku na jednom účtu**, buď existující na serveru, nebo novou. Konfigurace složek je v **Nastavení** pod Spamem a Notifikacemi, v sekci **Složky**. Každá složka tam má svou obrazovku: uprostřed je konfigurace, vpravo pravidla. Je tam i *+ Nová složka*. Tlačítko ⚙ u složky v levém sloupci otevře Nastavení rovnou na obrazovce této složky. V konfiguraci nastavíte cílový účet a složku a zda zprávy přesunuté ihned po doručení označit jako přečtené. Vpravo jsou pravidla (odesílatel, příjemce nebo část předmětu, lze přidat a smazat). Každé pravidlo má vlastní nastavení, kdy přesouvat: *ihned po doručení* nebo *až po přečtení*.
+- **Složky** (levý sloupec, *+ Přidat složku*): každá složka v aplikaci míří na **jednu konkrétní složku na jednom účtu**, buď existující na serveru, nebo novou. Konfigurace složek je v **Nastavení** pod Nedůležitými, Spamem a Notifikacemi, v sekci **Složky**. Každá složka tam má svou obrazovku: uprostřed je konfigurace, vpravo pravidla. Je tam i *+ Nová složka*. Tlačítko ⚙ u složky v levém sloupci otevře Nastavení rovnou na obrazovce této složky. V konfiguraci nastavíte cílový účet a složku a zda zprávy přesunuté ihned po doručení označit jako přečtené. Vpravo jsou pravidla (odesílatel, příjemce nebo část předmětu, lze přidat a smazat). Každé pravidlo má vlastní nastavení, kdy přesouvat: *ihned po doručení* nebo *až po přečtení*.
   - **Nastavit pravidlo…** (sloupec s tlačítky, sekce *Třídění*): otevře okno, kde u zprávy zvolíte složku, kdy přesouvat a podle čeho poznat další zprávy (odesílatel, příjemce, část předmětu). Zpráva se do složky přesune hned a pravidlo platí pro další zprávy.
   - Typy pravidel: **odesílatel**, **příjemce** (adresa v Komu nebo Kopii, např. když jste v kopii a příjemcem je kolega) a **slovo či fráze v předmětu** (bez ohledu na velikost písmen a předpony Re:/Fw:).
   - Pravidla platí pro doručenou poštu všech účtů. Zprávy z jiného účtu se přenesou na cílový účet (s původním datem a příznaky) a na původním účtu skončí v **koši**. Když uložení na cílový server selže, ze zdroje se nic nemaže.
@@ -47,7 +52,7 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
 - **Smazané** (levý sloupec): smazané zprávy ze všech účtů na jednom místě (koše jednotlivých účtů). Zprávy v této složce se automaticky označí jako přečtené, i když je tam přesunul jiný klient. Číslo u složky ukazuje celkový počet zpráv. Tlačítko **Vyprázdnit** dole pod seznamem je po potvrzení natrvalo smaže ze všech serverů. Smazání zprávy přímo ve Smazaných je definitivní a potvrzuje se.
 - **Spam** (levý sloupec): spam ze všech účtů na jednom místě, aby šlo najít, co tam spadlo omylem. Číslo u složky ukazuje nepřečtené zprávy. Ve Spamu se z tlačítka Spam stane **Není spam**: zpráva se vrátí do doručené pošty svého účtu a pravidlo spamu pro jejího odesílatele se zruší, aby další zprávy už do spamu nepadaly. Pravidlo se zruší i při přetažení zprávy ze Spamu do doručené pošty nebo do složky.
 - **Bayesovský filtr spamu** (Nastavení → Spam): pozná spam podle obsahu i od odesílatelů, kteří ještě nejsou v pravidlech. Učí se z toho, co označíte: tlačítko Spam nebo přetažení do Spamu = spam, **Není spam** = dobrá zpráva. Dobré zprávy se učí i samy: posouzená zpráva, kterou přečtete a necháte 3 dny v doručené poště, se naučí jako dobrá. Napoprvé se filtr naučí z existujících zpráv (spam = zprávy ve spamu od odesílatelů z pravidel, dobré = přečtené zprávy v doručené poště).
-  - Posuzuje jen nové nepřečtené zprávy (z posledních 3 dnů). Nikdy nepřesune zprávy od lidí, kterým jste psali, od zdrojů notifikací ani zprávy odpovídající pravidlům složek.
+  - Posuzuje jen nové nepřečtené zprávy (z posledních 3 dnů). Nikdy nepřesune zprávy od lidí, kterým jste psali, od odesílatelů z pravidel Nedůležitých a Notifikací ani zprávy odpovídající pravidlům složek.
   - Spam začne přesouvat, až zná aspoň 10 spamových a 10 dobrých zpráv. Citlivost: vysoká (hranice 80 %), střední (90 %), nízká (97 %). Filtr jde vypnout; „Zapomenout a naučit znovu“ ho vrátí do výchozího stavu.
   - U zprávy, kterou filtr přesunul do spamu, je v záhlaví štítek „Filtr spamu: 99 %“; po najetí myší ukáže slova, podle kterých rozhodl.
   - Metoda: Robinsonova/Fisherova kombinace pravděpodobností slov (jako SpamBayes), slova z předmětu, odesílatele, vybraných hlaviček, odkazů a prvních 32 kB zprávy. Všechno se počítá a ukládá lokálně v databázi aplikace.
@@ -57,18 +62,18 @@ Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\m
   - na **Smazané**: smazání;
   - na **Spam**: přesun do spamu, odesílatelé se přidají do pravidel spamu;
   - na **účet**: přesun do doručené pošty tohoto účtu;
-  - na **Notifikace**: odesílatelé se stanou zdrojem notifikací;
-  - na **Důležité** nebo **Vzít na vědomí**: odesílatelé přestanou být notifikacemi;
+  - na **Nedůležité** nebo **Notifikace**: pro odesílatele vznikne pravidlo této složky;
+  - na **Důležité** nebo **Vzít na vědomí**: zprávy přestanou být nedůležité / notifikacemi (zruší se i pravidla, která jim odpovídají);
   - ze Smazaných nebo ze složky na kterýkoli pohled doručené pošty: obnovení do doručené pošty.
 
-  Pokud by zprávy po přesunu hned zmizely, aplikace se předem zeptá. Jde o tyto případy: staré notifikace by se podle nastavení smazaly, odesílatel je označený jako spam, nebo zprávu hned přesune pravidlo složky.
+  Pokud by zprávy po přesunu hned zmizely, aplikace se předem zeptá. Jde o tyto případy: staré nedůležité zprávy nebo notifikace by se podle nastavení smazaly, odesílatel je označený jako spam, nebo zprávu hned přesune pravidlo složky.
 
 - **Kontextové menu** (pravé tlačítko myši na položce levého panelu):
   - **Označit vše jako přečtené**: platí pro pohledy doručené pošty, složky i účty. V aplikaci se změna projeví hned, server ji dostane na pozadí.
-  - **Nastavení**: u složky otevře její obrazovku v Nastavení, u účtu nastavení účtu, u Notifikací nastavení notifikací.
+  - **Nastavení**: u složky otevře její obrazovku v Nastavení, u účtu nastavení účtu, u Nedůležitých a Notifikací jejich nastavení.
   - Položky, které u dané složky nedávají smysl, jsou zašedlé (např. u Smazaných).
 
-Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení, pravidla pro spam, notifikace a složky a o konfiguraci složek (samotné složky a zprávy na serveru zůstanou).
+Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštění se znovu stáhne ze serverů. Přijdete jen o odložení, pravidla pro spam, nedůležité, notifikace a složky a o konfiguraci složek (samotné složky a zprávy na serveru zůstanou).
 
 ### Kde jsou data
 
@@ -76,7 +81,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 
 ## Co umí
 
-- Libovolný počet účtů, jejichž doručená pošta se slučuje do pohledů **Důležité**, **Vzít na vědomí** a **Notifikace** (účty se načítají paralelně a jsou barevně odlišené). Kliknutí na účet v levém sloupci otevře jeho nastavení.
+- Libovolný počet účtů, jejichž doručená pošta se slučuje do pohledů **Důležité**, **Vzít na vědomí**, **Nedůležité** a **Notifikace** (účty se načítají paralelně a jsou barevně odlišené). Kliknutí na účet v levém sloupci otevře jeho nastavení.
 - Nastavitelnou šířku sloupců: levý panel, seznam zpráv a kontext se dají rozšířit nebo zúžit tažením za okraj. Dvojklik na okraj vrátí výchozí šířku. Sloupec s tlačítky má pevnou šířku, čtení zprávy vyplní zbytek okna. Šířky se pamatují i po restartu.
 - Přepínač **Jen nepřečtené** v záhlaví seznamu skryje přečtené zprávy. Zpráva, kterou právě čtete, v seznamu zůstane. Přepínač platí jen do opuštění složky, po návratu jsou zase vidět všechny zprávy.
 - **Hledání ve veškeré poště** (pole nahoře přes všechny sloupce kromě levého): hledá ve všech účtech a složkách. Hned ukáže shody v uložených zprávách (předmět, odesílatel, příjemci) i se složkou, kde zprávu najdete. Potom na serverech dohledá shody v textu zpráv a zprávy, které ještě nejsou stažené, a přidá je pod oddělovač. Smazáním textu (nebo Esc) se vrátíte, kde jste byli.
