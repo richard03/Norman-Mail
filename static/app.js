@@ -232,7 +232,7 @@ $('#accounts').addEventListener('click', e => {
 function navItemInfo(el) {
   if (el.hasAttribute('data-trash'))
     return { label: 'Smazané', target: null, unread: 0, readNote: 'Zprávy ve Smazaných jsou vždy přečtené',
-             settingsNote: 'Smazané nemají žádné nastavení' };
+             settings: () => openSettings('trash') };
   if (el.hasAttribute('data-spam'))
     return { label: 'Spam', target: { type: 'spam' }, unread: state.spamUnread, settings: () => openSettings('spam') };
   if (el.dataset.unified) {

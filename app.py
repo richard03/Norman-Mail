@@ -833,6 +833,16 @@ def _move_warnings(items, target):
             warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} už ve Smazaných (nebo účet nemá koš) – "
                             f"{pl(n, 'smaže', 'smažou', 'smaže')} se definitivně a nepůjde to vrátit.")
         return warnings
+    settings = database.settings()
+    if target["type"] == "spam":
+        age = db.delete_age(settings, "spam")
+        old = [i for i in items if age and i["date"] and i["date"] < time.time() - age]
+        if old:
+            n = len(old)
+            warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než "
+                            f"{'týden' if age == db.WEEK else 'měsíc'} – ve spamu by se podle nastavení hned "
+                            f"{pl(n, 'smazala', 'smazaly', 'smazalo')} (do Smazaných).")
+        return warnings
     if target["type"] != "inbox":
         return warnings
     view = target["view"]
@@ -860,22 +870,25 @@ def _move_warnings(items, target):
     for name, n in by_folder.items():
         warnings.append(f"{zprav(n)} {pl(n, 'odpovídá', 'odpovídají', 'odpovídá')} pravidlu složky {name} – "
                         f"hned by se do ní {pl(n, 'přesunula', 'přesunuly', 'přesunulo')}.")
-    settings = database.settings()
-    cutoff = time.time() - db.WEEK
+    now = time.time()
 
     def doomed(cat, seen, date, snoozed):
-        if cat not in db.CATEGORIES or snoozed or not date or date >= cutoff:
-            return False
-        return settings[f"{CATEGORY_SETTING[cat]}_delete_{'read' if seen else 'unread'}_after_week"]
+        """Smazal by ji hned úklid? Vrací stáří, od kterého se maže (týden / měsíc), jinak None."""
+        if cat not in db.CATEGORIES or snoozed or not date:
+            return None
+        age = db.delete_age(settings, CATEGORY_SETTING[cat], seen)
+        return age if age and date < now - age else None
     dragged = {}
     for i in items:
         cat = category_after(i)
-        if (i["account_id"], i["folder"], i["uid"]) not in moved_away and doomed(cat, i["seen"], i["date"], i["snoozed"]):
-            dragged[cat] = dragged.get(cat, 0) + 1
-    for cat, n in dragged.items():
+        age = doomed(cat, i["seen"], i["date"], i["snoozed"])
+        if (i["account_id"], i["folder"], i["uid"]) not in moved_away and age:
+            dragged[(cat, age)] = dragged.get((cat, age), 0) + 1
+    for (cat, age), n in dragged.items():
         what = "notifikace" if cat == "notifications" else "nedůležité"
-        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než týden – jako {what} by se podle "
-                        f"nastavení hned {pl(n, 'smazala', 'smazaly', 'smazalo')} (do Smazaných).")
+        warnings.append(f"{zprav(n)} {pl(n, 'je', 'jsou', 'je')} starší než {'týden' if age == db.WEEK else 'měsíc'} "
+                        f"– jako {what} by se podle nastavení hned {pl(n, 'smazala', 'smazaly', 'smazalo')} "
+                        "(do Smazaných).")
     if new_senders:
         keys = {(i["account_id"], i["folder"], i["uid"]) for i in items}
         others = {(r["account_id"], r["uid"]) for r in database.inbox_from_senders(new_senders)

@@ -98,17 +98,35 @@ RULE_MATCH = ("((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') 
               " OR (r.kind='subject' AND instr(m.base_subject, r.value) > 0))")
 
 WEEK = 7 * 24 * 3600
+MONTH = 30 * 24 * 3600
 DEFAULT_SETTINGS = {
-    "notify_mark_read_on_leave": False,       # po opuštění Notifikací označit všechny za přečtené
-    "notify_delete_read_after_week": True,    # mazat přečtené notifikace starší než týden
-    "notify_delete_unread_after_week": False,  # mazat nepřečtené notifikace starší než týden
-    "unimp_mark_read_on_leave": False,        # totéž pro Nedůležité
-    "unimp_delete_read_after_week": True,
+    "notify_mark_read_on_leave": False,         # po opuštění Notifikací označit všechny za přečtené
+    "notify_delete_read_after_week": False,     # mazat přečtené notifikace starší než týden
+    "notify_delete_read_after_month": False,    # … starší než měsíc
+    "notify_delete_unread_after_week": False,   # mazat nepřečtené notifikace starší než týden
+    "notify_delete_unread_after_month": False,  # … starší než měsíc
+    "unimp_mark_read_on_leave": False,          # totéž pro Nedůležité
+    "unimp_delete_read_after_week": False,
+    "unimp_delete_read_after_month": False,
     "unimp_delete_unread_after_week": False,
+    "unimp_delete_unread_after_month": False,
+    "spam_delete_after_week": False,            # mazat zprávy ve spamu starší než týden
+    "spam_delete_after_month": False,           # … starší než měsíc
     "bayes_enabled": True,                    # bayesovský filtr přesouvá rozpoznaný spam
     "bayes_sensitivity": "medium",            # high / medium / low
 }
 SETTING_CHOICES = {"bayes_sensitivity": ("high", "medium", "low")}
+
+
+def delete_age(settings, prefix, seen=None):
+    """Stáří (s), od kterého se zprávy podle nastavení mažou; None = nemažou se.
+    prefix: notify / unimp / spam; seen: přečtené / nepřečtené (None = bez rozlišení, Spam)."""
+    part = f"{prefix}_delete" + ("" if seen is None else "_read" if seen else "_unread")
+    if settings.get(f"{part}_after_week"):
+        return WEEK
+    if settings.get(f"{part}_after_month"):
+        return MONTH
+    return None
 
 
 def rule_matches(rule, rec) -> bool:
@@ -436,6 +454,15 @@ class Database:
     def spam_folders(self) -> dict:
         """{account_id: název složky Spam}"""
         return self.role_folders("junk")
+
+    def role_uids_older(self, role, older_than) -> dict:
+        """{account_id: (složka, [uid])} zpráv ve složkách dané role starších než older_than (unix ts)."""
+        out = {}
+        for acc_id, folder, uid in self._q("""SELECT m.account_id, m.folder, m.uid FROM messages m JOIN folders f
+                ON f.account_id=m.account_id AND f.name=m.folder AND f.role=?
+                WHERE m.date IS NOT NULL AND m.date < ?""", (role, older_than)):
+            out.setdefault(acc_id, (folder, []))[1].append(uid)
+        return out
 
     def unseen_uids(self, acc_id, folder) -> list:
         return [r[0] for r in self._q("SELECT uid FROM messages WHERE account_id=? AND folder=? AND seen=0",

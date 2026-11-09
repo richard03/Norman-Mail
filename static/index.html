@@ -230,8 +230,9 @@
   <div class="settings-body">
     <nav class="settings-nav">
       <button type="button" data-section="unimportant">Nedůležité</button>
-      <button type="button" data-section="spam">Spam</button>
       <button type="button" data-section="notifications">Notifikace</button>
+      <button type="button" data-section="spam">Spam</button>
+      <button type="button" data-section="trash">Smazané</button>
       <div class="settings-nav-section">Složky</div>
       <div id="settingsFolders"></div>
       <button type="button" class="nav-new" data-new-folder>+ Nová složka</button>
@@ -248,16 +249,27 @@
             Když opustím sekci Nedůležité, označit všechny nedůležité zprávy jako přečtené</label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_week">
             Mazat přečtené nedůležité zprávy starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_month">
+            Mazat přečtené nedůležité zprávy starší než měsíc</label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_unread_after_week">
             Mazat nepřečtené nedůležité zprávy starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="unimp_delete_unread_after_month">
+            Mazat nepřečtené nedůležité zprávy starší než měsíc</label>
         </div>
-        <p class="note">Mazáním se zprávy přesouvají do koše. Odložené zprávy se nemažou.</p>
+        <p class="note">Mazáním se zprávy přesouvají do Smazaných. Odložené zprávy se nemažou.</p>
       </div>
       <div data-panel="spam">
         <h3>Spam</h3>
         <p class="note">Pravidla vznikají označením zprávy jako <b>Spam</b>. Nové zprávy od těchto odesílatelů se
           ve všech účtech automaticky přesouvají do spamu, dřív než se objeví v seznamu.</p>
         <p class="note">Smazáním pravidla se už přesunuté zprávy ze spamu nevrátí. Pro vlastní adresy pravidla nevznikají.</p>
+        <div class="options">
+          <label class="option"><input type="checkbox" data-setting="spam_delete_after_week">
+            Mazat zprávy starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="spam_delete_after_month">
+            Mazat zprávy starší než měsíc</label>
+        </div>
+        <p class="note">Mazáním se zprávy ze spamu přesouvají do Smazaných.</p>
         <h3 class="sub-head">Bayesovský filtr</h3>
         <p class="note">Pozná spam podle obsahu, i od odesílatelů, které ještě neznáte. Učí se z toho, co označíte
           tlačítkem <b>Spam</b> (spam) a <b>Není spam</b> (dobrá zpráva). Dobré zprávy se učí i samy: přečtená
@@ -287,10 +299,21 @@
             Když opustím sekci Notifikace, označit všechny notifikace jako přečtené</label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_week">
             Mazat přečtené notifikace starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_month">
+            Mazat přečtené notifikace starší než měsíc</label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_unread_after_week">
             Mazat nepřečtené notifikace starší než týden</label>
+          <label class="option"><input type="checkbox" data-setting="notify_delete_unread_after_month">
+            Mazat nepřečtené notifikace starší než měsíc</label>
         </div>
-        <p class="note">Mazáním se notifikace přesouvají do koše. Odložené zprávy se nemažou.</p>
+        <p class="note">Mazáním se notifikace přesouvají do Smazaných. Odložené zprávy se nemažou.</p>
+      </div>
+      <div data-panel="trash">
+        <h3>Smazané</h3>
+        <p class="note">Smazané zprávy ze všech účtů na jednom místě (koše jednotlivých účtů). Zprávy v této složce se
+          automaticky označí jako přečtené. Číslo u složky ukazuje celkový počet zpráv.</p>
+        <p class="note">Tlačítko <b>Vyprázdnit</b> pod seznamem zpráv je po potvrzení natrvalo smaže ze všech serverů.
+          Smazání zprávy přímo ve Smazaných je definitivní.</p>
       </div>
       <div data-panel="folder">
         <form id="folderForm" class="folder-form" autocomplete="off">

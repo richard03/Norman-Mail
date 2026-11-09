@@ -520,30 +520,36 @@ class SyncManager:
     CATEGORY_LOG = {"notifications": "notifikací", "unimportant": "nedůležitých zpráv"}
 
     def cleanup_categories(self):
-        """Podle nastavení smaže (do koše) notifikace a nedůležité zprávy starší než týden."""
+        """Podle nastavení smaže (do koše) staré notifikace, nedůležité zprávy a zprávy ve spamu."""
         settings = self.db.settings()
-        cutoff = time.time() - db_module.WEEK
+        now = time.time()
+        work = []  # (účet, složka, uid, popis)
         for cat, prefix in self.CATEGORY_SETTINGS.items():
-            targets = []
-            if settings[f"{prefix}_delete_read_after_week"]:
-                targets.append(True)
-            if settings[f"{prefix}_delete_unread_after_week"]:
-                targets.append(False)
-            for seen in targets:
-                for acc_id, uids in self.db.category_uids(cat, seen=seen, older_than=cutoff).items():
-                    acc = self.store.get(acc_id)
-                    if acc is None:
-                        continue
-                    try:
-                        with self.pool.get(acc) as M:
-                            mail.trash_uids(M, "INBOX", uids)
-                            self.db.delete_uids(acc_id, "INBOX", uids)
-                    except Exception as e:
-                        self._error(acc, e)
-                        continue
-                    log.info("Smazáno %d %s %s starších než týden (účet %s)", len(uids),
-                             "přečtených" if seen else "nepřečtených", self.CATEGORY_LOG[cat], acc["name"])
-                    self.db.bump()
+            for seen in (True, False):
+                age = db_module.delete_age(settings, prefix, seen)
+                if age is None:
+                    continue
+                what = f"{'přečtených' if seen else 'nepřečtených'} {self.CATEGORY_LOG[cat]}"
+                for acc_id, uids in self.db.category_uids(cat, seen=seen, older_than=now - age).items():
+                    work.append((acc_id, "INBOX", uids, what, age))
+        age = db_module.delete_age(settings, "spam")
+        if age is not None:
+            for acc_id, (folder, uids) in self.db.role_uids_older("junk", now - age).items():
+                work.append((acc_id, folder, uids, "zpráv ve spamu", age))
+        for acc_id, folder, uids, what, age in work:
+            acc = self.store.get(acc_id)
+            if acc is None:
+                continue
+            try:
+                with self.pool.get(acc) as M:
+                    mail.trash_uids(M, folder, uids)
+                    self.db.delete_uids(acc_id, folder, uids)
+            except Exception as e:
+                self._error(acc, e)
+                continue
+            log.info("Smazáno %d %s starších než %s (účet %s)", len(uids), what,
+                     "týden" if age == db_module.WEEK else "měsíc", acc["name"])
+            self.db.bump()
 
     def mark_category_read(self, category):
         """Označí všechny zprávy kategorie jako přečtené – na serveru i v databázi. Zápis na server běží pod
