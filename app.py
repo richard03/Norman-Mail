@@ -678,6 +678,14 @@ def user_folder_rules(folder_id):
 def user_folder_rule_add(folder_id):
     _folder_or_404(folder_id)
     data = request.get_json(force=True)
+    kind, value = _rule_arg(data)
+    database.add_folder_rule(folder_id, kind, value, bool(data.get("after_read")))
+    syncer.trigger()  # existující zprávy podle pravidla přesunout
+    return jsonify(database.folder_rules(folder_id))
+
+
+def _rule_arg(data):
+    """Typ a hodnota pravidla složky z požadavku (zkontrolované, hodnota malými písmeny)."""
     kind = data.get("kind") or "sender"
     value = " ".join(str(data.get("value") or data.get("sender") or "").split()).lower()
     if kind not in db.RULE_KINDS:
@@ -686,9 +694,7 @@ def user_folder_rule_add(folder_id):
         raise ValidationError("Zadejte platnou e-mailovou adresu.")
     if kind == "subject" and not 2 <= len(value) <= 100:
         raise ValidationError("Slovo nebo fráze v předmětu musí mít 2 až 100 znaků.")
-    database.add_folder_rule(folder_id, kind, value)
-    syncer.trigger()  # existující zprávy od odesílatele přesunout
-    return jsonify(database.folder_rules(folder_id))
+    return kind, value
 
 
 @app.delete("/api/user-folder-rules/<int:rule_id>")
@@ -713,7 +719,8 @@ def user_folder_messages(folder_id):
 
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/to-folder")
 def message_to_folder(acc_id, uid):
-    """Přesune zprávu do složky aplikace (i na jiný účet) a vytvoří pravidlo pro jejího odesílatele.
+    """Nastavit pravidlo: vytvoří pravidlo složky (odesílatel / příjemce / část předmětu, ihned / po přečtení)
+    a zprávu do složky hned přesune (i na jiný účet). Bez kind/value = pravidlo podle odesílatele.
     UI a databáze hned, server na pozadí."""
     acc = account_or_404(acc_id)
     data = request.get_json(force=True)
@@ -721,18 +728,21 @@ def message_to_folder(acc_id, uid):
     target = _folder_or_404(int(data.get("target_id") or 0))
     if not target["account_id"]:
         raise ValidationError(f"Složka {target['name']} nemá nastavený cílový účet – nastavte ho v konfiguraci (⚙).")
-    if target["account_id"] == acc_id and target["imap_name"] == folder:
-        raise ValidationError("Zpráva už v této složce je.")
     row = database.message(acc_id, folder, uid)
-    sender = row["from"][0]["addr"].lower() if row and row["from"] else None
-    if sender:
-        database.add_folder_rule_hits(database.add_folder_rule(target["id"], "sender", sender), 1)
-    syncer.enqueue(acc, folder, uid, f"Přesun do složky {target['name']}",
-                   lambda: syncer.move_messages(acc, folder, [uid], target), remove=True, use_conn=False)
-    database.remove_message(acc_id, folder, uid)
+    if not data.get("value"):  # původní chování: pravidlo podle odesílatele zprávy
+        data = {**data, "kind": "sender", "value": row["from"][0]["addr"] if row and row["from"] else ""}
+    kind, value = _rule_arg(data)
+    rule_id = database.add_folder_rule(target["id"], kind, value, bool(data.get("after_read")))
+    in_target = target["account_id"] == acc_id and target["imap_name"] == folder
+    if row and not in_target and db.rule_matches({"kind": kind, "value": value}, row):
+        database.add_folder_rule_hits(rule_id, 1)
+    if not in_target:
+        syncer.enqueue(acc, folder, uid, f"Přesun do složky {target['name']}",
+                       lambda: syncer.move_messages(acc, folder, [uid], target), remove=True, use_conn=False)
+        database.remove_message(acc_id, folder, uid)
     database.bump()
-    syncer.trigger()  # další zprávy od odesílatele podle pravidla
-    return jsonify(ok=True, sender=sender, folder=target["name"])
+    syncer.trigger()  # další zprávy podle pravidla
+    return jsonify(ok=True, kind=kind, value=value, folder=target["name"], moved=not in_target)
 
 
 # --------------------------------------------------------------------------

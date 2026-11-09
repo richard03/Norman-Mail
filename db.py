@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS user_folders(
     after_read INTEGER DEFAULT 0, mark_read INTEGER DEFAULT 0, created REAL);
 CREATE TABLE IF NOT EXISTS user_folder_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL,
-    created REAL, hits INTEGER DEFAULT 0, UNIQUE(kind, value));
+    created REAL, hits INTEGER DEFAULT 0, after_read INTEGER DEFAULT 0, UNIQUE(kind, value));
 CREATE TABLE IF NOT EXISTS my_addresses(
     account_id TEXT, email TEXT, PRIMARY KEY(account_id, email));
 CREATE TABLE IF NOT EXISTS notify_rules(
@@ -107,6 +107,12 @@ class Database:
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folders)")}
         if "account_id" not in cols:
             self._conn.execute("ALTER TABLE user_folders ADD COLUMN account_id TEXT")
+        # migrace: „ihned / až po přečtení“ má každé pravidlo zvlášť (dřív celá složka) – převzít nastavení složky
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folder_rules)")}
+        if "after_read" not in cols:
+            self._conn.execute("ALTER TABLE user_folder_rules ADD COLUMN after_read INTEGER DEFAULT 0")
+            self._conn.execute("UPDATE user_folder_rules SET after_read=COALESCE("
+                               "(SELECT f.after_read FROM user_folders f WHERE f.id=user_folder_rules.folder_id), 0)")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -488,14 +494,15 @@ class Database:
         return [dict(r) for r in self._q(
             "SELECT * FROM user_folder_rules WHERE folder_id=? ORDER BY created DESC", (folder_id,))]
 
-    def add_folder_rule(self, folder_id, kind, value):
-        """Pravidlo složky (odesílatel / příjemce / slovo v předmětu). Stejné pravidlo může patřit
-        jen do jedné složky (při přidání do jiné se přesune)."""
+    def add_folder_rule(self, folder_id, kind, value, after_read=False):
+        """Pravidlo složky (odesílatel / příjemce / slovo v předmětu), přesun ihned nebo až po přečtení.
+        Stejné pravidlo může patřit jen do jedné složky (při přidání do jiné se přesune)."""
         assert kind in RULE_KINDS
         value = " ".join(value.lower().split())
-        self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created) VALUES(?, ?, ?, ?)
-                   ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created""",
-                (folder_id, kind, value, time.time()))
+        self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read) VALUES(?, ?, ?, ?, ?)
+                   ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created,
+                                                          after_read=excluded.after_read""",
+                (folder_id, kind, value, time.time(), int(after_read)))
         return self._q("SELECT id FROM user_folder_rules WHERE kind=? AND value=?", (kind, value))[0][0]
 
     def delete_folder_rule(self, rule_id):
@@ -507,19 +514,17 @@ class Database:
     def folder_rules_active(self) -> list:
         """Všechna pravidla složek, které mají cílový účet, i s nastavením složky."""
         return [dict(r) for r in self._q("""
-            SELECT r.id AS rule_id, r.kind, r.value, f.id, f.name, f.account_id, f.imap_name, f.after_read, f.mark_read
+            SELECT r.id AS rule_id, r.kind, r.value, r.after_read, f.id, f.name, f.account_id, f.imap_name, f.mark_read
             FROM user_folder_rules r JOIN user_folders f ON f.id=r.folder_id
             WHERE f.account_id IS NOT NULL""")]
 
-    def folder_rule_matches(self, folder_id, only_seen) -> dict:
+    def folder_rule_matches(self, folder_id) -> dict:
         """{account_id: {uid: id pravidla}} zpráv v doručené poště, které pravidla složky přesouvají
-        (odložené se vynechávají)."""
+        (pravidla „až po přečtení“ jen přečtené; odložené se vynechávají)."""
         sql = f"""SELECT m.account_id, m.uid, r.id FROM messages m
-                  JOIN user_folder_rules r ON r.folder_id=? AND {RULE_MATCH}
+                  JOIN user_folder_rules r ON r.folder_id=? AND {RULE_MATCH} AND (r.after_read=0 OR m.seen=1)
                   LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
                   WHERE m.folder='INBOX' AND s.uid IS NULL"""
-        if only_seen:
-            sql += " AND m.seen=1"
         out = {}
         for acc_id, uid, rule_id in self._q(sql, (folder_id,)):
             out.setdefault(acc_id, {}).setdefault(uid, rule_id)

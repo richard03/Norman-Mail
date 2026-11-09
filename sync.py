@@ -457,7 +457,7 @@ class SyncManager:
         for f in self.db.user_folders():
             if not f["account_id"]:
                 continue  # složka z dřívější verze bez cílového účtu – čeká na dokonfigurování
-            for acc_id, uids in self.db.folder_rule_matches(f["id"], only_seen=bool(f["after_read"])).items():
+            for acc_id, uids in self.db.folder_rule_matches(f["id"]).items():
                 uids = {u: s for u, s in uids.items() if (acc_id, "INBOX", u) not in self.pending}
                 acc = self.store.get(acc_id)
                 if not uids or acc is None:

@@ -273,6 +273,8 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 .action:disabled { opacity: .45; cursor: default; }
 .action.busy { opacity: .6; pointer-events: none; }
 .action-sep { height: 8px; }
+.action-bottom { margin-top: auto; margin-bottom: 12px; }  /* Smazat: ukotvené dole */
+#actions .action-bottom { flex: none; }
 #contextBody { overflow-y: auto; flex: 1; }
 #contextBody .empty { padding: 30px 14px; }
 .ctx { padding: 9px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
@@ -350,20 +352,16 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 .ufolder-item:hover .edit, .ufolder-item.active .edit { visibility: visible; }
 .nav-item.add-folder { color: var(--muted); font-size: 13px; }
 .nav-item.add-folder:hover { color: var(--text); }
-.action-wrap { position: relative; }
 .menu {
   position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 100%; width: max-content; max-width: 260px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .3); max-height: 50vh; overflow-y: auto;
 }
-.menu.up { top: auto; bottom: calc(100% + 4px); }
 .menu button {
   display: block; width: 100%; text-align: left; border: none; background: none; padding: 7px 10px;
   border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .menu button:hover { background: var(--hover); }
-.menu .menu-new { color: var(--accent); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 2px; }
-.menu-empty { padding: 7px 10px; color: var(--muted); font-size: 13px; }
 .folder-rules { border-top: 1px solid var(--border); padding-top: 10px; }
 .folder-rules h3 { margin: 0 0 4px; font-size: 15px; }
 .folder-rules .rules { max-height: 240px; overflow-y: auto; margin-top: 8px; }
@@ -400,6 +398,12 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 }
 .list-footer[hidden] { display: none; }
 dialog.confirm { width: min(480px, calc(100vw - 32px)); }
+/* Nastavit pravidlo */
+dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
+.rule-kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.rule-kinds legend { grid-column: 1 / -1; }
+.rule-kinds input:disabled, .rule-kinds select:disabled { opacity: .5; }
+#ruleMessage { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .confirm-lines { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
 #confirmQuestion { margin: 4px 0 0; font-weight: 600; }
 
@@ -417,7 +421,7 @@ dialog.confirm { width: min(480px, calc(100vw - 32px)); }
 .settings-rules .rules { margin-top: 10px; }
 .settings-rules .rule-add input { min-width: 0; }
 .settings-rules .rule-add { flex-wrap: wrap; }
-.settings-rules .rule-add select { flex: 1 1 100%; }
+.settings-rules .rule-add select { flex: 1 1 40%; }
 
 /* ---------- kontextové menu ---------- */
 .menu.ctx-menu { position: fixed; right: auto; top: 0; left: 0; min-width: 210px; z-index: 100; }

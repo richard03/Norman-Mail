@@ -727,7 +727,7 @@ async function doAction(act, btn) {
   if (act === 'replyAll') return withLoadedMessage(cur, () => reply(true));
   if (act === 'forward') return withLoadedMessage(cur, forward);
   if (act === 'notification') return toggleNotification(cur, btn);
-  if (act === 'toFolder') return toggleFolderMenu();
+  if (act === 'rule') return openRuleDialog(cur);
   if (act === 'snoozeDay' || act === 'snoozeWeek') return snooze(cur, act === 'snoozeDay' ? 1 : 7, btn);
   if (!MOVE_DONE[act]) return;
 
@@ -1453,74 +1453,94 @@ async function loadUserFolders() {
   else renderSidebar();
 }
 
-/** Nabídka složek u tlačítka „Do složky…“ ve sloupci Akce. */
-function toggleFolderMenu(force) {
-  const menu = $('#folderMenu');
-  const open = force ?? menu.hidden;
-  if (!open) { menu.hidden = true; return; }
-  const v = state.view;
-  const items = state.userFolders.filter(f => !(v.type === 'ufolder' && v.id === f.id));
-  menu.innerHTML = (items.length
-    ? items.map(f => `<button type="button" data-target="${f.id}">${esc(f.name)}
-        <span class="muted small">· ${esc(accById(f.account_id)?.name || 'nenastaveno')}</span></button>`).join('')
-    : '<div class="menu-empty">Zatím nemáte žádnou složku.</div>')
-    + '<button type="button" class="menu-new" data-new-folder>+ Nová složka…</button>';
-  menu.hidden = false;
-  fitMenu(menu);
-}
+// --- Nastavit pravidlo: zatřídění zprávy do složky + pravidlo pro další zprávy
 
-/** Vejde nabídku do okna: otevře ji tam, kde je víc místa, a zbytek nechá rolovat. */
-function fitMenu(menu) {
-  menu.classList.remove('up');
-  menu.style.maxHeight = '';
-  const btn = menu.parentElement.getBoundingClientRect();
-  const gap = 12;
-  const below = window.innerHeight - btn.bottom - gap;
-  const above = btn.top - gap;
-  const up = menu.scrollHeight > below && above > below;
-  menu.classList.toggle('up', up);
-  menu.style.maxHeight = `${Math.max(120, up ? above : below)}px`;
-}
+let ruleFor = null;  // zpráva (state.current), pro kterou je okno otevřené
 
-$('#folderMenu').addEventListener('click', e => {
-  const b = e.target.closest('button');
-  if (!b) return;
-  toggleFolderMenu(false);
-  if (b.hasAttribute('data-new-folder')) return openFolderDialog(null);
-  moveToFolder(state.current, +b.dataset.target);
-});
-document.addEventListener('click', e => {  // klik mimo nabídku ji zavře
-  if (!$('#folderMenu').hidden && !e.target.closest('.action-wrap')) toggleFolderMenu(false);
-});
-document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleFolderMenu(false); });
+const stripPrefixes = s => String(s || '').replace(/^(\s*(re|fw|fwd|odp|vs|aw|wg)\s*(\[\d+\])?\s*:\s*)+/i, '').trim();
 
-/** Přesun do složky + pravidlo pro odesílatele. V UI hned, server na pozadí. */
-async function moveToFolder(cur, targetId) {
+function openRuleDialog(cur) {
   if (!cur) return;
-  const target = state.userFolders.find(f => f.id === targetId);
-  removeAndAdvance(cur);
-  const sender = (cur.data || cur.item)?.from?.[0]?.addr;
-  toast(`Přesunuto do složky ${target?.name || ''}` + (sender ? ` – další zprávy od ${sender} půjdou také tam` : ''));
-  try {
-    await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/to-folder`,
-      { method: 'POST', body: { folder: cur.folder, target_id: targetId } });
-    loadUserFolders();
-  } catch (err) {
-    toast(err.message, true);
-    loadList({ quiet: true, keepLoaded: true });
-  }
+  ruleFor = cur;
+  const m = cur.data || cur.item || {};
+  const f = $('#ruleForm').elements;
+  $('#ruleForm').reset();
+  $('#ruleError').textContent = '';
+  $('#ruleMessage').textContent = `${shortAddr(m.from)} – ${m.subject || '(bez předmětu)'}`;
+  $('#ruleMessage').title = m.subject || '';
+  const v = state.view;
+  const folders = state.userFolders.filter(x => accById(x.account_id));
+  $('#ruleFolder').innerHTML = folders.length
+    ? folders.map(x => `<option value="${x.id}" ${v.type === 'ufolder' && v.id === x.id ? 'selected' : ''}>${esc(x.name)} · ${esc(accById(x.account_id)?.name || '')}</option>`).join('')
+    : '<option value="">Zatím nemáte žádnou složku</option>';
+  $('#ruleSave').disabled = !folders.length;
+  f.namedItem('sender').value = m.from?.[0]?.addr || '';
+  const recips = [...new Set([...(m.to || []), ...(m.cc || [])].map(a => (a.addr || '').toLowerCase()).filter(Boolean))];
+  $('#ruleRecipient').innerHTML = recips.length
+    ? recips.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')
+    : '<option value="">Zpráva nemá žádné příjemce</option>';
+  $('#ruleForm').querySelector('input[name="kind"][value="recipient"]').disabled = !recips.length;
+  f.namedItem('subject').value = stripPrefixes(m.subject);
+  syncRuleForm();
+  $('#ruleDialog').showModal();
+  $('#ruleFolder').focus();
 }
+
+/** Aktivní je jen pole u zvoleného kritéria; poznámka popisuje, co se stane. */
+function syncRuleForm() {
+  const f = $('#ruleForm').elements;
+  const kind = f.namedItem('kind').value;
+  f.namedItem('sender').disabled = kind !== 'sender';
+  f.namedItem('recipient').disabled = kind !== 'recipient';
+  f.namedItem('subject').disabled = kind !== 'subject';
+  const folder = state.userFolders.find(x => x.id === +f.namedItem('target').value);
+  const inTarget = folder && ruleFor && folder.account_id === ruleFor.accountId && folder.imap_name === ruleFor.folder;
+  const who = { sender: 'od tohoto odesílatele', recipient: 'pro tohoto příjemce', subject: 's touto částí předmětu' }[kind];
+  const when = f.namedItem('when').value === 'read' ? 'po přečtení' : 'hned po doručení';
+  $('#ruleNote').textContent = folder
+    ? (inTarget ? 'Zpráva už v této složce je. ' : `Tato zpráva se do složky ${folder.name} přesune hned. `)
+      + `Další zprávy ${who} se tam budou přesouvat ${when}.`
+    : '';
+}
+
+$('#ruleForm').addEventListener('change', syncRuleForm);
+$('#ruleCancel').addEventListener('click', () => $('#ruleDialog').close());
+$('#ruleNewFolder').addEventListener('click', () => {
+  $('#ruleDialog').close();
+  openFolderDialog(null);
+});
+
+$('#ruleForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const cur = ruleFor;
+  const f = $('#ruleForm').elements;
+  const targetId = +f.namedItem('target').value;
+  const target = state.userFolders.find(x => x.id === targetId);
+  const kind = f.namedItem('kind').value;
+  const value = f.namedItem(kind).value.trim();
+  if (!cur || !target) return;
+  if (!value) { $('#ruleError').textContent = 'Vyplňte, podle čeho se mají další zprávy poznat.'; return; }
+  const btn = $('#ruleSave');
+  btn.disabled = true;
+  $('#ruleError').textContent = '';
+  let res;
+  try {
+    res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/to-folder`, { method: 'POST',
+      body: { folder: cur.folder, target_id: targetId, kind, value, after_read: f.namedItem('when').value === 'read' } });
+  } catch (err) {
+    $('#ruleError').textContent = err.message;
+    return;
+  } finally { btn.disabled = false; }
+  $('#ruleDialog').close();
+  if (res.moved) removeAndAdvance(cur);
+  toast((res.moved ? `Přesunuto do složky ${res.folder}. ` : '') + `${RULE_TOASTS[kind](res.value)} ${res.folder}`);
+  loadUserFolders();
+  loadList({ quiet: true, keepLoaded: true });  // pravidlo mohlo hned přesunout i další zprávy
+});
 
 // --- dialog konfigurace složky
 
 function folderForm() { return $('#folderForm').elements; }
-
-function syncFolderOptions() {
-  const f = folderForm();
-  const afterRead = f.namedItem('when').value === 'read';
-  f.namedItem('mark_read').disabled = afterRead;  // po přečtení jsou zprávy přečtené už samy
-  if (afterRead) f.namedItem('mark_read').checked = false;
-}
 
 /** Dekódovaný název složky na serveru (modifikované UTF-7 → text) – podle seznamu složek účtu. */
 function decodeFolderName(imapName) {
@@ -1569,14 +1589,13 @@ async function openFolderDialog(id) {
     : (state.view.type === 'folder' ? state.view.accountId : state.accounts[0]?.id);
   $('#folderAccount').innerHTML = state.accounts.map(a =>
     `<option value="${a.id}" ${a.id === accId ? 'selected' : ''}>${esc(a.name || a.email)}</option>`).join('');
-  f.namedItem('when').value = folder?.after_read ? 'read' : 'now';
   f.namedItem('mark_read').checked = !!folder?.mark_read;
-  syncFolderOptions();
   $('#folderTitle').textContent = folder ? `Složka ${folder.name}` : 'Nová složka';
   $('#folderSaveBtn').textContent = folder ? 'Uložit změny' : 'Vytvořit složku';
   $('#folderDeleteBtn').hidden = !folder;
   $('#folderDeletePanel').hidden = true;
   $('#folderRuleKind').value = 'sender';
+  $('#folderRuleWhen').value = 'now';
   $('#folderRuleInput').placeholder = RULE_PLACEHOLDERS.sender;
   $('#folderError').textContent = folder && !folder.account_id
     ? 'Složka z dřívější verze nemá cílový účet – vyberte účet a složku a uložte. Do té doby se pravidla neuplatňují.' : '';
@@ -1606,14 +1625,12 @@ async function renderFolderRules(rules) {
     <li class="rule">
       <div class="rule-main">
         <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
-        <div class="rule-meta">${FOLDER_RULE_KINDS[r.kind] || r.kind} · přidáno ${new Date(r.created * 1000).toLocaleDateString('cs-CZ')} · přesunuto ${r.hits}×</div>
+        <div class="rule-meta">${FOLDER_RULE_KINDS[r.kind] || r.kind} · ${r.after_read ? 'po přečtení' : 'ihned'} · přidáno ${new Date(r.created * 1000).toLocaleDateString('cs-CZ')} · přesunuto ${r.hits}×</div>
       </div>
       <button type="button" class="btn danger" data-folder-rule="${r.id}">Smazat</button>
     </li>`).join('')
-    : '<li class="empty-rules">Zatím žádná pravidla. Přidejte odesílatele, příjemce nebo slovo v předmětu, nebo u zprávy použijte „Do složky…“.</li>';
+    : '<li class="empty-rules">Zatím žádná pravidla. Přidejte odesílatele, příjemce nebo část předmětu, nebo u zprávy použijte „Nastavit pravidlo…“.</li>';
 }
-
-document.querySelectorAll('#folderForm input[name="when"]').forEach(r => r.addEventListener('change', syncFolderOptions));
 
 $('#folderForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1622,7 +1639,7 @@ $('#folderForm').addEventListener('submit', async e => {
   const body = { name: f.namedItem('name').value, account_id: f.namedItem('account_id').value,
                  server_folder: isNew ? null : f.namedItem('server_folder').value,
                  new_folder: isNew ? (f.namedItem('new_folder').value.trim() || f.namedItem('name').value) : null,
-                 after_read: f.namedItem('when').value === 'read', mark_read: f.namedItem('mark_read').checked };
+                 mark_read: f.namedItem('mark_read').checked };
   const btn = $('#folderSaveBtn');
   btn.disabled = true;
   $('#folderError').textContent = '';
@@ -1645,7 +1662,7 @@ $('#folderForm').addEventListener('submit', async e => {
   }
 });
 
-const FOLDER_RULE_KINDS = { sender: 'Odesílatel', recipient: 'Příjemce', subject: 'Slovo v předmětu' };
+const FOLDER_RULE_KINDS = { sender: 'Odesílatel', recipient: 'Příjemce', subject: 'Část předmětu' };
 const RULE_PLACEHOLDERS = { sender: 'odesilatel@example.cz', recipient: 'kolega@example.cz', subject: 'např. projekt Alfa' };
 const RULE_TOASTS = {
   sender: v => `Zprávy od ${v} se budou přesouvat do složky`,
@@ -1663,7 +1680,8 @@ async function addFolderRule() {
   const value = input.value.trim();
   if (!value) return;
   try {
-    const rules = await api(`/api/user-folders/${state.editingFolder}/rules`, { method: 'POST', body: { kind, value } });
+    const rules = await api(`/api/user-folders/${state.editingFolder}/rules`, { method: 'POST',
+      body: { kind, value, after_read: $('#folderRuleWhen').value === 'read' } });
     input.value = '';
     renderFolderRules(rules);
     toast(RULE_TOASTS[kind](value));

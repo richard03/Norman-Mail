@@ -56,18 +56,16 @@
       <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 14v3"/></svg>Odložit o týden</button>
     <button class="action" data-act="archive" disabled>
       <svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4"/></svg>Archivovat</button>
-    <div class="action-wrap">
-      <button class="action" data-act="toFolder" disabled
-              title="Přesune zprávu do složky a vytvoří pravidlo pro jejího odesílatele">
-        <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13l3 3 3-3"/></svg>Do složky…</button>
-      <div id="folderMenu" class="menu" hidden></div>
-    </div>
+    <div class="col-title">Třídění</div>
     <button class="action" data-act="notification" disabled
             title="Označí tuto i všechny ostatní zprávy od stejného odesílatele jako notifikace">
       <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span class="label">Notifikace</span></button>
     <button class="action" data-act="spam" disabled>
       <svg viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg><span class="label">Spam</span></button>
-    <button class="action danger" data-act="delete" disabled>
+    <button class="action" data-act="rule" disabled
+            title="Zatřídí zprávu do složky a vytvoří pravidlo pro další zprávy">
+      <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13l3 3 3-3"/></svg>Nastavit pravidlo…</button>
+    <button class="action danger action-bottom" data-act="delete" disabled>
       <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>Smazat</button>
   </aside>
 
@@ -81,6 +79,38 @@
 
 <div id="dragGhost" class="drag-ghost"></div>
 <div id="ctxMenu" class="menu ctx-menu" role="menu" hidden></div>
+
+<!-- Nastavit pravidlo: zatřídění zprávy do složky + pravidlo pro další zprávy -->
+<dialog id="ruleDialog" class="rule-dialog">
+  <form id="ruleForm" method="dialog" autocomplete="off">
+    <h2>Nastavit pravidlo</h2>
+    <p id="ruleMessage" class="note"></p>
+    <label>Do které složky zprávu zatřídit
+      <select name="target" id="ruleFolder"></select></label>
+    <p class="note"><button type="button" class="link" id="ruleNewFolder">+ Vytvořit novou složku…</button></p>
+    <fieldset>
+      <legend>Kdy zprávy podle pravidla přesouvat</legend>
+      <label class="option"><input type="radio" name="when" value="now" checked> Ihned po doručení</label>
+      <label class="option"><input type="radio" name="when" value="read"> Až po přečtení</label>
+    </fieldset>
+    <fieldset class="rule-kinds">
+      <legend>Podle čeho další zprávy poznat</legend>
+      <label class="option"><input type="radio" name="kind" value="sender" checked> Odesílatel</label>
+      <input name="sender" id="ruleSender" placeholder="odesilatel@example.cz">
+      <label class="option"><input type="radio" name="kind" value="recipient"> Příjemce (Komu / Kopie)</label>
+      <select name="recipient" id="ruleRecipient"></select>
+      <label class="option"><input type="radio" name="kind" value="subject"> Část předmětu</label>
+      <input name="subject" id="ruleSubject" maxlength="100" placeholder="např. projekt Alfa">
+    </fieldset>
+    <p id="ruleNote" class="note"></p>
+    <p id="ruleError" class="error"></p>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="ruleCancel">Zrušit</button>
+      <button type="submit" class="btn primary" id="ruleSave">Zatřídit a uložit pravidlo</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Upozornění / potvrzení (přesun, který by zprávy hned smazal; definitivní smazání) -->
 <dialog id="confirmDialog" class="confirm">
@@ -230,12 +260,8 @@
               <input name="new_folder" maxlength="60" placeholder="vznikne při prvním přesunu"></label>
             <p id="folderTargetNote" class="note"></p>
           </fieldset>
-          <fieldset>
-            <legend>Kdy zprávy podle pravidel přesouvat</legend>
-            <label class="option"><input type="radio" name="when" value="now" checked> Ihned po doručení</label>
-            <label class="option"><input type="radio" name="when" value="read"> Až po přečtení</label>
-          </fieldset>
-          <label class="option"><input type="checkbox" name="mark_read"> Přesunuté zprávy označit jako přečtené</label>
+          <label class="option"><input type="checkbox" name="mark_read"> Zprávy přesunuté ihned po doručení označit jako přečtené</label>
+          <p class="note">Kdy se zprávy přesouvají (ihned, nebo až po přečtení), se nastavuje u každého pravidla zvlášť.</p>
           <p id="folderError" class="error"></p>
           <div class="dialog-actions">
             <button type="button" id="folderDeleteBtn" class="btn danger" hidden>Smazat složku</button>
@@ -265,12 +291,16 @@
       <div data-panel="folder" id="folderRulesSection">
         <h3>Pravidla <span id="folderRulesCount" class="muted"></span></h3>
         <p class="note">Zprávy z doručené pošty všech účtů, které odpovídají kterémukoli pravidlu, se přesouvají do
-          složky. Pravidlo podle odesílatele vznikne i tlačítkem <b>Do složky…</b> u zprávy.</p>
+          složky. Pravidlo vznikne i tlačítkem <b>Nastavit pravidlo…</b> u zprávy.</p>
         <div class="rule-add">
           <select id="folderRuleKind">
             <option value="sender">Odesílatel</option>
             <option value="recipient">Příjemce (Komu / Kopie)</option>
-            <option value="subject">Slovo v předmětu</option>
+            <option value="subject">Část předmětu</option>
+          </select>
+          <select id="folderRuleWhen" title="Kdy zprávy podle pravidla přesouvat">
+            <option value="now">Ihned</option>
+            <option value="read">Po přečtení</option>
           </select>
           <input id="folderRuleInput" placeholder="odesilatel@example.cz" autocomplete="off">
           <button type="button" id="folderRuleAdd" class="btn">Přidat</button>
