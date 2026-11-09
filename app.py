@@ -374,6 +374,11 @@ def unread_arg():
     return ((acc, folder, uid) if acc and folder and uid is not None else None,)
 
 
+def query_arg():
+    """Text filtru seznamu (?q=) – filtruje se v uložených zprávách (předmět, odesílatel, příjemci)."""
+    return " ".join((request.args.get("q") or "").split()) or None
+
+
 def unread_only(messages, unread):
     """Výsledky hledání na serveru: stejné omezení jako unread_arg v databázi."""
     if unread is None:
@@ -386,26 +391,18 @@ def unread_only(messages, unread):
 def messages(acc_id):
     acc = account_or_404(acc_id)
     page = max(0, request.args.get("page", 0, type=int))
-    folder, query = folder_arg(), request.args.get("q") or None
-    if query:  # hledání v textu zpráv umí jen server
-        with pool.get(acc) as M:
-            res = mail.list_messages(M, folder, page, PAGE_SIZE, query)
-        for m in res["messages"]:
-            m["account_id"] = acc_id
-        res["messages"] = unread_only(res["messages"], unread_arg())
-        return jsonify(res)
+    folder = folder_arg()
     syncer.ensure_synced(acc, folder)
     offset, limit = list_window(PAGE_SIZE)
     version = database.version  # verze dat, ze které seznam vzniká (UI podle ní pozná, že je zastaralý)
-    return jsonify(**database.list_messages([acc_id], folder, page, limit, offset=offset, unread=unread_arg()),
-                   version=version)
+    return jsonify(**database.list_messages([acc_id], folder, page, limit, offset=offset, unread=unread_arg(),
+                                            search=query_arg()), version=version)
 
 
 @app.get("/api/unified")
 def unified():
     """Sloučená doručená pošta ze všech účtů – z lokální databáze."""
     page = max(0, request.args.get("page", 0, type=int))
-    query = request.args.get("q") or None
     view = request.args.get("filter", "all")
     if view not in db.VIEW_FILTERS:
         abort(400, "Neznámý pohled.")
@@ -413,35 +410,6 @@ def unified():
     if not accounts:
         return jsonify(messages=[], has_more=False, errors=[])
     errors = []
-
-    if query:  # hledání v textu – paralelně na serverech
-        def work(acc):
-            with pool.get(acc) as M:
-                return mail.list_messages(M, "INBOX", page, UNIFIED_PAGE_SIZE, query)
-        result, has_more = [], False
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            for acc, fut in [(a, ex.submit(work, a)) for a in accounts]:
-                try:
-                    res = fut.result()
-                except Exception as e:
-                    errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
-                    continue
-                for m in res["messages"]:
-                    m["account_id"] = acc["id"]
-                result.extend(res["messages"])
-                has_more = has_more or res["has_more"]
-        if view != "all":  # výsledky hledání ze serveru roztřídíme stejně jako pohledy z databáze
-            senders, mine = database.notify_senders(), database.my_addresses()
-
-            def view_of(m):
-                if any(a["addr"].lower() in senders for a in m["from"]):
-                    return "notifications"
-                direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
-                return "important" if direct else "fyi"
-            result = [m for m in result if view_of(m) == view]
-        result = unread_only(result, unread_arg())
-        result.sort(key=lambda m: m["date"] or 0, reverse=True)
-        return jsonify(messages=result, has_more=has_more, errors=errors)
 
     # účty, které ještě nikdy nebyly synchronizovány, stáhneme hned (paralelně)
     fresh = [a for a in accounts if not (database.folder(a["id"], "INBOX") or {}).get("last_sync")]
@@ -457,7 +425,7 @@ def unified():
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
     res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset,
-                                 unread=unread_arg())
+                                 unread=unread_arg(), search=query_arg())
     return jsonify(messages=res["messages"], has_more=res["has_more"], errors=errors, version=version)
 
 
@@ -734,7 +702,7 @@ def user_folder_messages(folder_id):
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
     res = database.list_messages([f["account_id"]], f["imap_name"], page, limit, offset=offset, unread=unread_arg(),
-                                 search=(request.args.get("q") or "").strip() or None)
+                                 search=query_arg())
     return jsonify(messages=res["messages"], has_more=res["has_more"], errors=[], version=version)
 
 
@@ -1008,7 +976,7 @@ def _role_list(by_acc):
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
     res = database.list_messages([], locations, page, limit, offset=offset, unread=unread_arg(),
-                                 search=(request.args.get("q") or "").strip() or None)
+                                 search=query_arg())
     return jsonify(messages=res["messages"], has_more=res["has_more"], total=res["total"], errors=[], version=version)
 
 
@@ -1193,6 +1161,127 @@ def message_locate(acc_id, uid):
     title = (database.folder(acc_id, folder) or {}).get("display") or mail.decode_utf7(folder)
     return jsonify(view={"type": "folder", "accountId": acc_id, "folder": folder, "title": title},
                    position=database.list_position([acc_id], folder, "all", acc_id, folder, uid))
+
+
+# --------------------------------------------------------------------------
+# Hledání: nejdřív okamžitě v uložených zprávách, pak dohledání na serverech (text zpráv, nestažené zprávy)
+# --------------------------------------------------------------------------
+
+REMOTE_PER_FOLDER = 200     # nejvýš tolik nejnovějších výsledků z jedné složky
+REMOTE_FETCH = 50           # z toho nejvýš tolik nestažených zpráv (hlavičky ze serveru)
+search_seq = {"n": 0}       # novější hledání ukončí starší, aby se nehromadila
+
+
+@app.get("/api/search")
+def search_all():
+    """Hledání ve veškeré poště – z lokální databáze (okamžité)."""
+    q = query_arg()
+    if not q:
+        return jsonify(messages=[], has_more=False, version=database.version)
+    version = database.version
+    found, more = database.search_all(q, [a["id"] for a in store.all()])
+    return jsonify(messages=found, has_more=more, version=version)
+
+
+def _search_locations():
+    """Kde hledat na serveru: ({účet: [složky]}, pohled doručené pošty nebo None) podle ?scope=."""
+    scope = request.args.get("scope") or "all"
+    accounts = store.all()
+    if scope == "all":  # veškerá pošta: synchronizované složky + koš
+        locs = {}
+        for a in accounts:
+            folders = database.folders(a["id"])
+            names = [f["name"] for f in sync.context_folders(folders, database.user_folder_names(a["id"]))]
+            names += [f["name"] for f in folders if f["role"] == "trash" and f["name"] not in names]
+            locs[a["id"]] = names
+        return locs, None
+    if scope == "unified":
+        view = request.args.get("filter") or "all"
+        if view not in db.VIEW_FILTERS:
+            abort(400, "Neznámý pohled.")
+        return {a["id"]: ["INBOX"] for a in accounts}, view
+    if scope == "ufolder":
+        f = _folder_or_404(request.args.get("id", type=int) or 0)
+        return ({f["account_id"]: [f["imap_name"]]} if f["account_id"] and store.get(f["account_id"]) else {}), None
+    if scope in ("spam", "trash"):
+        by_acc = database.spam_folders() if scope == "spam" else database.trash_folders()
+        return {a["id"]: [by_acc[a["id"]]] for a in accounts if a["id"] in by_acc}, None
+    if scope == "folder":
+        acc = account_or_404(request.args.get("account"))
+        return {acc["id"]: [folder_arg()]}, None
+    abort(400, "Neznámý rozsah hledání.")
+
+
+def _local_match(m, term):
+    """Našel by zprávu už lokální filtr? (pak ji dohledání na serveru nevrací znovu)"""
+    t = term.lower()
+    people = m["from"] + m["to"] + m.get("cc", [])
+    return t in (m["subject"] or "").lower() or any(t in f"{a.get('name') or ''} {a.get('addr') or ''}".lower()
+                                                   for a in people)
+
+
+@app.get("/api/search/remote")
+def search_remote():
+    """Dohledání na serverech: zprávy, které lokální filtr nenajde – shoda v textu zprávy nebo zprávy,
+    které ještě nejsou stažené. Novější hledání starší ukončí (stale)."""
+    q = query_arg()
+    if not q or len(q) < 2:
+        return jsonify(messages=[], errors=[])
+    locations, view = _search_locations()
+    with jobs_lock:
+        search_seq["n"] += 1
+        seq = search_seq["n"]
+    is_stale = lambda: search_seq["n"] != seq
+    if view not in (None, "all"):
+        senders, mine = database.notify_senders(), database.my_addresses()
+
+    def in_view(m):
+        if view in (None, "all"):
+            return True
+        if any(a["addr"].lower() in senders for a in m["from"]):
+            return view == "notifications"
+        direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
+        return view == ("important" if direct else "fyi")
+
+    def work(acc_id, folders):
+        acc, out = store.get(acc_id), []
+        if acc is None:
+            return out
+        with bg_pool.get(acc) as M:
+            for folder in folders:
+                if is_stale():
+                    break
+                try:
+                    mail._select(M, folder, readonly=True)
+                    uids = sorted((int(u) for u in mail._search(M, q)), reverse=True)[:REMOTE_PER_FOLDER]
+                except mail.MailError:
+                    continue  # složka mezitím zmizela / server hledání v ní neumí
+                known = database.messages_by_uids(acc_id, folder, uids)
+                out += [m for m in known.values() if not _local_match(m, q)]
+                unknown = [u for u in uids if u not in known][:REMOTE_FETCH]
+                if unknown:
+                    label = database.folder_label(acc_id, folder)
+                    for r in mail.fetch_header_records(M, unknown):
+                        if r.get("deleted"):
+                            continue
+                        m = {k: v for k, v in r.items() if k in mail.LIST_FIELDS or k == "message_id"}
+                        m.update(account_id=acc_id, folder=folder, folder_label=label, cc=r.get("cc", []),
+                                 prio=0 if folder == "INBOX" else 1)
+                        out.append(m)
+        return out
+
+    found, errors = [], []
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [(acc_id, ex.submit(work, acc_id, folders)) for acc_id, folders in locations.items() if folders]
+        for acc_id, fut in futures:
+            try:
+                found += fut.result()
+            except Exception as e:
+                errors.append(f"{(store.get(acc_id) or {}).get('name', acc_id)}: {mail.friendly_error(e)}")
+    if is_stale():
+        return jsonify(stale=True, messages=[], errors=[])
+    found = [m for m in database.dedupe(found) if in_view(m)]
+    return jsonify(messages=unread_only(found, unread_arg()), errors=errors)
 
 
 @app.get("/api/accounts/<acc_id>/messages/<int:uid>/context")

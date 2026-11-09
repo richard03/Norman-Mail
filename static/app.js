@@ -330,6 +330,7 @@ function setView(view, reveal = null) {
   state.anchor = reveal ? reveal.key : null;
   state.query = '';
   $('#searchInput').value = '';
+  if (view.type !== 'search') { $('#globalSearchInput').value = ''; state.beforeSearch = null; }
   renderSidebar();
   return loadList({ reveal });
 }
@@ -393,25 +394,33 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
       const cur = state.current;
       if (cur) { qs.set('keep_acc', cur.accountId); qs.set('keep_folder', cur.folder); qs.set('keep_uid', cur.uid); }
     }
-    if (state.query) qs.set('q', state.query);
-    else if (append) qs.set('offset', loaded);                     // pokračovat za zobrazenými
+    if (state.query) qs.set('q', state.query);                    // filtr (z uložených zpráv)
+    const local = state.messages.filter(m => !m.remote).length;   // dohledané ze serveru jsou až na konci
+    if (append) qs.set('offset', local);                           // pokračovat za zobrazenými
     else if (reveal) { qs.set('offset', 0); qs.set('limit', reveal.position + 20); }  // rovnou po hledanou zprávu
-    else if (keepLoaded && loaded) { qs.set('offset', 0); qs.set('limit', loaded); }  // obnovit vše zobrazené
+    else if (keepLoaded && local) { qs.set('offset', 0); qs.set('limit', local); }  // obnovit vše zobrazené
     let res;
-    if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
+    if (v.type === 'search') { qs.set('q', v.q); res = await api('/api/search?' + qs); }
+    else if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
     else if (v.type === 'spam') res = await api('/api/spam?' + qs);
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
-    state.messages = append ? state.messages.concat(res.messages) : res.messages;
+    if (append) {  // další stránka patří před dohledané ze serveru (a bez těch, které už tam jsou)
+      const remote = state.messages.filter(m => m.remote);
+      const have = new Set(state.messages.map(keyOf));
+      state.messages = state.messages.filter(m => !m.remote)
+        .concat(res.messages.filter(m => !have.has(keyOf(m))), remote);
+    } else state.messages = res.messages;
     if (v.type === 'trash' && !state.query && !state.unreadOnly && res.total != null && res.total !== state.trashTotal) {
       state.trashTotal = res.total;
       renderSidebar();
     }
     if (!append) pruneSelection();
     if (keepLoaded && !state.query && !state.messages.length && loaded) state.page = 0;
-    state.hasMore = res.has_more;
+    state.hasMore = v.type === 'search' ? false : res.has_more;  // hledání: jedna dávka (nejnovější výsledky)
+    state.searchTruncated = v.type === 'search' && res.has_more;
     state.loadMoreFailed = false;
     if (!append || keepLoaded) state.listVersion = res.version ?? null;
     state.listErrors = res.errors || [];
@@ -424,6 +433,50 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
   renderList();
   if (reveal) scrollToActive();
   setTimeout(maybeLoadMore, 0);  // seznam je pořád kratší než okno → načíst další hned
+  if (!append && token === listToken) searchRemote();  // filtr / hledání: dohledat na serveru
+}
+
+// --- dohledání na serveru: zprávy, které lokální filtr nenajde (shoda v textu zprávy, nestažené zprávy)
+
+let remoteToken = 0, remoteTimer = null;
+
+/** Text, který se v aktuálním seznamu hledá (hledání ve veškeré poště, nebo filtr složky). */
+const activeQuery = () => (state.view.type === 'search' ? state.view.q : state.query) || '';
+
+function remoteScope() {
+  const v = state.view, qs = new URLSearchParams({ q: activeQuery() });
+  if (v.type === 'search') qs.set('scope', 'all');
+  else if (v.type === 'unified') { qs.set('scope', 'unified'); qs.set('filter', v.filter); }
+  else if (v.type === 'ufolder') { qs.set('scope', 'ufolder'); qs.set('id', v.id); }
+  else if (v.type === 'trash' || v.type === 'spam') qs.set('scope', v.type);
+  else { qs.set('scope', 'folder'); qs.set('account', v.accountId); qs.set('folder', v.folder); }
+  if (state.unreadOnly) qs.set('unread', '1');
+  return qs;
+}
+
+function searchRemote() {
+  const token = ++remoteToken;
+  clearTimeout(remoteTimer);
+  state.remoteStatus = null;
+  if (activeQuery().length < 2) return;
+  state.remoteStatus = 'searching';
+  renderList();
+  remoteTimer = setTimeout(async () => {  // až uživatel dopíše
+    let res;
+    try { res = await api('/api/search/remote?' + remoteScope()); } catch (e) {
+      if (token !== remoteToken) return;
+      state.remoteStatus = { error: e.message };
+      return renderList();
+    }
+    if (token !== remoteToken || res.stale) return;
+    const have = new Set(state.messages.map(keyOf));
+    const ids = new Set(state.messages.map(m => m.message_id && `${m.account_id}|${m.message_id}`).filter(Boolean));
+    const extra = res.messages.filter(m => !have.has(keyOf(m))
+      && !(m.message_id && ids.has(`${m.account_id}|${m.message_id}`))).map(m => ({ ...m, remote: true }));
+    state.messages = state.messages.concat(extra);
+    state.remoteStatus = { found: extra.length, errors: res.errors || [] };
+    renderList();
+  }, 450);
 }
 
 /** Automatické načítání dalších zpráv, když se seznam posune blízko konce. */
@@ -439,27 +492,34 @@ function maybeLoadMore() {
 function renderList() {
   const v = state.view;
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
-  const multi = ['unified', 'ufolder', 'trash', 'spam'].includes(v.type);  // zprávy z více účtů
-  $('#listTitle').textContent = v.type === 'unified' ? UNIFIED_TITLE[v.filter] : v.type === 'trash' ? 'Smazané'
-    : v.type === 'spam' ? 'Spam' : v.type === 'ufolder' ? v.title : `${v.title || v.folder} · ${acc?.name || ''}`;
-  $('#searchInput').placeholder = v.type === 'unified' ? 'Hledat v doručené poště…'
-    : v.type === 'trash' ? 'Hledat ve Smazaných…' : v.type === 'spam' ? 'Hledat ve spamu…' : 'Hledat ve složce…';
+  const isSearch = v.type === 'search';
+  const multi = ['unified', 'ufolder', 'trash', 'spam', 'search'].includes(v.type);  // zprávy z více účtů
+  $('#listTitle').textContent = isSearch ? `Hledání: „${v.q}“` : v.type === 'unified' ? UNIFIED_TITLE[v.filter]
+    : v.type === 'trash' ? 'Smazané' : v.type === 'spam' ? 'Spam' : v.type === 'ufolder' ? v.title
+    : `${v.title || v.folder} · ${acc?.name || ''}`;
+  $('#listTitle').title = $('#listTitle').textContent;
+  $('#searchForm').hidden = isSearch;              // výsledky hledání se dál nefiltrují
+  $('.unread-toggle').hidden = isSearch;
   renderTrashFooter();
   $('#listErrors').innerHTML = state.listErrors.map(e => `<div class="list-error">${esc(e)}</div>`).join('');
 
   const showTo = v.type === 'folder' && ['sent', 'drafts'].includes(folderRole(v.accountId, v.folder));
   const cur = state.current;
+  const firstRemote = state.messages.findIndex(m => m.remote);
   $('#messages').innerHTML = state.messages.map((m, i) => {
+    const sep = i === firstRemote
+      ? '<li class="list-sep">Další nalezené na serveru (shoda v textu zprávy nebo zatím nestažené)</li>' : '';
     const active = cur && cur.accountId === m.account_id && cur.folder === m.folder && cur.uid === m.uid;
     const sel = state.selected.has(keyOf(m));
-    return `<li class="msg ${m.seen ? '' : 'unread'} ${active ? 'active' : ''} ${sel ? 'selected' : ''}" data-i="${i}" draggable="true">
+    return `${sep}<li class="msg ${m.seen ? '' : 'unread'} ${active ? 'active' : ''} ${sel ? 'selected' : ''}" data-i="${i}" draggable="true">
       ${multi ? `<span class="strip" style="background:${accColor(m.account_id)}"></span>` : ''}
       <div class="row1">
         <span class="from">${esc(showTo ? 'Komu: ' + shortAddr(m.to) : shortAddr(m.from))}</span>
         <span class="date">${m.snoozed_until ? `<span title="Odloženo do ${esc(fmtSnooze(m.snoozed_until))}">⏰</span> ` : ''}${m.flagged ? '★ ' : ''}${m.has_attachments ? '📎 ' : ''}${fmtDate(m.date)}</span>
       </div>
       <div class="subject">${esc(m.subject)}</div>
-      ${multi ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}</div>` : ''}
+      ${multi ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}${isSearch && m.folder_label
+        ? ` · <span class="folder-label">${esc(m.folder_label)}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') + listTail();
 }
@@ -473,14 +533,24 @@ function renderTrashFooter() {
   $('#emptyTrashBtn').disabled = !state.trashTotal;
 }
 
-/** Poslední řádek seznamu: spinner při načítání, jinak stav (prázdno / chyba dalších zpráv). */
+/** Poslední řádek seznamu: spinner při načítání, jinak stav (prázdno / chyba dalších zpráv / dohledávání). */
 function listTail() {
   if (state.listLoading) return '<li class="list-tail"><span class="spinner" aria-label="Načítám"></span></li>';
   if (state.loadMoreFailed)
     return '<li class="list-tail">Další zprávy se nepodařilo načíst. <button class="link" id="retryMore">Zkusit znovu</button></li>';
+  if (state.hasMore) return '';  // další stránky se načtou při rolování
+  const rs = activeQuery() ? state.remoteStatus : null;
+  if (rs === 'searching')
+    return `<li class="list-tail"><span class="spinner small" aria-hidden="true"></span> ${state.messages.length
+      ? 'Dohledávám další na serveru…' : 'V uložených zprávách nic – hledám na serveru…'}</li>`;
+  const errs = rs?.errors?.length ? `<div class="error small">${rs.errors.map(esc).join('<br>')}</div>` : '';
+  if (rs?.error) return `<li class="list-tail error">Dohledání na serveru selhalo: ${esc(rs.error)}</li>`;
   if (!state.messages.length && state.accounts.length && !state.listErrors.length)
-    return `<li class="list-tail">${state.query ? 'Nic nenalezeno.' : state.unreadOnly ? 'Žádné nepřečtené zprávy.' : 'Žádné zprávy.'}</li>`;
-  return '';
+    return `<li class="list-tail">${activeQuery() ? 'Nic nenalezeno.' : state.unreadOnly ? 'Žádné nepřečtené zprávy.' : 'Žádné zprávy.'}${errs}</li>`;
+  const more = state.searchTruncated ? '<div class="small">Zobrazeny jsou nejnovější výsledky – zpřesněte hledání.</div>' : '';
+  if (rs && !rs.found) return `<li class="list-tail muted">Na serveru nic dalšího.${more}${errs}</li>`;
+  if (more) return `<li class="list-tail muted">${more}</li>`;
+  return errs ? `<li class="list-tail">${errs}</li>` : '';
 }
 
 // Klik = otevřít zprávu; Ctrl+klik = přidat/odebrat z výběru; Shift+klik = výběr rozsahu.
@@ -536,13 +606,47 @@ $('#messages').addEventListener('click', e => {
   if (!state.listLoading) { state.page++; loadList({ append: true }); }
 });
 $('#refreshBtn').addEventListener('click', () => refreshAll());
-$('#searchForm').addEventListener('submit', e => {
-  e.preventDefault();
-  state.query = $('#searchInput').value.trim();
-  loadList();
+// Filtr ve 2. sloupci: při psaní hned z uložených zpráv, pak dohledání na serveru.
+let filterTimer = null;
+function applyFilter() {
+  clearTimeout(filterTimer);
+  const q = $('#searchInput').value.trim();
+  if (q === state.query) return;
+  state.query = q;
+  loadList({ quiet: true });
+}
+$('#searchForm').addEventListener('submit', e => { e.preventDefault(); applyFilter(); });
+$('#searchInput').addEventListener('input', () => { clearTimeout(filterTimer); filterTimer = setTimeout(applyFilter, 200); });
+$('#searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; applyFilter(); }
 });
-$('#searchInput').addEventListener('search', () => {  // křížek v poli hledání
-  if (!$('#searchInput').value && state.query) { state.query = ''; loadList(); }
+
+// Hledání ve veškeré poště (nad seznamem): vlastní seznam výsledků; prázdné pole = zpět, kde uživatel byl.
+let globalTimer = null;
+function applyGlobalSearch() {
+  clearTimeout(globalTimer);
+  const q = $('#globalSearchInput').value.trim();
+  if (!q) {
+    if (state.view.type === 'search') {
+      const back = state.beforeSearch || { type: 'unified', filter: 'important' };
+      state.beforeSearch = null;
+      setView(back);
+    }
+    return;
+  }
+  if (state.view.type === 'search') {
+    if (state.view.q === q) return;
+    state.view = { type: 'search', q };
+    return loadList({ quiet: true });
+  }
+  const prev = state.view;
+  setView({ type: 'search', q });
+  state.beforeSearch = prev;
+}
+$('#globalSearch').addEventListener('submit', e => { e.preventDefault(); applyGlobalSearch(); });
+$('#globalSearchInput').addEventListener('input', () => { clearTimeout(globalTimer); globalTimer = setTimeout(applyGlobalSearch, 250); });
+$('#globalSearchInput').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && e.target.value) { e.target.value = ''; applyGlobalSearch(); }
 });
 
 function adjustUnseen(accountId, folder, delta) {
@@ -2008,7 +2112,7 @@ async function pollSync() {
   if (lastNoticeId !== null) notices.filter(([id]) => id > lastNoticeId).forEach(([, text]) => toast(text, true));
   lastNoticeId = Math.max(lastNoticeId ?? 0, newest);
   // Seznam vznikl z určité verze databáze; pokud se od té doby změnila, načteme ho znovu.
-  if (!state.listLoading && state.listVersion != null && st.version !== state.listVersion && !state.query)
+  if (!state.listLoading && state.listVersion != null && st.version !== state.listVersion && !activeQuery())
     loadList({ quiet: true, keepLoaded: true });
 }
 
@@ -2045,8 +2149,7 @@ function saveColumnWidths() {
 
 const colWidth = name => $(COLUMNS[name].el).getBoundingClientRect().width;
 /** Místo, které zbývá na čtecí část (její vlastní šířka pod minimum neklesne – rozvržení by přeteklo). */
-const readerSpace = () => $('#detail').getBoundingClientRect().width
-  - $('#actions').getBoundingClientRect().width - colWidth('context');
+const readerSpace = () => $('#detail').getBoundingClientRect().width - $('#actions').getBoundingClientRect().width;
 
 /** Když se okno zmenší, aby čtecí část neklesla pod minimum: ubrat nejdřív kontextu, pak seznamu a panelu. */
 function fitColumns() {

@@ -20,6 +20,12 @@
     </div>
   </aside>
 
+  <!-- Hledání ve veškeré poště (nad seznamem, čtením a tlačítky) -->
+  <form id="globalSearch" class="global-search" role="search" autocomplete="off">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="globalSearchInput" type="search" placeholder="Hledat ve veškeré poště…" aria-label="Hledat ve veškeré poště">
+  </form>
+
   <section id="list">
     <header class="list-head">
       <h1 id="listTitle">Důležité</h1>
@@ -28,7 +34,7 @@
       <button id="refreshBtn" class="icon-btn" title="Obnovit">⟳</button>
     </header>
     <form id="searchForm" class="search">
-      <input id="searchInput" type="search" placeholder="Hledat ve složce…">
+      <input id="searchInput" type="search" placeholder="Filtrovat…" aria-label="Filtrovat seznam">
     </form>
     <div id="listErrors"></div>
     <ul id="messages"></ul>
@@ -70,13 +76,13 @@
     <button class="action danger action-bottom" data-act="delete" disabled>
       <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>Smazat</button>
   </aside>
+  </div>
+  </section>
 
   <aside id="context">
     <div class="col-title">Kontext <span id="contextCount" class="muted"></span></div>
     <div id="contextBody"><div class="empty small">Vyberte zprávu</div></div>
   </aside>
-  </div>
-  </section>
 </div>
 
 <div id="dragGhost" class="drag-ghost"></div>

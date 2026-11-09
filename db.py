@@ -238,6 +238,74 @@ class Database:
         rows = self._q(self._SELECT + " WHERE m.account_id=? AND m.folder=? AND m.uid=?", (acc_id, folder, uid))
         return self._to_dict(rows[0]) if rows else None
 
+    # ------------------------------------------------------------------ hledání ve veškeré poště
+
+    # Kde zprávu v aplikaci uvidíte: složka aplikace, pohled doručené pošty, Spam, Smazané, jinak název složky.
+    # Priorita pro odstranění duplicit (Gmail: zpráva je v doručené poště i ve „Všech zprávách“).
+    _LABELED = f"""SELECT m.*, s.until AS snoozed_until, {IS_NOTIFICATION} AS is_notification,
+            CASE WHEN u.name IS NOT NULL THEN u.name
+                 WHEN m.folder='INBOX' THEN CASE WHEN {IS_NOTIFICATION} THEN 'Notifikace'
+                                                 WHEN {IS_DIRECT} THEN 'Důležité' ELSE 'Vzít na vědomí' END
+                 WHEN f.role='trash' THEN 'Smazané' WHEN f.role='junk' THEN 'Spam'
+                 ELSE COALESCE(f.display, m.folder) END AS folder_label,
+            CASE WHEN m.folder='INBOX' OR u.name IS NOT NULL THEN 0 WHEN f.role='all' THEN 2 ELSE 1 END AS prio
+        FROM messages m
+        LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
+        LEFT JOIN folders f ON f.account_id=m.account_id AND f.name=m.folder
+        LEFT JOIN user_folders u ON u.account_id=m.account_id AND u.imap_name=m.folder"""
+
+    def _labeled(self, rows):
+        out = []
+        for r in rows:
+            d = self._to_dict(r)
+            d["folder_label"], d["prio"] = r["folder_label"], r["prio"]
+            out.append(d)
+        return out
+
+    @staticmethod
+    def dedupe(messages):
+        """Stejná zpráva ve více složkách (podle Message-ID) jen jednou – tam, kde ji uživatel vidí."""
+        best = {}
+        for m in messages:
+            k = (m["account_id"], m.get("message_id") or f"{m['folder']}|{m['uid']}")
+            if k not in best or m.get("prio", 1) < best[k].get("prio", 1):
+                best[k] = m
+        return sorted(best.values(), key=lambda m: (m["date"] or 0, m["uid"]), reverse=True)
+
+    def search_all(self, term, acc_ids, limit=300):
+        """Hledání ve všech uložených zprávách všech účtů (předmět, odesílatel, příjemci).
+        Vrací (zprávy, zda jich je víc)."""
+        if not acc_ids:
+            return [], False
+        like = f"%{term}%"
+        rows = self._q(f"""{self._LABELED}
+            WHERE m.account_id IN ({','.join('?' * len(acc_ids))})
+              AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ? OR m.cc_json LIKE ?)
+            ORDER BY m.date DESC, m.uid DESC LIMIT ?""", (*acc_ids, like, like, like, like, limit * 2 + 1))
+        found = self.dedupe(self._labeled(rows))
+        return found[:limit], len(rows) > limit * 2 or len(found) > limit
+
+    def messages_by_uids(self, acc_id, folder, uids) -> dict:
+        """{uid: zpráva s folder_label} uložených zpráv ze seznamu UID (výsledky hledání na serveru)."""
+        out = {}
+        uids = list(uids)
+        for i in range(0, len(uids), 500):
+            chunk = uids[i:i + 500]
+            rows = self._q(f"{self._LABELED} WHERE m.account_id=? AND m.folder=? AND m.uid IN ({','.join('?' * len(chunk))})",
+                           (acc_id, folder, *chunk))
+            out.update({d["uid"]: d for d in self._labeled(rows)})
+        return out
+
+    def folder_label(self, acc_id, folder) -> str:
+        """Popisek složky pro zprávu, která ještě není v databázi."""
+        u = self._q("SELECT name FROM user_folders WHERE account_id=? AND imap_name=?", (acc_id, folder))
+        if u:
+            return u[0][0]
+        if folder == "INBOX":
+            return "Doručená pošta"
+        f = self.folder(acc_id, folder) or {}
+        return {"trash": "Smazané", "junk": "Spam"}.get(f.get("role"), f.get("display") or folder)
+
     def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None,
                       unread=None) -> dict:
         """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
