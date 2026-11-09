@@ -702,6 +702,21 @@ def _rule_arg(data):
     return kind, value
 
 
+def _update_rule(table, rule_id, kind, value, after_read=None):
+    if not database.update_rule(table, rule_id, kind, value, after_read):
+        raise ValidationError("Stejné pravidlo už existuje.")
+    database.bump()
+    syncer.trigger()  # zprávy podle upraveného pravidla
+    return jsonify(ok=True, kind=kind, value=value)
+
+
+@app.put("/api/user-folder-rules/<int:rule_id>")
+def user_folder_rule_update(rule_id):
+    data = request.get_json(force=True)
+    kind, value = _rule_arg(data)
+    return _update_rule("user_folder_rules", rule_id, kind, value, bool(data.get("after_read")))
+
+
 @app.delete("/api/user-folder-rules/<int:rule_id>")
 def user_folder_rule_delete(rule_id):
     database.delete_folder_rule(rule_id)
@@ -1086,6 +1101,25 @@ def category_rules(category):
     return jsonify(database.category_rules(_category_or_404(category)))
 
 
+@app.put("/api/categories/<category>/rules/<int:rule_id>")
+def category_rule_update(category, rule_id):
+    """Úprava pravidla Nedůležitých / Notifikací: odesílatel (adresa) nebo předmět (bez Re:/Fw:)."""
+    _category_or_404(category)
+    data = request.get_json(force=True)
+    kind = data.get("kind")
+    if kind not in db.CATEGORY_RULE_KINDS:
+        raise ValidationError("Neznámý typ pravidla.")
+    if kind == "sender":
+        value = str(data.get("value") or "").strip().lower()
+        if not mail.ADDR_RE.match(value):
+            raise ValidationError("Zadejte platnou e-mailovou adresu.")
+    else:
+        value = mail.base_subject(str(data.get("value") or "")).lower()
+        if not value:
+            raise ValidationError("Zadejte předmět.")
+    return _update_rule(db.CATEGORY_TABLES[category], rule_id, kind, value)
+
+
 @app.delete("/api/categories/<category>/rules/<int:rule_id>")
 def category_rule_delete(category, rule_id):
     database.delete_category_rule(_category_or_404(category), rule_id)
@@ -1096,6 +1130,14 @@ def category_rule_delete(category, rule_id):
 @app.get("/api/spam-rules")
 def spam_rules():
     return jsonify(database.spam_rules())
+
+
+@app.put("/api/spam-rules/<int:rule_id>")
+def spam_rule_update(rule_id):
+    value = str(request.get_json(force=True).get("value") or "").strip().lower()
+    if not mail.ADDR_RE.match(value):
+        raise ValidationError("Zadejte platnou e-mailovou adresu.")
+    return _update_rule("spam_rules", rule_id, "sender", value)
 
 
 @app.delete("/api/spam-rules/<int:rule_id>")

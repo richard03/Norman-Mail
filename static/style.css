@@ -354,6 +354,13 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 .rule-main { flex: 1; min-width: 0; }
 .rule-value { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rule-meta { font-size: 12px; color: var(--muted); }
+.rule.editing { display: block; }
+.rule-edit { display: flex; flex-wrap: wrap; gap: 6px; }
+.rule-edit select { flex: 1 1 40%; min-width: 0; width: auto; }
+.rule-edit input { flex: 1 1 100%; min-width: 0; }
+.rule-edit-error { flex: 1 1 100%; margin: 0; }
+.rule-edit-error:empty { display: none; }
+.rule-edit-actions { display: flex; gap: 6px; margin-left: auto; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
 .action.active { background: var(--active); border-color: var(--accent); }

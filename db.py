@@ -515,6 +515,21 @@ class Database:
     def spam_rules(self):
         return [dict(r) for r in self._q("SELECT * FROM spam_rules ORDER BY created DESC")]
 
+    RULE_TABLES = ("spam_rules", "notify_rules", "unimportant_rules", "user_folder_rules")
+
+    def update_rule(self, table, rule_id, kind, value, after_read=None) -> bool:
+        """Úprava pravidla (typ, hodnota, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
+        assert table in self.RULE_TABLES
+        sets, params = ["kind=?", "value=?"], [kind, value]
+        if after_read is not None:
+            sets.append("after_read=?")
+            params.append(int(after_read))
+        try:
+            self._q(f"UPDATE {table} SET {', '.join(sets)} WHERE id=?", (*params, rule_id))
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
     def delete_spam_rule(self, rule_id):
         self._q("DELETE FROM spam_rules WHERE id=?", (rule_id,))
 
