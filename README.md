@@ -78,6 +78,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 
 - Libovolný počet účtů, jejichž doručená pošta se slučuje do pohledů **Důležité**, **Vzít na vědomí** a **Notifikace** (účty se načítají paralelně a jsou barevně odlišené). Kliknutí na účet v levém sloupci otevře jeho nastavení.
 - Nastavitelnou šířku sloupců: levý panel, seznam zpráv a kontext se dají rozšířit nebo zúžit tažením za okraj. Dvojklik na okraj vrátí výchozí šířku. Sloupec s tlačítky má pevnou šířku, čtení zprávy vyplní zbytek okna. Šířky se pamatují i po restartu.
+- Přepínač **Jen nepřečtené** v záhlaví seznamu skryje přečtené zprávy. Zpráva, kterou právě čtete, v seznamu zůstane. Přepínač platí jen do opuštění složky, po návratu jsou zase vidět všechny zprávy.
 - Procházení všech složek každého účtu s počtem nepřečtených zpráv.
 - Čtení HTML i textových zpráv a stahování příloh. Vložené obrázky (`cid:`) se zobrazí přímo ve zprávě.
 - Psaní nových zpráv, odpovědi, odpovědi všem a přeposílání včetně původních příloh. Lze přidat kopii, skrytou kopii i vlastní přílohy.

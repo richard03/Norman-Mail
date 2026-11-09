@@ -32,6 +32,7 @@ const state = {
   userFolders: [],        // uživatelské složky (z /api/user-folders)
   editingFolder: null,    // id složky v dialogu konfigurace
   messages: [], page: 0, hasMore: false, query: '', listErrors: [], listLoading: false,
+  unreadOnly: false,      // přepínač „Jen nepřečtené“ – platí jen do opuštění složky
   selected: new Set(),    // klíče vybraných zpráv (Ctrl/Shift + klik) – pro drag & drop a hromadné mazání
   anchor: null,           // klíč zprávy, od které se počítá výběr se Shiftem
   dragItems: null,        // právě přetahované zprávy
@@ -324,6 +325,7 @@ function setView(view, reveal = null) {
   if (isNotifView(state.view) && !isNotifView(view) && state.settings?.notify_mark_read_on_leave)
     markNotificationsRead();
   state.view = view;
+  setUnreadOnly(false);
   state.selected = reveal ? new Set([reveal.key]) : new Set();
   state.anchor = reveal ? reveal.key : null;
   state.query = '';
@@ -331,6 +333,15 @@ function setView(view, reveal = null) {
   renderSidebar();
   return loadList({ reveal });
 }
+
+function setUnreadOnly(on) {
+  state.unreadOnly = on;
+  $('#unreadOnly').checked = on;
+}
+$('#unreadOnly').addEventListener('change', e => {
+  state.unreadOnly = e.target.checked;
+  loadList();
+});
 
 const sameView = (a, b) => a.type === b.type && a.filter === b.filter && a.id === b.id
   && a.accountId === b.accountId && a.folder === b.folder;
@@ -350,6 +361,7 @@ async function revealInList(cur) {
   if (sameView(res.view, state.view)) {  // stejný pohled, jen zpráva ještě není načtená (nebo je zapnuté hledání)
     state.query = '';
     $('#searchInput').value = '';
+    setUnreadOnly(false);
     await loadList({ reveal, quiet: true });
   } else await setView(res.view, reveal);
   if (state.current === cur && cur.data) markListedSeen(cur);
@@ -376,6 +388,11 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
   renderList();
   try {
     const qs = new URLSearchParams({ page: state.page });
+    if (state.unreadOnly) {  // jen nepřečtené; právě otevřená zpráva v seznamu zůstane, i když je přečtená
+      qs.set('unread', '1');
+      const cur = state.current;
+      if (cur) { qs.set('keep_acc', cur.accountId); qs.set('keep_folder', cur.folder); qs.set('keep_uid', cur.uid); }
+    }
     if (state.query) qs.set('q', state.query);
     else if (append) qs.set('offset', loaded);                     // pokračovat za zobrazenými
     else if (reveal) { qs.set('offset', 0); qs.set('limit', reveal.position + 20); }  // rovnou po hledanou zprávu
@@ -388,7 +405,7 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
     state.messages = append ? state.messages.concat(res.messages) : res.messages;
-    if (v.type === 'trash' && !state.query && res.total != null && res.total !== state.trashTotal) {
+    if (v.type === 'trash' && !state.query && !state.unreadOnly && res.total != null && res.total !== state.trashTotal) {
       state.trashTotal = res.total;
       renderSidebar();
     }
@@ -462,7 +479,7 @@ function listTail() {
   if (state.loadMoreFailed)
     return '<li class="list-tail">Další zprávy se nepodařilo načíst. <button class="link" id="retryMore">Zkusit znovu</button></li>';
   if (!state.messages.length && state.accounts.length && !state.listErrors.length)
-    return `<li class="list-tail">${state.query ? 'Nic nenalezeno.' : 'Žádné zprávy.'}</li>`;
+    return `<li class="list-tail">${state.query ? 'Nic nenalezeno.' : state.unreadOnly ? 'Žádné nepřečtené zprávy.' : 'Žádné zprávy.'}</li>`;
   return '';
 }
 

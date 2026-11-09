@@ -238,14 +238,23 @@ class Database:
         rows = self._q(self._SELECT + " WHERE m.account_id=? AND m.folder=? AND m.uid=?", (acc_id, folder, uid))
         return self._to_dict(rows[0]) if rows else None
 
-    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None) -> dict:
+    def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None,
+                      unread=None) -> dict:
         """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
-        nic nepřeskočí, ani když mezitím nějaké zprávy zmizely."""
+        nic nepřeskočí, ani když mezitím nějaké zprávy zmizely. unread = (keep,) → jen nepřečtené;
+        keep = (účet, složka, uid) zprávy, která v seznamu zůstane i přečtená (právě otevřená), nebo None."""
         if offset is None:
             offset = page * page_size
         if isinstance(folder, dict) and not folder:
             return {"messages": [], "total": 0, "has_more": False}
         where, params = self._list_where(acc_ids, folder, view)
+        if unread is not None:
+            keep = unread[0]
+            if keep:
+                where += " AND (m.seen=0 OR (m.account_id=? AND m.folder=? AND m.uid=?))"
+                params += list(keep)
+            else:
+                where += " AND m.seen=0"
         if search:
             where += " AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ?)"
             params += [f"%{search}%"] * 3

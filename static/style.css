@@ -40,7 +40,7 @@ body {
 button, input, select, textarea { font: inherit; color: inherit; }
 
 /* Šířky sloupců: výchozí hodnoty; po přetažení úchytu je přepíše inline styl na #app. */
-:root { --w-sidebar: 220px; --w-list: 340px; --w-actions: 170px; --w-context: 300px; }
+:root { --w-sidebar: 220px; --w-list: 340px; --w-actions: 221px; --w-context: 300px; }
 #app {
   display: grid;
   grid-template-columns: var(--w-sidebar) var(--w-list) minmax(0, 1fr);
@@ -290,7 +290,7 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 .tag.spam { color: var(--danger); border-color: var(--danger); }
 
 @media (max-width: 1500px) {
-  :root { --w-sidebar: 190px; --w-list: 290px; --w-actions: 150px; --w-context: 260px; }
+  :root { --w-sidebar: 190px; --w-list: 290px; --w-actions: 195px; --w-context: 260px; }
 }
 @media (max-width: 760px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 40vh 1fr; height: auto; min-height: 100vh; }
@@ -426,3 +426,21 @@ dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
 /* ---------- kontextové menu ---------- */
 .menu.ctx-menu { position: fixed; right: auto; top: 0; left: 0; min-width: 210px; z-index: 100; }
 .menu button:disabled { color: var(--muted); opacity: .55; cursor: default; background: none; }
+
+/* ---------- přepínač „Jen nepřečtené“ v záhlaví seznamu ---------- */
+.unread-toggle {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap;
+}
+.unread-toggle input {
+  appearance: none; -webkit-appearance: none; margin: 0; cursor: pointer; flex: none;
+  width: 28px; height: 16px; border-radius: 8px; background: var(--border); position: relative; transition: background .15s;
+}
+.unread-toggle input::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--panel); transition: transform .15s;
+}
+.unread-toggle input:checked { background: var(--accent); }
+.unread-toggle input:checked::after { transform: translateX(12px); }
+.unread-toggle input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.unread-toggle:has(input:checked) { color: var(--text); }
