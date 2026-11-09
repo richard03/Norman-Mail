@@ -584,7 +584,7 @@ def message_categorize(acc_id, uid):
         if not value:
             raise mail.MailError("Zpráva nemá adresu odesílatele." if scope == "sender" else "Zpráva nemá předmět.")
         database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
-        database.add_category_rule(category, scope, value)
+        database.add_category_rule(category, **{scope: value})
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
     return jsonify(ok=True, sender=sender, subject=subject, view=view)
@@ -930,7 +930,7 @@ def messages_move():
     if target["type"] == "inbox" and target["view"] in db.CATEGORIES:
         other = next(c for c in db.CATEGORIES if c != target["view"])
         for s in senders - own:
-            database.add_category_rule(target["view"], "sender", s)
+            database.add_category_rule(target["view"], sender=s)
         for i in items:  # označení „jen tento email“ v druhé kategorii by mělo před pravidlem přednost
             if i["rec"]:
                 database.unmark_message(i["rec"], other)
@@ -940,7 +940,7 @@ def messages_move():
                 if i["rec"]:
                     database.uncategorize(i["rec"], cat)
                 elif i["sender"]:
-                    database.remove_category_rule(cat, "sender", i["sender"])
+                    database.remove_category_sender(cat, i["sender"])
     if target["type"] == "spam":
         for s in senders - own:
             database.add_spam_rule(s)
@@ -1103,21 +1103,23 @@ def category_rules(category):
 
 @app.put("/api/categories/<category>/rules/<int:rule_id>")
 def category_rule_update(category, rule_id):
-    """Úprava pravidla Nedůležitých / Notifikací: odesílatel (adresa) nebo předmět (bez Re:/Fw:)."""
+    """Úprava pravidla Nedůležitých / Notifikací: odesílatel, příjemce, část předmětu (vyplněné musí platit všechny)."""
     _category_or_404(category)
     data = request.get_json(force=True)
-    kind = data.get("kind")
-    if kind not in db.CATEGORY_RULE_KINDS:
-        raise ValidationError("Neznámý typ pravidla.")
-    if kind == "sender":
-        value = str(data.get("value") or "").strip().lower()
-        if not mail.ADDR_RE.match(value):
-            raise ValidationError("Zadejte platnou e-mailovou adresu.")
-    else:
-        value = mail.base_subject(str(data.get("value") or "")).lower()
-        if not value:
-            raise ValidationError("Zadejte předmět.")
-    return _update_rule(db.CATEGORY_TABLES[category], rule_id, kind, value)
+    sender, recipient = (str(data.get(k) or "").strip().lower() for k in ("sender", "recipient"))
+    subject = mail.base_subject(str(data.get("subject") or "")).lower()
+    for label, addr in (("odesílatele", sender), ("příjemce", recipient)):
+        if addr and not mail.ADDR_RE.match(addr):
+            raise ValidationError(f"Zadejte platnou e-mailovou adresu {label}.")
+    if len(subject) > 200:
+        raise ValidationError("Část předmětu může mít nejvýš 200 znaků.")
+    if not (sender or recipient or subject):
+        raise ValidationError("Vyplňte aspoň jedno pole.")
+    if not database.update_category_rule(category, rule_id, sender, recipient, subject):
+        raise ValidationError("Stejné pravidlo už existuje.")
+    database.bump()
+    syncer.trigger()
+    return jsonify(ok=True)
 
 
 @app.delete("/api/categories/<category>/rules/<int:rule_id>")

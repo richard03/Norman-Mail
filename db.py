@@ -51,12 +51,21 @@ CREATE TABLE IF NOT EXISTS unimportant_rules(
     created REAL, UNIQUE(kind, value));
 CREATE TABLE IF NOT EXISTS message_marks(
     key TEXT PRIMARY KEY, category TEXT NOT NULL, created REAL);
+CREATE TABLE IF NOT EXISTS category_rules(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
+    sender TEXT NOT NULL DEFAULT '', recipient TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
+    created REAL, UNIQUE(category, sender, recipient, subject));
 """
 
-# Kategorie doručené pošty, které určuje uživatel: pravidla (odesílatel / předmět) nebo označení jedné zprávy.
+# Kategorie doručené pošty, které určuje uživatel: pravidla nebo označení jedné zprávy.
+# Pravidlo má až tři podmínky (odesílatel, příjemce v Komu / Kopii, část předmětu); zpráva musí splnit všechny
+# vyplněné. (Dřívější tabulky notify_rules / unimportant_rules se jednou převedly do category_rules.)
 CATEGORIES = ("notifications", "unimportant")
-CATEGORY_TABLES = {"notifications": "notify_rules", "unimportant": "unimportant_rules"}
-CATEGORY_RULE_KINDS = ("sender", "subject")
+CATEGORY_RULE_FIELDS = ("sender", "recipient", "subject")
+CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || ',') > 0)"
+                       " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
+                       "      OR instr(m.cc_addrs, ',' || r.recipient || ',') > 0)"
+                       " AND (r.subject='' OR instr(m.base_subject, r.subject) > 0)")
 # Klíč zprávy pro označení „jen tento email“ – Message-ID (přežije přesun), jinak umístění zprávy.
 MSG_KEY = "COALESCE(NULLIF(m.message_id, ''), m.account_id || '|' || m.folder || '|' || m.uid)"
 
@@ -66,9 +75,17 @@ def message_key(rec) -> str:
 
 
 def _category_rule(cat):
-    return (f"EXISTS (SELECT 1 FROM {CATEGORY_TABLES[cat]} r WHERE "
-            "(r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0) "
-            "OR (r.kind='subject' AND m.base_subject = r.value))")
+    return f"EXISTS (SELECT 1 FROM category_rules r WHERE r.category='{cat}' AND {CATEGORY_RULE_MATCH})"
+
+
+def category_rule_matches(rule, rec) -> bool:
+    """Odpovídá zpráva pravidlu Nedůležitých / Notifikací? Stejná logika jako CATEGORY_RULE_MATCH v SQL."""
+    if rule["sender"] and not any((a.get("addr") or "").lower() == rule["sender"] for a in rec["from"]):
+        return False
+    if rule["recipient"] and not any((a.get("addr") or "").lower() == rule["recipient"]
+                                     for a in rec.get("to", []) + rec.get("cc", [])):
+        return False
+    return not rule["subject"] or rule["subject"] in (rec.get("base_subject") or "")
 
 
 # Kategorie zprávy (jediný výraz, vyhodnotí se jednou): označení jedné zprávy má přednost před pravidly;
@@ -163,6 +180,13 @@ class Database:
             self._conn.execute("ALTER TABLE user_folder_rules ADD COLUMN after_read INTEGER DEFAULT 0")
             self._conn.execute("UPDATE user_folder_rules SET after_read=COALESCE("
                                "(SELECT f.after_read FROM user_folders f WHERE f.id=user_folder_rules.folder_id), 0)")
+        # migrace: pravidla Notifikací / Nedůležitých s více podmínkami (dřív jen odesílatel NEBO předmět)
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='category_rules_migrated'").fetchone():
+            for cat, table in (("notifications", "notify_rules"), ("unimportant", "unimportant_rules")):
+                self._conn.execute(f"""INSERT OR IGNORE INTO category_rules(category, sender, subject, created)
+                    SELECT ?, CASE kind WHEN 'sender' THEN value ELSE '' END,
+                              CASE kind WHEN 'subject' THEN value ELSE '' END, created FROM {table}""", (cat,))
+            self._conn.execute("INSERT INTO meta VALUES('category_rules_migrated', '1')")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -515,7 +539,7 @@ class Database:
     def spam_rules(self):
         return [dict(r) for r in self._q("SELECT * FROM spam_rules ORDER BY created DESC")]
 
-    RULE_TABLES = ("spam_rules", "notify_rules", "unimportant_rules", "user_folder_rules")
+    RULE_TABLES = ("spam_rules", "user_folder_rules")
 
     def update_rule(self, table, rule_id, kind, value, after_read=None) -> bool:
         """Úprava pravidla (typ, hodnota, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
@@ -538,7 +562,7 @@ class Database:
         a lidé, kterým jsem někdy psal (jsou v Komu/Kopie odeslané pošty)."""
         senders = {s.lower() for s in senders if s}
         own = {r[0].lower() for r in self._q("SELECT email FROM my_addresses")}
-        safe = senders & (own | self.category_senders("notifications") | self.category_senders("unimportant"))
+        safe = senders & (own | self.category_senders())
         for s in senders - safe:
             if self._q("""SELECT 1 FROM messages m JOIN folders f ON f.account_id=m.account_id AND f.name=m.folder
                           AND f.role='sent' WHERE instr(m.to_addrs, ?) > 0 OR instr(m.cc_addrs, ?) > 0 LIMIT 1""",
@@ -713,29 +737,59 @@ class Database:
 
     # ------------------------------------------------------------------ Notifikace / Nedůležité: pravidla a označení
 
-    def add_category_rule(self, category, kind, value):
-        """Pravidlo kategorie (odesílatel / předmět). Stejné pravidlo může být v obou kategoriích –
-        pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
-        assert category in CATEGORIES and kind in CATEGORY_RULE_KINDS
-        self._q(f"INSERT OR IGNORE INTO {CATEGORY_TABLES[category]}(kind, value, created) VALUES(?, ?, ?)",
-                (kind, value.lower(), time.time()))
+    def add_category_rule(self, category, sender="", recipient="", subject=""):
+        """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Stejné pravidlo může být v obou
+        kategoriích – pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
+        assert category in CATEGORIES and (sender or recipient or subject)
+        self._q("""INSERT OR IGNORE INTO category_rules(category, sender, recipient, subject, created)
+                   VALUES(?, ?, ?, ?, ?)""", (category, sender.lower(), recipient.lower(), subject.lower(), time.time()))
 
-    def remove_category_rule(self, category, kind, value):
-        self._q(f"DELETE FROM {CATEGORY_TABLES[category]} WHERE kind=? AND value=?", (kind, value.lower()))
+    def update_category_rule(self, category, rule_id, sender, recipient, subject) -> bool:
+        """Úprava pravidla. False = stejné pravidlo už v kategorii existuje."""
+        try:
+            self._q("UPDATE category_rules SET sender=?, recipient=?, subject=? WHERE id=? AND category=?",
+                    (sender, recipient, subject, rule_id, category))
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
+    def remove_category_sender(self, category, sender):
+        """Smaže pravidla „jen odesílatel“ (bez dalších podmínek)."""
+        self._q("DELETE FROM category_rules WHERE category=? AND sender=? AND recipient='' AND subject=''",
+                (category, sender.lower()))
 
     def delete_category_rule(self, category, rule_id):
-        self._q(f"DELETE FROM {CATEGORY_TABLES[category]} WHERE id=?", (rule_id,))
+        self._q("DELETE FROM category_rules WHERE id=? AND category=?", (rule_id, category))
 
-    def category_senders(self, category) -> set:
-        return {r[0] for r in self._q(f"SELECT value FROM {CATEGORY_TABLES[category]} WHERE kind='sender'")}
+    def category_senders(self, category=None) -> set:
+        """Odesílatelé z pravidel „jen odesílatel“ (category=None: obou kategorií)."""
+        sql = "SELECT sender FROM category_rules WHERE sender<>'' AND recipient='' AND subject=''"
+        if category:
+            return {r[0] for r in self._q(sql + " AND category=?", (category,))}
+        return {r[0] for r in self._q(sql)}
 
     def category_rules(self, category):
-        """Pravidla s počtem zpráv, které jim v doručené poště odpovídají."""
-        return [dict(r) for r in self._q(f"""
-            SELECT r.*, (SELECT COUNT(*) FROM messages m WHERE m.folder='INBOX'
-                         AND ((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0)
-                              OR (r.kind='subject' AND m.base_subject = r.value))) AS messages
-            FROM {CATEGORY_TABLES[category]} r ORDER BY r.created DESC""")]
+        """Pravidla s počtem zpráv, které jim v doručené poště odpovídají (jeden průchod doručenou poštou;
+        pravidla „jen odesílatel“ se hledají ve slovníku)."""
+        rules = [dict(r, messages=0) for r in self._q(
+            "SELECT * FROM category_rules WHERE category=? ORDER BY created DESC", (category,))]
+        by_sender, other = {}, []
+        for r in rules:
+            if r["sender"] and not r["recipient"] and not r["subject"]:
+                by_sender[r["sender"]] = r
+            else:
+                other.append(r)
+        for frm, to, cc, subj in self._q(
+                "SELECT from_addrs, to_addrs, cc_addrs, base_subject FROM messages WHERE folder='INBOX'"):
+            for a in frm.strip(",").split(","):
+                if a in by_sender:
+                    by_sender[a]["messages"] += 1
+            for r in other:
+                if ((not r["sender"] or f",{r['sender']}," in frm)
+                        and (not r["recipient"] or f",{r['recipient']}," in to or f",{r['recipient']}," in cc)
+                        and (not r["subject"] or r["subject"] in (subj or ""))):
+                    r["messages"] += 1
+        return rules
 
     def mark_message(self, rec, category):
         """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
@@ -750,29 +804,24 @@ class Database:
 
     def uncategorize(self, rec, category):
         """Zpráva přestane patřit do kategorie: zruší se její označení i pravidla, která jí odpovídají
-        (odesílatel, předmět) – ta platila i pro ostatní zprávy."""
+        – ta platila i pro ostatní zprávy."""
         self.unmark_message(rec, category)
-        for a in rec["from"]:
-            if a.get("addr"):
-                self.remove_category_rule(category, "sender", a["addr"])
-        if rec.get("base_subject"):
-            self.remove_category_rule(category, "subject", rec["base_subject"])
+        ids = [r["id"] for r in self._q("SELECT * FROM category_rules WHERE category=?", (category,))
+               if category_rule_matches(r, rec)]
+        if ids:
+            self._q(f"DELETE FROM category_rules WHERE id IN ({','.join('?' * len(ids))})", ids)
 
     def categorizer(self):
         """Funkce zpráva → "notifications" / "unimportant" / None (stejná logika jako IS_NOTIFICATION
         a IS_UNIMPORTANT v SQL) – pro zprávy, které nejsou v databázi."""
         marks = dict(self._q("SELECT key, category FROM message_marks"))
-        rules = {cat: {(r[0], r[1]) for r in self._q(f"SELECT kind, value FROM {CATEGORY_TABLES[cat]}")}
-                 for cat in CATEGORIES}
+        rules = {cat: self._q("SELECT * FROM category_rules WHERE category=?", (cat,)) for cat in CATEGORIES}
 
         def category(rec):
             mark = marks.get(message_key(rec))
             if mark:
                 return mark
-            keys = {("sender", a["addr"].lower()) for a in rec["from"] if a.get("addr")}
-            if rec.get("base_subject"):
-                keys.add(("subject", rec["base_subject"]))
-            return next((cat for cat in CATEGORIES if keys & rules[cat]), None)
+            return next((cat for cat in CATEGORIES if any(category_rule_matches(r, rec) for r in rules[cat])), None)
         return category
 
     # ------------------------------------------------------------------ kontext

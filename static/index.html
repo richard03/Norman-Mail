@@ -141,6 +141,23 @@
   </form>
 </dialog>
 
+<!-- Úprava pravidla Nedůležitých / Notifikací (z Nastavení) -->
+<dialog id="categoryRuleDialog" class="confirm">
+  <form id="categoryRuleForm" method="dialog" autocomplete="off">
+    <h2 id="categoryRuleTitle">Upravit pravidlo</h2>
+    <label>Odesílatel<input name="sender" placeholder="odesilatel@example.cz"></label>
+    <label>Příjemce<input name="recipient" placeholder="adresa v Komu nebo Kopii"></label>
+    <label>Část předmětu<input name="subject" maxlength="200" placeholder="např. faktura"></label>
+    <p class="note">Zpráva musí splnit všechna vyplněná pole. Prázdné pole se nekontroluje.</p>
+    <p id="categoryRuleError" class="error"></p>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="categoryRuleCancel">Zrušit</button>
+      <button type="submit" class="btn primary" id="categoryRuleSave">Uložit</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- Upozornění / potvrzení (přesun, který by zprávy hned smazal; definitivní smazání) -->
 <dialog id="confirmDialog" class="confirm">
   <form method="dialog">

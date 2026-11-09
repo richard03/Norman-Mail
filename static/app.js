@@ -2058,11 +2058,11 @@ async function renderCategoryRules(cat) {
   list.innerHTML = rules.length ? rules.map(r => `
     <li class="rule">
       <div class="rule-main">
-        <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
-        <div class="rule-meta">${RULE_KINDS[r.kind] || r.kind} · přidáno ${new Date(r.created * 1000).toLocaleDateString('cs-CZ')}
+        <div class="rule-value" title="${esc(categoryRuleText(r))}">${esc(categoryRuleText(r))}</div>
+        <div class="rule-meta">přidáno ${new Date(r.created * 1000).toLocaleDateString('cs-CZ')}
           · ${zprav(r.messages)} v doručené poště</div>
       </div>
-      ${editRuleButton(cat, r.id)}
+      <button type="button" class="btn" data-edit-category-rule="${r.id}" data-category="${cat}" title="Upravit pravidlo">Upravit</button>
       <button type="button" class="btn danger" data-category-rule="${r.id}" data-category="${cat}" title="Smazat pravidlo">Smazat</button>
     </li>`).join('')
     : `<li class="empty-rules">Zatím žádná pravidla. Vzniknou tlačítkem ${CATEGORIES[cat].title} u zprávy.</li>`;
@@ -2091,13 +2091,50 @@ async function afterCategoryRuleChange(cat) {
 // --- úprava pravidel v Nastavení (přímo v řádku seznamu)
 
 const ruleCache = {};  // poslední vykreslená pravidla podle seznamu: spam / unimportant / notifications / folder
-const CATEGORY_RULE_KINDS = { sender: 'Odesílatel', subject: 'Předmět' };
+
+/** Popis pravidla Nedůležitých / Notifikací: vyplněné podmínky. */
+const categoryRuleText = r => [r.sender && `od ${r.sender}`, r.recipient && `pro ${r.recipient}`,
+                               r.subject && `předmět obsahuje „${r.subject}“`].filter(Boolean).join(' · ');
+
+// --- úprava pravidla Nedůležitých / Notifikací v modálním okně
+let editingCategoryRule = null;  // { cat, id }
+$('#settingsDialog').addEventListener('click', e => {
+  const b = e.target.closest('[data-edit-category-rule]');
+  if (!b) return;
+  const cat = b.dataset.category, id = +b.dataset.editCategoryRule;
+  const r = ruleCache[cat]?.find(x => x.id === id);
+  if (!r) return;
+  editingCategoryRule = { cat, id };
+  const f = $('#categoryRuleForm').elements;
+  f.sender.value = r.sender;
+  f.recipient.value = r.recipient;
+  f.subject.value = r.subject;
+  $('#categoryRuleTitle').textContent = `Upravit pravidlo – ${CATEGORIES[cat].title}`;
+  $('#categoryRuleError').textContent = '';
+  $('#categoryRuleSave').disabled = false;
+  $('#categoryRuleDialog').showModal();
+  f.sender.focus();
+});
+$('#categoryRuleCancel').addEventListener('click', () => $('#categoryRuleDialog').close());
+$('#categoryRuleForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const { cat, id } = editingCategoryRule || {};
+  if (!cat) return;
+  const f = e.target.elements;
+  const body = { sender: f.sender.value.trim(), recipient: f.recipient.value.trim(), subject: f.subject.value.trim() };
+  $('#categoryRuleSave').disabled = true;
+  try {
+    await api(`/api/categories/${cat}/rules/${id}`, { method: 'PUT', body });
+    $('#categoryRuleDialog').close();
+    toast('Pravidlo upraveno');
+    await afterCategoryRuleChange(cat);
+  } catch (err) {
+    $('#categoryRuleError').textContent = err.message;
+    $('#categoryRuleSave').disabled = false;
+  }
+});
 const RULE_EDITORS = {
   spam: { kinds: { sender: 'Odesílatel' }, url: id => `/api/spam-rules/${id}`, render: () => renderSpamRules() },
-  unimportant: { kinds: CATEGORY_RULE_KINDS, url: id => `/api/categories/unimportant/rules/${id}`,
-                 render: () => renderCategoryRules('unimportant'), after: () => afterCategoryRuleChange('unimportant') },
-  notifications: { kinds: CATEGORY_RULE_KINDS, url: id => `/api/categories/notifications/rules/${id}`,
-                   render: () => renderCategoryRules('notifications'), after: () => afterCategoryRuleChange('notifications') },
   folder: { kinds: FOLDER_RULE_KINDS, when: true, url: id => `/api/user-folder-rules/${id}`,
             render: () => renderFolderRules(), after: () => { renderFolderRules(); loadUserFolders(); } },
 };
