@@ -1997,6 +1997,94 @@ async function pollSync() {
     loadList({ quiet: true, keepLoaded: true });
 }
 
+// ------------------------------------------------------------------ šířka sloupců
+
+// Šířku lze měnit levému panelu, seznamu a kontextu (tažením úchytu na okraji, dvojklik = výchozí šířka).
+// Čtecí část vezme zbytek (nejméně READER_MIN), sloupec Akce má pevnou šířku.
+const COLUMNS = {
+  sidebar: { el: '#sidebar', prop: '--w-sidebar', edge: 'right', min: 150, max: 420 },
+  list:    { el: '#list',    prop: '--w-list',    edge: 'right', min: 220, max: 760 },
+  context: { el: '#context', prop: '--w-context', edge: 'left',  min: 180, max: 640 },
+};
+const READER_MIN = 320;
+const COLUMNS_KEY = 'mailer.columns';
+
+function loadColumnWidths() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(COLUMNS_KEY) || '{}') || {}; } catch { /* úložiště nedostupné */ }
+  for (const [name, c] of Object.entries(COLUMNS)) {
+    const w = +saved[name];
+    if (w >= c.min && w <= c.max) $('#app').style.setProperty(c.prop, `${w}px`);
+  }
+  fitColumns();
+}
+
+function saveColumnWidths() {
+  const out = {};
+  for (const [name, c] of Object.entries(COLUMNS)) {
+    const v = $('#app').style.getPropertyValue(c.prop);
+    if (v) out[name] = parseFloat(v);
+  }
+  try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(out)); } catch { /* úložiště nedostupné */ }
+}
+
+const colWidth = name => $(COLUMNS[name].el).getBoundingClientRect().width;
+/** Místo, které zbývá na čtecí část (její vlastní šířka pod minimum neklesne – rozvržení by přeteklo). */
+const readerSpace = () => $('#detail').getBoundingClientRect().width
+  - $('#actions').getBoundingClientRect().width - colWidth('context');
+
+/** Když se okno zmenší, aby čtecí část neklesla pod minimum: ubrat nejdřív kontextu, pak seznamu a panelu. */
+function fitColumns() {
+  if (innerWidth <= 760) return;  // úzké okno: sloupce pod sebou
+  let lack = READER_MIN - readerSpace();
+  for (const name of ['context', 'list', 'sidebar']) {
+    if (lack <= 0.5) break;
+    const c = COLUMNS[name], w = colWidth(name);
+    const nw = Math.max(c.min, w - lack);
+    if (nw < w) {
+      $('#app').style.setProperty(c.prop, `${nw}px`);
+      lack -= w - nw;
+    }
+  }
+}
+
+for (const [name, c] of Object.entries(COLUMNS)) {
+  const handle = document.createElement('div');
+  handle.className = `col-resizer ${c.edge}`;
+  handle.title = 'Tažením změníte šířku sloupce, dvojklikem vrátíte výchozí';
+  $(c.el).append(handle);
+  handle.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX, startW = colWidth(name);
+    const max = Math.min(c.max, startW + readerSpace() - READER_MIN);
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('dragging');
+    document.body.classList.add('resizing');
+    const move = ev => {
+      const dx = ev.clientX - startX;
+      const w = Math.round(Math.min(Math.max(startW + (c.edge === 'right' ? dx : -dx), c.min), Math.max(c.min, max)));
+      $('#app').style.setProperty(c.prop, `${w}px`);
+    };
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      saveColumnWidths();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end, { once: true });
+    handle.addEventListener('pointercancel', end, { once: true });
+  });
+  handle.addEventListener('dblclick', () => {
+    $('#app').style.removeProperty(c.prop);
+    fitColumns();
+    saveColumnWidths();
+  });
+}
+window.addEventListener('resize', fitColumns);
+loadColumnWidths();
+
 (async () => {
   try {
     await loadAccounts();  // jen seznam účtů z lokálního úložiště – okamžité

@@ -39,11 +39,26 @@ body {
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 
+/* Šířky sloupců: výchozí hodnoty; po přetažení úchytu je přepíše inline styl na #app. */
+:root { --w-sidebar: 220px; --w-list: 340px; --w-actions: 170px; --w-context: 300px; }
 #app {
   display: grid;
-  grid-template-columns: 220px 340px minmax(0, 1fr);
+  grid-template-columns: var(--w-sidebar) var(--w-list) minmax(0, 1fr);
   height: 100vh;
 }
+#sidebar, #list, #context { position: relative; min-width: 0; }
+.col-resizer {
+  position: absolute; top: 0; bottom: 0; width: 7px; z-index: 20; cursor: col-resize; touch-action: none;
+}
+.col-resizer.right { right: -4px; }
+.col-resizer.left { left: -4px; }
+.col-resizer::after {  /* tenká čára při najetí / tažení */
+  content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 3px; background: transparent;
+  transition: background .15s;
+}
+.col-resizer:hover::after, body.resizing .col-resizer.dragging::after { background: var(--accent); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe { pointer-events: none; }  /* rámec se zprávou by jinak „spolkl“ pohyb myši */
 
 /* ---------- sidebar ---------- */
 #sidebar {
@@ -156,7 +171,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #messageHead h2 { margin: 0 0 8px; }
 #detailBody {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: minmax(320px, 1fr) 170px 300px;
+  display: grid; grid-template-columns: minmax(320px, 1fr) var(--w-actions) var(--w-context);
 }
 #reader { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); }
 .empty { margin: auto; color: var(--muted); padding: 20px; text-align: center; }
@@ -275,12 +290,12 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 .tag.spam { color: var(--danger); border-color: var(--danger); }
 
 @media (max-width: 1500px) {
-  #app { grid-template-columns: 190px 290px minmax(0, 1fr); }
-  #detailBody { grid-template-columns: minmax(280px, 1fr) 150px 260px; }
+  :root { --w-sidebar: 190px; --w-list: 290px; --w-actions: 150px; --w-context: 260px; }
 }
 @media (max-width: 760px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 40vh 1fr; height: auto; min-height: 100vh; }
   #sidebar { max-height: 30vh; }
+  .col-resizer { display: none; }
   .grid2, .grid3, #detailBody, .settings-body { grid-template-columns: 1fr; }
 }
 .banner.snooze { background: var(--active); }

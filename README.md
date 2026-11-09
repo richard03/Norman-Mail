@@ -76,6 +76,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 ## Co umí
 
 - Libovolný počet účtů a společnou složku **Všechny doručené**, která slučuje doručenou poštu ze všech účtů (účty se načítají paralelně a jsou barevně odlišené).
+- Nastavitelnou šířku sloupců: levý panel, seznam zpráv a kontext se dají rozšířit nebo zúžit tažením za okraj. Dvojklik na okraj vrátí výchozí šířku. Sloupec s tlačítky má pevnou šířku, čtení zprávy vyplní zbytek okna. Šířky se pamatují i po restartu.
 - Procházení všech složek každého účtu s počtem nepřečtených zpráv.
 - Čtení HTML i textových zpráv a stahování příloh. Vložené obrázky (`cid:`) se zobrazí přímo ve zprávě.
 - Psaní nových zpráv, odpovědi, odpovědi všem a přeposílání včetně původních příloh. Lze přidat kopii, skrytou kopii i vlastní přílohy.
