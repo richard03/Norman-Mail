@@ -32,6 +32,7 @@ const state = {
   userFolders: [],        // uživatelské složky (z /api/user-folders)
   editingFolder: null,    // id složky v dialogu konfigurace
   messages: [], page: 0, hasMore: false, query: '', listErrors: [], listLoading: false,
+  keepRead: new Map(),    // Všechny nepřečtené: zprávy přečtené během návštěvy pohledu zůstávají v seznamu
   selected: new Set(),    // klíče vybraných zpráv (Ctrl/Shift + klik) – pro drag & drop a hromadné mazání
   anchor: null,           // klíč zprávy, od které se počítá výběr se Shiftem
   dragItems: null,        // právě přetahované zprávy
@@ -46,7 +47,7 @@ const state = {
 let listToken = 0;
 
 const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['notifications', 'Notifikace'],
-                       ['all', 'Všechny doručené']];
+                       ['unread', 'Všechny nepřečtené'], ['all', 'Všechny doručené']];
 const UNIFIED_TITLE = Object.fromEntries(UNIFIED_VIEWS);
 
 // ------------------------------------------------------------------ utility
@@ -154,7 +155,7 @@ function renderSidebar() {
     (s, a) => s + ((state.folders[a.id] || []).find(f => f.role === 'inbox')?.unseen || 0), 0);
   let h = '';
   if (state.accounts.length) {
-    const vu = state.viewUnread || { all: unread };
+    const vu = state.viewUnread || { all: unread, unread };
     for (const [filter, label] of UNIFIED_VIEWS) {
       const active = state.view.type === 'unified' && state.view.filter === filter;
       h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
@@ -300,7 +301,11 @@ async function markAllRead(info) {
     || (t.type === 'ufolder' && v.type === 'ufolder' && v.id === t.id)
     || (t.type === 'spam' && v.type === 'spam')
     || (t.type === 'account' && v.type === 'folder' && v.accountId === t.account_id && v.folder === 'INBOX');
-  if (isCurrent) {  // zobrazený seznam hned
+  if (isCurrent && t.view === 'unread') {  // Všechny nepřečtené: po označení nezbude nic
+    state.keepRead = new Map();
+    state.messages = [];
+    renderList();
+  } else if (isCurrent) {  // zobrazený seznam hned
     state.messages.forEach(m => { m.seen = true; });
     renderList();
   }
@@ -316,7 +321,8 @@ async function markAllRead(info) {
 function markNotificationsRead() {
   const vu = state.viewUnread;
   if (vu && vu.notifications) {
-    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu.notifications), notifications: 0 };
+    state.viewUnread = { ...vu, all: Math.max(0, vu.all - vu.notifications),
+                         unread: Math.max(0, (vu.unread ?? vu.all) - vu.notifications), notifications: 0 };
     renderSidebar();
   }
   api('/api/notifications/mark-read', { method: 'POST' })
@@ -326,21 +332,55 @@ function markNotificationsRead() {
 
 const isNotifView = v => v.type === 'unified' && v.filter === 'notifications';
 
-function setView(view) {
+/** reveal = otevřená zpráva, kterou má nový seznam obsahovat a nalistovat (pořadí od serveru). */
+function setView(view, reveal = null) {
   if (isNotifView(state.view) && !isNotifView(view) && state.settings?.notify_mark_read_on_leave)
     markNotificationsRead();
   state.view = view;
-  state.selected = new Set();
-  state.anchor = null;
+  state.keepRead = new Map();
+  state.selected = reveal ? new Set([reveal.key]) : new Set();
+  state.anchor = reveal ? reveal.key : null;
   state.query = '';
   $('#searchInput').value = '';
   renderSidebar();
-  loadList();
+  return loadList({ reveal });
+}
+
+const sameView = (a, b) => a.type === b.type && a.filter === b.filter && a.id === b.id
+  && a.accountId === b.accountId && a.folder === b.folder;
+
+/** Zprávu otevřenou mimo seznam (z pravého sloupce) najde v levém sloupci: přepne na pohled, kde je,
+ *  načte seznam aspoň po ni a odroluje na ni. */
+async function revealInList(cur) {
+  let res;
+  try {
+    res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/locate?folder=${enc(cur.folder)}`);
+  } catch { return; }  // nenalezeno – seznam zůstane, jak je
+  if (state.current !== cur || !res.view) return;
+  const key = curKey(cur);
+  if (sameView(res.view, state.view) && !state.query && state.messages.some(m => keyOf(m) === key))
+    return scrollToActive();
+  const reveal = { key, position: res.position ?? 0 };
+  if (sameView(res.view, state.view)) {  // stejný pohled, jen zpráva ještě není načtená (nebo je zapnuté hledání)
+    state.query = '';
+    $('#searchInput').value = '';
+    await loadList({ reveal, quiet: true });
+  } else await setView(res.view, reveal);
+  if (state.current === cur && cur.data) markListedSeen(cur);
+}
+
+function markListedSeen(cur) {
+  const listed = state.messages.find(m => keyOf(m) === curKey(cur));
+  if (listed && !listed.seen) { listed.seen = true; renderList(); }
+}
+
+function scrollToActive() {
+  $('#messages .msg.active')?.scrollIntoView({ block: 'center' });
 }
 
 // ------------------------------------------------------------------ seznam zpráv
 
-async function loadList({ append = false, quiet = false, keepLoaded = false } = {}) {
+async function loadList({ append = false, quiet = false, keepLoaded = false, reveal = null } = {}) {
   const token = ++listToken;
   const v = state.view;
   const loaded = state.messages.length;
@@ -352,8 +392,13 @@ async function loadList({ append = false, quiet = false, keepLoaded = false } = 
     const qs = new URLSearchParams({ page: state.page });
     if (state.query) qs.set('q', state.query);
     else if (append) qs.set('offset', loaded);                     // pokračovat za zobrazenými
+    else if (reveal) { qs.set('offset', 0); qs.set('limit', reveal.position + 20); }  // rovnou po hledanou zprávu
     else if (keepLoaded && loaded) { qs.set('offset', 0); qs.set('limit', loaded); }  // obnovit vše zobrazené
     let res;
+    if (v.type === 'unified' && v.filter === 'unread' && !state.query) {  // přečtené zprávy zatím nechat v seznamu
+      for (const m of state.messages) if (m.seen) state.keepRead.set(keyOf(m), [m.account_id, m.folder, m.uid]);
+      if (state.keepRead.size) qs.set('keep', JSON.stringify([...state.keepRead.values()]));
+    }
     if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
@@ -378,6 +423,7 @@ async function loadList({ append = false, quiet = false, keepLoaded = false } = 
   }
   state.listLoading = false;
   renderList();
+  if (reveal) scrollToActive();
   setTimeout(maybeLoadMore, 0);  // seznam je pořád kratší než okno → načíst další hned
 }
 
@@ -527,6 +573,7 @@ async function openMessage(m) {
     cur.data = data;
     if (state.current !== cur) return;
     if (!m.seen) { m.seen = true; adjustUnseen(m.account_id, m.folder, -1); renderList(); }
+    markListedSeen(cur);  // zpráva otevřená z pravého sloupce může být v seznamu jako jiná položka
     renderReader();
     updateActions();
     loadContext();
@@ -874,7 +921,7 @@ function leavesView(m, target) {
   if (target.type !== 'inbox') return true;                      // Smazané, složka
   if (target.account_id && target.account_id !== m.account_id) return v.type !== 'unified';
   if (m.folder !== 'INBOX') return true;                         // ze složky / Smazaných do doručené
-  if (v.type === 'unified' && target.view === 'notifications') return !['notifications', 'all'].includes(v.filter);
+  if (v.type === 'unified' && target.view === 'notifications') return !['notifications', 'unread', 'all'].includes(v.filter);
   if (v.type === 'unified' && ['important', 'fyi'].includes(target.view)) return v.filter === 'notifications';
   return false;
 }
@@ -951,6 +998,7 @@ function dropTarget(el) {
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     if (v.type === 'unified' && v.filter === view) return null;
+    if (view === 'unread') return null;  // jen pohled, přesunout se sem nedá
     if (view === 'all' && items.every(m => m.folder === 'INBOX')) return null;  // nic by se nezměnilo
     return { type: 'inbox', view };
   }
@@ -1041,7 +1089,8 @@ $('#emptyTrashBtn').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ sloupec Kontext
 
-const REASONS = { sender: 'odesílatel', mine: 'ode mě', cc: 'v kopii', subject: 'předmět' };
+const REASONS = { mine: 'ode mě', cc: 'v kopii' };
+const HIDDEN_REASONS = ['sender', 'subject'];  // důvody, které se jako štítek nezobrazují
 let ctxToken = 0;
 
 function clearContext(text = 'Vyberte zprávu') {
@@ -1076,20 +1125,22 @@ function renderContext() {
     const me = (accById(m.account_id)?.email || '').toLowerCase();
     const fromMe = m.from[0]?.addr.toLowerCase() === me;
     const who = fromMe ? `Já → ${shortAddr(m.to)}` : shortAddr(m.from);
-    const tags = m.reasons.map(r => `<span class="tag">${REASONS[r] || r}</span>`);
+    const tags = m.reasons.filter(r => !HIDDEN_REASONS.includes(r)).map(r => `<span class="tag">${REASONS[r] || r}</span>`);
     if (m.folder_role !== 'inbox')
       tags.unshift(`<span class="tag folder ${m.folder_role === 'junk' ? 'spam' : ''}">${esc(m.folder_display)}</span>`);
     return `<div class="ctx ${m.seen ? '' : 'unread'}" data-i="${i}" title="${esc(m.subject)}">
       <div class="ctx-row1"><span class="ctx-who">${esc(who)}</span><span class="ctx-date">${fmtDate(m.date)}</span></div>
       <div class="ctx-subject">${esc(m.subject)}</div>
-      <div class="ctx-tags">${tags.join('')}</div>
+      ${tags.length ? `<div class="ctx-tags">${tags.join('')}</div>` : ''}
     </div>`;
   }).join('');
 }
 
 $('#contextBody').addEventListener('click', e => {
   const el = e.target.closest('.ctx[data-i]');
-  if (el) openMessage(state.context[+el.dataset.i]);
+  if (!el) return;
+  openMessage(state.context[+el.dataset.i]);
+  revealInList(state.current);  // a najít ji v levém sloupci
 });
 
 // ------------------------------------------------------------------ psaní zpráv
@@ -1435,6 +1486,20 @@ function toggleFolderMenu(force) {
     : '<div class="menu-empty">Zatím nemáte žádnou složku.</div>')
     + '<button type="button" class="menu-new" data-new-folder>+ Nová složka…</button>';
   menu.hidden = false;
+  fitMenu(menu);
+}
+
+/** Vejde nabídku do okna: otevře ji tam, kde je víc místa, a zbytek nechá rolovat. */
+function fitMenu(menu) {
+  menu.classList.remove('up');
+  menu.style.maxHeight = '';
+  const btn = menu.parentElement.getBoundingClientRect();
+  const gap = 12;
+  const below = window.innerHeight - btn.bottom - gap;
+  const above = btn.top - gap;
+  const up = menu.scrollHeight > below && above > below;
+  menu.classList.toggle('up', up);
+  menu.style.maxHeight = `${Math.max(120, up ? above : below)}px`;
 }
 
 $('#folderMenu').addEventListener('click', e => {

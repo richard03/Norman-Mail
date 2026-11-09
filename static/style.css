@@ -134,7 +134,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border); cursor: pointer;
 }
 .msg:hover { background: var(--hover); }
-.msg.active { background: var(--active); }
+.msg.active { background: var(--active); box-shadow: inset -3px 0 0 var(--accent); }
+.msg.active .subject { color: var(--text); }
 .msg .strip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
 .msg .row1 { display: flex; gap: 8px; }
 .msg .from { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -342,6 +343,7 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .3); max-height: 50vh; overflow-y: auto;
 }
+.menu.up { top: auto; bottom: calc(100% + 4px); }
 .menu button {
   display: block; width: 100%; text-align: left; border: none; background: none; padding: 7px 10px;
   border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

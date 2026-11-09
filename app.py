@@ -4,6 +4,7 @@ endpointy přes most pywebview uvnitř procesu. Jako skutečný server na 127.0.
 
 import base64
 import io
+import json
 import os
 import threading
 import time
@@ -419,7 +420,7 @@ def unified():
                     return "notifications"
                 direct = any(a["addr"].lower() in mine.get(m["account_id"], ()) for a in m["to"])
                 return "important" if direct else "fyi"
-            result = [m for m in result if view_of(m) == view]
+            result = [m for m in result if (not m["seen"] if view == "unread" else view_of(m) == view)]
         result.sort(key=lambda m: m["date"] or 0, reverse=True)
         return jsonify(messages=result, has_more=has_more, errors=errors)
 
@@ -436,8 +437,19 @@ def unified():
             errors.append(f"{acc['name']}: {syncer.errors[acc['id']]} (zobrazuji uložená data)")
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
-    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset)
+    keep = _keep_arg() if view == "unread" else ()
+    res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset, keep=keep)
     return jsonify(messages=res["messages"], has_more=res["has_more"], errors=errors, version=version)
+
+
+def _keep_arg():
+    """Všechny nepřečtené: zprávy, které UI už zobrazilo a mají v seznamu zůstat i po přečtení
+    (dokud uživatel pohled neopustí). JSON [[účet, složka, uid], …]."""
+    try:
+        raw = json.loads(request.args.get("keep") or "[]")
+        return [(str(a), str(f), int(u)) for a, f, u in raw[:2000]]
+    except (ValueError, TypeError):
+        abort(400, "Neplatný parametr keep.")
 
 
 def _mark_seen_in_background(acc, folder, uid):
@@ -925,7 +937,7 @@ def mark_all_read():
     t = request.get_json(force=True) or {}
     kind = t.get("type")
     if kind == "unified":
-        if t.get("view") not in INBOX_VIEWS:
+        if t.get("view") not in db.VIEW_FILTERS:
             abort(400, "Neznámý pohled.")
         groups = database.unseen_in("INBOX", t["view"])
         folder = "INBOX"
@@ -1135,6 +1147,33 @@ def job_status(job_id):
         if job["status"] == "done":
             del jobs[job_id]
     return jsonify(result)
+
+
+@app.get("/api/accounts/<acc_id>/messages/<int:uid>/locate")
+def message_locate(acc_id, uid):
+    """Kde zprávu najít v levém sloupci: pohled a pořadí zprávy v jeho seznamu.
+    Přednost má složka aplikace, pak Důležité / Vzít na vědomí / Notifikace (Všechny doručené),
+    pak Spam a Smazané; zprávy z ostatních složek (Odeslané, Archiv…) se ukážou v dané složce účtu."""
+    account_or_404(acc_id)
+    folder = folder_arg()
+    if database.message(acc_id, folder, uid) is None:
+        return jsonify(view=None)
+    accounts = [a["id"] for a in store.all()]
+    pos = lambda where, view="all": database.list_position(accounts, where, view, acc_id, folder, uid)
+    for f in database.user_folders():
+        if f["account_id"] == acc_id and f["imap_name"] == folder:
+            return jsonify(view={"type": "ufolder", "id": f["id"], "title": f["name"]},
+                           position=database.list_position([acc_id], folder, "all", acc_id, folder, uid))
+    if folder == "INBOX":
+        view = database.view_of(acc_id, folder, uid)
+        return jsonify(view={"type": "unified", "filter": view}, position=pos("INBOX", view))
+    for kind, by_acc in (("spam", database.spam_folders()), ("trash", database.trash_folders())):
+        if by_acc.get(acc_id) == folder:
+            locations = {a: by_acc[a] for a in accounts if a in by_acc}
+            return jsonify(view={"type": kind}, position=pos(locations))
+    title = (database.folder(acc_id, folder) or {}).get("display") or mail.decode_utf7(folder)
+    return jsonify(view={"type": "folder", "accountId": acc_id, "folder": folder, "title": title},
+                   position=database.list_position([acc_id], folder, "all", acc_id, folder, uid))
 
 
 @app.get("/api/accounts/<acc_id>/messages/<int:uid>/context")
