@@ -12,7 +12,7 @@ Jedinou systémovou součástí, kterou Mailer potřebuje, je **Microsoft Edge W
 
 **Připnutí na hlavní panel:** na běžícím Maileru klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `Mailer.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
 
-**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `Mailer\` (aplikace), `Mailer-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`), i instalátor `Mailer-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
+**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `Mailer\` (aplikace), `Mailer-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup](https://jrsoftware.org/isinfo.php) 6 nebo 7 (`winget install JRSoftware.InnoSetup`), i instalátor `Mailer-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 

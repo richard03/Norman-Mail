@@ -1,4 +1,4 @@
-﻿; Instalátor Maileru (Inno Setup 6). Sestavuje ho build.bat ze složky dist\Mailer:
+﻿; Instalátor Maileru (Inno Setup 6 nebo 7). Sestavuje ho build.bat ze složky dist\Mailer:
 ;   iscc /DAppVersion=1.0.0 installer.iss
 ; Instaluje se jen pro aktuálního uživatele (bez práv správce) do %LOCALAPPDATA%\Programs\Mailer.
 ; Odinstalace data aplikace (%APPDATA%\Mailer) ani hesla ve Správci pověření nemaže.
