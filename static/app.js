@@ -41,6 +41,7 @@ const state = {
   current: null,          // { accountId, folder, uid, data }
   context: [],            // související zprávy aktuální zprávy
   showImages: false,
+  originalColors: false,  // otevřená HTML zpráva v tmavém režimu bez inverze barev („Zobrazit v původních barvách“)
   editingId: null,
   compose: null,          // { inReplyTo, references, files: [], forward }
 };
@@ -672,6 +673,7 @@ async function openMessage(m) {
   state.selected = new Set([keyOf(m)]);
   state.anchor = keyOf(m);
   state.showImages = false;
+  state.originalColors = false;
   renderList();
   updateActions();
   clearContext('Načítám…');
@@ -726,10 +728,33 @@ function hasRemoteContent(html) {
 // přesměrovávají (meta refresh), mění cíl odkazů (base) nebo by spouštěly kód.
 const FRAME_DROP = 'link, meta, base, script, iframe, frame, frameset, object, embed, applet, portal, template';
 
+// Tmavý režim HTML zpráv (řídí se nastavením Windows, stejně jako celá aplikace):
+//  - native: zpráva má vlastní tmavou verzi (@media prefers-color-scheme) – jen ji povolíme,
+//  - invert: ostatní zprávy se barevně převrátí a obrázky se převrátí zpět (jako Gmail / Outlook),
+//  - light: světlý režim, nebo uživatel zvolil „Zobrazit v původních barvách“.
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const FRAME_BASE = 'body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;margin:16px;word-wrap:break-word}'
+  + 'img{max-width:100%;height:auto}';
+const FRAME_THEMES = {
+  light: ':root{color-scheme:light}body{color:#111;background:#fff}',
+  native: ':root{color-scheme:light dark}body{color:#111;background:#fff}'
+    + '@media (prefers-color-scheme:dark){body{color:#e3e7ee;background:#1c2027}a{color:#8ab4f8}}',
+  // bílé pozadí → téměř černé; obrázky, videa a pozadí z obrázků se převrátí zpět do původních barev
+  invert: ':root{color-scheme:light;filter:invert(1) hue-rotate(180deg)}body{color:#111;background:#e3e3e3}'
+    + 'img,picture,video,canvas,svg image,[background],[style*="background-image"],[style*="url("]'
+    + '{filter:invert(1) hue-rotate(180deg)}',
+};
+
+/** Jak zprávu v aktuálním režimu zobrazit: light / native / invert. */
+function frameTheme(html) {
+  if (!darkQuery.matches || state.originalColors) return 'light';
+  return /prefers-color-scheme\s*:\s*dark/i.test(html) ? 'native' : 'invert';
+}
+
 /** HTML zprávy pro rámec (iframe srcdoc, bez skriptů). Rozebere se stejným parserem, který ho vykreslí
  *  (DOMParser – dokument je inertní, nic nenačítá), nebezpečné značky a atributy se odstraní a na začátek
- *  hlavičky se vloží vlastní CSP, vypnutí předběžných dotazů DNS a cíl odkazů. */
-function buildFrameDoc(html, allowRemote) {
+ *  hlavičky se vloží vlastní CSP, vypnutí předběžných dotazů DNS, cíl odkazů a barvy podle režimu. */
+function buildFrameDoc(html, allowRemote, theme = 'light') {
   const remote = allowRemote ? ' https: http:' : '';
   const csp = `default-src 'none'; img-src data:${remote}; style-src 'unsafe-inline'${remote}; font-src data:${remote}`;
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -744,8 +769,7 @@ function buildFrameDoc(html, allowRemote) {
     <meta http-equiv="Content-Security-Policy" content="${csp}">
     <meta http-equiv="x-dns-prefetch-control" content="off">
     <base target="_blank">
-    <style>body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;margin:16px;color:#111;background:#fff;word-wrap:break-word}
-    img{max-width:100%;height:auto}</style></head><body></body></html>`, 'text/html').head;
+    <style>${FRAME_BASE}${FRAME_THEMES[theme]}</style></head><body></body></html>`, 'text/html').head;
   doc.head.prepend(...[...head.childNodes].map(n => doc.importNode(n, true)));  // CSP musí být úplně první
   return '<!doctype html>' + doc.documentElement.outerHTML;
 }
@@ -759,6 +783,7 @@ function renderReader() {
     `<a class="chip" data-index="${a.index}" href="/api/accounts/${accountId}/messages/${data.uid}/attachments/${a.index}?folder=${enc(data.folder)}"
         download="${esc(a.filename)}">📎 ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span></a>`).join('');
   const remote = data.html && hasRemoteContent(data.html);
+  const theme = data.html ? frameTheme(data.html) : 'light';
   const role = folderRole(accountId, data.folder);
   const folderNote = role && role !== 'inbox'
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
@@ -778,13 +803,20 @@ function renderReader() {
       ${data.snoozed_until ? `<div class="banner snooze">⏰ Odloženo – ${esc(fmtSnooze(data.snoozed_until))} se zpráva znovu
           označí jako nepřečtená. <button class="link" data-act="unsnooze">Zrušit odložení</button></div>` : ''}
       ${remote && !state.showImages ? `<div class="banner">Vzdálené obrázky byly zablokovány kvůli soukromí.
-          <button class="link" data-act="images">Zobrazit obrázky</button></div>` : ''}`;
+          <button class="link" data-act="images">Zobrazit obrázky</button></div>` : ''}
+      ${theme === 'invert' ? `<div class="colors-note muted">Barvy zprávy jsou upravené pro tmavý režim.
+          <button class="link" data-act="original-colors">Zobrazit v původních barvách</button></div>`
+        : data.html && state.originalColors && darkQuery.matches ? `<div class="colors-note muted">Zpráva je v původních barvách.
+          <button class="link" data-act="dark-colors">Zobrazit tmavě</button></div>` : ''}`;
   $('#reader').innerHTML = `
-    ${data.html ? '<iframe class="body-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>'
+    ${data.html ? `<iframe class="body-frame ${theme}" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>`
                 : '<div class="body-text"></div>'}`;
-  if (data.html) $('#reader iframe').srcdoc = buildFrameDoc(data.html, state.showImages);
+  if (data.html) $('#reader iframe').srcdoc = buildFrameDoc(data.html, state.showImages, theme);
   else $('#reader .body-text').textContent = data.text || '(prázdná zpráva)';
 }
+
+// Přepnutí světlého / tmavého režimu Windows za běhu: otevřenou HTML zprávu vykreslit v novém režimu.
+darkQuery.addEventListener('change', () => { if (state.current?.data?.html) renderReader(); });
 
 // V desktopové verzi ukládáme přílohy přes nativní dialog „Uložit jako“.
 const desktop = () => window.pywebview?.api;
@@ -794,6 +826,12 @@ $('#messageHead').addEventListener('click', async e => {
     return renderReader();
   }
   if (e.target.closest('[data-act="unsnooze"]') && state.current?.data) return unsnooze(state.current);
+  for (const [act, value] of [['original-colors', true], ['dark-colors', false]]) {
+    if (e.target.closest(`[data-act="${act}"]`) && state.current?.data) {
+      state.originalColors = value;
+      return renderReader();
+    }
+  }
   const chip = e.target.closest('a.chip[data-index]');
   if (!chip || !desktop() || !state.current?.data) return;
   e.preventDefault();

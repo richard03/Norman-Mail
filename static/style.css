@@ -208,6 +208,9 @@ a.chip:hover { background: var(--hover); }
 .chip .x { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 15px; padding: 0 2px; }
 .banner { margin-top: 10px; background: var(--banner); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
 .body-frame { flex: 1; border: none; width: 100%; background: #fff; }
+.body-frame.invert { background: #1c1c1c; }       /* žádné bílé bliknutí před vykreslením zprávy */
+.body-frame.native { background: var(--panel); }
+.colors-note { margin-top: 8px; font-size: 12px; }
 .body-text { flex: 1; overflow: auto; padding: 16px 20px; white-space: pre-wrap; word-wrap: break-word; }
 
 /* ---------- dialogs ---------- */
