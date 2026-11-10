@@ -1393,6 +1393,7 @@ function openCompose(opts = {}) {
   $('#composeError').textContent = '';
   state.compose = { inReplyTo: opts.inReplyTo || '', references: opts.references || '', files: [], forward: opts.forward || null };
   renderComposeAttachments();
+  loadContacts();
   $('#composeDialog').showModal();
   (opts.to ? f.body : f.to).focus();
   if (opts.to) f.body.setSelectionRange(0, 0);
@@ -1465,6 +1466,135 @@ $('#composeForm').addEventListener('submit', async e => {
 });
 
 $('#composeBtn').addEventListener('click', () => openCompose());
+
+// ------------------------------------------------------------------ našeptávání adres (Komu / Kopie / Skrytá)
+
+state.contacts = [];  // [{email, name, key}] seřazené od nejčastějších; key = text pro hledání
+const foldText = t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+async function loadContacts() {
+  try {
+    const { contacts } = await api('/api/contacts');
+    state.contacts = contacts.map(c => ({ ...c, words: foldText(`${c.name} ${c.email}`).split(/[\s.@_+\-"'<>(),]+/).filter(Boolean),
+                                          name0: foldText(c.name), email0: c.email }));
+  } catch { /* bez našeptávání */ }
+}
+
+/** Rozsah právě psané adresy v poli (text mezi čárkami / středníky kolem kurzoru). */
+function addrToken(input) {
+  const v = input.value, pos = input.selectionStart ?? v.length;
+  const start = Math.max(v.lastIndexOf(',', pos - 1), v.lastIndexOf(';', pos - 1)) + 1;
+  let end = v.slice(pos).search(/[,;]/);
+  end = end < 0 ? v.length : pos + end;
+  return { start, end, text: v.slice(start, end).trim() };
+}
+
+function contactMatches(q, input) {
+  q = foldText(q);
+  if (!q) return [];
+  const used = new Set((input.value.match(/[^\s<>,;"']+@[^\s<>,;"']+/g) || []).map(a => a.toLowerCase()));
+  const out = [];
+  for (const c of state.contacts) {
+    if (used.has(c.email)) continue;
+    if (c.email0.startsWith(q) || c.name0.startsWith(q) || c.words.some(w => w.startsWith(q))) {
+      out.push(c);
+      if (out.length >= 8) break;
+    }
+  }
+  return out;
+}
+
+/** Zvýrazní začátky slov, které odpovídají hledanému textu. */
+function acHighlight(text, q) {
+  const f = foldText(text), n = q.length;
+  let html = '', i = 0;
+  while (i < text.length) {
+    const atWord = i === 0 || /[\s.@_+\-"'<>(),]/.test(text[i - 1]);
+    if (n && atWord && f.slice(i, i + n) === q) {
+      html += `<mark>${esc(text.slice(i, i + n))}</mark>`;
+      i += n;
+    } else { html += esc(text[i]); i++; }
+  }
+  return html;
+}
+
+const ac = { input: null, items: [], index: 0, el: null };
+
+function acClose() {
+  ac.el?.remove();
+  Object.assign(ac, { input: null, items: [], index: 0, el: null });
+}
+
+function acRender() {
+  if (!ac.items.length) return acClose();
+  const input = ac.input, q = foldText(addrToken(input).text);
+  if (!ac.el) {
+    ac.el = document.createElement('div');
+    ac.el.className = 'ac-list';
+    ac.el.setAttribute('role', 'listbox');
+    ac.el.addEventListener('mousedown', e => {  // mousedown: pole nesmí ztratit fokus
+      e.preventDefault();
+      const it = e.target.closest('.ac-item');
+      if (it) acPick(+it.dataset.i);
+    });
+  }
+  ac.el.style.left = input.offsetLeft + 'px';
+  ac.el.style.width = input.offsetWidth + 'px';
+  ac.el.innerHTML = ac.items.map((c, i) => `
+    <div class="ac-item${i === ac.index ? ' active' : ''}" role="option" data-i="${i}">
+      ${c.name ? `<span class="ac-name">${acHighlight(c.name, q)}</span>` : ''}
+      <span class="${c.name ? 'ac-addr' : 'ac-name'}">${acHighlight(c.email, q)}</span>
+    </div>`).join('');
+  if (ac.el.parentElement !== input.parentElement) input.parentElement.appendChild(ac.el);
+  ac.el.children[ac.index]?.scrollIntoView({ block: 'nearest' });
+}
+
+function acUpdate(input) {
+  const tok = addrToken(input);
+  ac.input = input;
+  ac.items = tok.text.length >= 1 ? contactMatches(tok.text, input) : [];
+  ac.index = 0;
+  acRender();
+}
+
+function fmtContact(c) {
+  if (!c.name) return c.email;
+  const name = /[,;"<>@()[\]:\\]/.test(c.name) ? `"${c.name.replace(/["\\]/g, m => '\\' + m)}"` : c.name;
+  return `${name} <${c.email}>`;
+}
+
+function acPick(i) {
+  const input = ac.input, c = ac.items[i];
+  if (!input || !c) return;
+  const v = input.value, tok = addrToken(input);
+  const before = v.slice(0, tok.start).replace(/\s*$/, '');
+  const after = v.slice(tok.end).replace(/^[,;]?\s*/, '');
+  const head = (before ? before + ' ' : '') + fmtContact(c) + ', ';
+  input.value = head + after;
+  input.setSelectionRange(head.length, head.length);
+  acClose();
+}
+
+document.querySelectorAll('#composeForm input[data-addr]').forEach(input => {
+  input.addEventListener('input', () => acUpdate(input));
+  input.addEventListener('blur', () => { if (ac.input === input) acClose(); });
+  input.addEventListener('keydown', e => {
+    if (ac.input !== input || !ac.items.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      ac.index = (ac.index + (e.key === 'ArrowDown' ? 1 : -1) + ac.items.length) % ac.items.length;
+      acRender();
+    } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+      e.preventDefault();
+      acPick(ac.index);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();  // zavře jen našeptávání, ne celé okno
+      e.stopPropagation();
+      acClose();
+    }
+  });
+});
+$('#composeDialog').addEventListener('close', acClose);
 
 // ------------------------------------------------------------------ nastavení účtů
 
@@ -2261,6 +2391,20 @@ $('#spamRules').addEventListener('click', async e => {
 $('#settingsBtn').addEventListener('click', () => openSettings());
 document.querySelectorAll('dialog [data-close]').forEach(b =>
   b.addEventListener('click', () => b.closest('dialog').close()));
+
+// Zavírací křížek v pravém horním rohu každého modálního okna (Nastavení má vlastní v záhlaví).
+// Přidává se na konec okna, aby po otevření nedostal fokus místo prvního pole.
+document.querySelectorAll('dialog').forEach(dlg => {
+  if (dlg.querySelector('.close-x')) return;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'icon-btn close-x dialog-x';
+  b.title = 'Zavřít (Esc)';
+  b.setAttribute('aria-label', 'Zavřít');
+  b.textContent = '✕';
+  b.addEventListener('click', () => { dlg.returnValue = ''; dlg.close(); });
+  dlg.appendChild(b);
+});
 
 // ------------------------------------------------------------------ start
 

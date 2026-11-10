@@ -405,11 +405,11 @@
 <dialog id="composeDialog" class="compose">
   <form id="composeForm" method="dialog">
     <h2 id="composeTitle">Nová zpráva</h2>
-    <label class="row">Od<select name="account_id" id="fromSelect"></select></label>
-    <label class="row">Komu<input name="to" placeholder="adresa@example.cz, další@example.cz"></label>
-    <label class="row">Kopie<input name="cc"></label>
-    <label class="row">Skrytá<input name="bcc"></label>
-    <label class="row">Předmět<input name="subject"></label>
+    <label class="row"><span class="row-label">Od</span><select name="account_id" id="fromSelect"></select></label>
+    <label class="row"><span class="row-label">Komu</span><input name="to" data-addr autocomplete="off" placeholder="adresa@example.cz, další@example.cz"></label>
+    <label class="row"><span class="row-label">Kopie</span><input name="cc" data-addr autocomplete="off"></label>
+    <label class="row"><span class="row-label">Skrytá</span><input name="bcc" data-addr autocomplete="off"></label>
+    <label class="row"><span class="row-label">Předmět</span><input name="subject"></label>
     <textarea name="body" rows="14"></textarea>
     <div id="composeAttachments" class="chips"></div>
     <p id="composeError" class="error"></p>

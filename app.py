@@ -1453,5 +1453,15 @@ def send():
     msg = mail.build_message(acc, to, cc, str(data.get("subject") or ""), str(data.get("body") or ""),
                              data.get("in_reply_to") or None, data.get("references") or None, attachments)
     warning = mail.send_message(acc, msg, recipients, pool)
+    try:
+        database.add_sent_contacts([(a["name"], a["addr"]) for v in (to, cc, bcc) for a in mail.parse_addrs(v)])
+    except Exception:
+        pass  # zpráva odešla; adresáti se do kontaktů dostanou i synchronizací Odeslaných
     return jsonify(ok=True, warning=warning)
+
+
+@app.get("/api/contacts")
+def contacts():
+    """Adresy pro našeptávání v polích Komu / Kopie / Skrytá (filtruje se v prohlížeči)."""
+    return jsonify(contacts=database.contacts())
 

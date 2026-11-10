@@ -236,9 +236,23 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 .note:empty, .error:empty { display: none; }
 .error { color: var(--danger); margin: 0; font-size: 13px; white-space: pre-wrap; }
 .compose { width: min(780px, calc(100vw - 32px)); }
-.compose label.row { flex-direction: row; align-items: center; gap: 10px; }
-.compose label.row > :first-child { flex: 1; }
-.compose label.row input, .compose label.row select { flex: 1; }
+.compose label.row { flex-direction: row; align-items: center; gap: 10px; position: relative; }
+.compose .row-label { flex: none; width: 64px; text-align: left; }
+.compose label.row input, .compose label.row select { flex: 1; min-width: 0; }
+/* našeptávání adres v Komu / Kopie / Skrytá */
+.ac-list {
+  position: absolute; top: 100%; z-index: 10; margin-top: 2px; max-height: 280px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .25); padding: 4px 0;
+}
+.ac-item { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; cursor: pointer; color: var(--text); font-size: 14px; }
+.ac-item.active { background: var(--active); }
+.ac-item .ac-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-item .ac-addr { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-item mark { background: none; color: inherit; font-weight: 700; }
+/* zavírací křížek v pravém horním rohu modálních oken */
+.dialog-x { position: absolute; top: 12px; right: 12px; z-index: 5; }
+dialog:has(.dialog-x) h2 { padding-right: 36px; }
 .compose textarea { resize: vertical; min-height: 220px; font-family: inherit; }
 .file-btn { color: var(--text) !important; flex-direction: row !important; font-size: 14px !important; }
 

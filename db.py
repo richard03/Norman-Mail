@@ -1,6 +1,7 @@
 """Lokální databáze metadat zpráv (SQLite): cache hlaviček a těl, stav synchronizace, odložené zprávy."""
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -55,6 +56,11 @@ CREATE TABLE IF NOT EXISTS category_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
     sender TEXT NOT NULL DEFAULT '', recipient TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
     created REAL, UNIQUE(category, sender, recipient, subject));
+CREATE TABLE IF NOT EXISTS contacts(
+    email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+    sent INTEGER NOT NULL DEFAULT 0,       -- kolikrát jsem této adrese psal
+    received INTEGER NOT NULL DEFAULT 0,   -- kolikrát se adresa objevila ve zprávě, kterou jsem dostal
+    last REAL NOT NULL DEFAULT 0);         -- datum poslední takové zprávy
 """
 
 # Kategorie doručené pošty, které určuje uživatel: pravidla nebo označení jedné zprávy.
@@ -154,6 +160,12 @@ def rule_matches(rule, rec) -> bool:
     if rule["kind"] == "recipient":
         return any(a["addr"].lower() == v for a in rec["to"] + rec["cc"])
     return v in (rec.get("base_subject") or "")
+
+
+# Adresy, které se do našeptávání nehodí (automatické odesílatele)
+NO_REPLY_RE = re.compile(r"^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)([+._-]|@)",
+                         re.IGNORECASE)
+MAX_CONTACTS = 5000
 
 
 def _addrs(lst) -> str:
@@ -267,8 +279,18 @@ class Database:
                  json.dumps(r["cc"], ensure_ascii=False), _addrs(r["from"]), _addrs(r["to"]), _addrs(r["cc"]),
                  r["date"], int(r["seen"]), int(r["flagged"]), int(r["has_attachments"]), r["size"])
                 for r in records if not r.get("deleted")]
-        self._tx(lambda c: c.executemany(
-            "INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows))
+        def run(c):
+            new = self._new_records(c, acc_id, folder, records)
+            c.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            if new and self._contacts_built(c):
+                self._learn_contacts(c, acc_id, folder, new)
+        self._tx(run)
+
+    @staticmethod
+    def _new_records(c, acc_id, folder, records) -> list:
+        """Záznamy, které v cache ještě nejsou (aby se kontakty nepočítaly dvakrát)."""
+        have = {r[0] for r in c.execute("SELECT uid FROM messages WHERE account_id=? AND folder=?", (acc_id, folder))}
+        return [r for r in records if not r.get("deleted") and r["uid"] not in have]
 
     def delete_uids(self, acc_id, folder, uids):
         uids = list(uids)
@@ -711,6 +733,81 @@ class Database:
         out = {}
         for acc_id, uid, rule_id in self._q(sql, (folder_id,)):
             out.setdefault(acc_id, {}).setdefault(uid, rule_id)
+        return out
+
+    # ------------------------------------------------------------------ kontakty (našeptávání adres)
+
+    @staticmethod
+    def _contacts_built(c) -> bool:
+        return c.execute("SELECT 1 FROM meta WHERE key='contacts_built'").fetchone() is not None
+
+    @staticmethod
+    def _learn_contacts(c, acc_id, folder, records, mine=None, by_me=False):
+        """Přičte adresy ze zpráv do kontaktů. Zpráva ode mě (z mé adresy nebo z Odeslaných) = psal jsem
+        jejím příjemcům; jinak = adresy z ní (odesílatel i ostatní příjemci) jsem dostal. Spam se přeskakuje."""
+        role = (c.execute("SELECT role FROM folders WHERE account_id=? AND name=?", (acc_id, folder)).fetchone()
+                or [None])[0]
+        if role == "spam":
+            return
+        if mine is None:
+            mine = {r[0] for r in c.execute("SELECT email FROM my_addresses")}
+        for r in records:
+            frm = [a for a in r.get("from") or [] if a.get("addr")]
+            sent = by_me or role == "sent" or any(a["addr"].lower() in mine for a in frm)
+            people = (r.get("to") or []) + (r.get("cc") or []) + ([] if sent else frm)
+            col = "sent" if sent else "received"
+            seen = set()
+            for a in people:
+                addr = (a.get("addr") or "").strip().lower()
+                if "@" not in addr or addr in mine or addr in seen or len(addr) > 254:
+                    continue
+                seen.add(addr)
+                name = (a.get("name") or "").strip().strip("\"'")
+                if name.lower() == addr:
+                    name = ""
+                date = r.get("date") or 0
+                c.execute(f"""INSERT INTO contacts(email, name, {col}, last) VALUES(?, ?, 1, ?)
+                              ON CONFLICT(email) DO UPDATE SET {col}={col}+1,
+                              name=CASE WHEN excluded.name<>'' AND (contacts.name='' OR excluded.last>=contacts.last)
+                                        THEN excluded.name ELSE contacts.name END,
+                              last=MAX(contacts.last, excluded.last)""", (addr, name[:200], date))
+
+    def _build_contacts(self):
+        """Jednorázové naplnění kontaktů ze zpráv, které už jsou v cache."""
+        def run(c):
+            if self._contacts_built(c):
+                return
+            mine = {r[0] for r in c.execute("SELECT email FROM my_addresses")}
+            groups = {}
+            for r in c.execute("SELECT account_id, folder, from_json, to_json, cc_json, date FROM messages"):
+                groups.setdefault((r[0], r[1]), []).append(
+                    {"from": json.loads(r[2] or "[]"), "to": json.loads(r[3] or "[]"),
+                     "cc": json.loads(r[4] or "[]"), "date": r[5]})
+            for (acc_id, folder), recs in groups.items():
+                self._learn_contacts(c, acc_id, folder, recs, mine)
+            c.execute("INSERT INTO meta VALUES('contacts_built', '1')")
+        self._tx(run)
+
+    def add_sent_contacts(self, addrs):
+        """Adresáti právě odeslané zprávy: [(jméno, adresa)] – do našeptávání hned, ne až po synchronizaci."""
+        self._build_contacts()
+        rec = {"from": [], "to": [{"name": n, "addr": a} for n, a in addrs], "date": time.time()}
+        self._tx(lambda c: self._learn_contacts(c, None, None, [rec], by_me=True))
+
+    def contacts(self) -> list:
+        """Kontakty pro našeptávání, nejčastější první: komu píšu, pak od koho dostávám poštu.
+        Bez automatických odesílatelů, spammerů a zdrojů Notifikací / Nedůležitých (pokud jsem jim nepsal)."""
+        self._build_contacts()
+        skip = self.spam_senders() | self.category_senders()
+        rows = self._q("SELECT email, name, sent, received FROM contacts "
+                       "ORDER BY (sent > 0) DESC, sent * 5 + received DESC, last DESC")
+        out = []
+        for r in rows:
+            if not r["sent"] and (r["email"] in skip or NO_REPLY_RE.match(r["email"])):
+                continue
+            out.append({"email": r["email"], "name": r["name"]})
+            if len(out) >= MAX_CONTACTS:
+                break
         return out
 
     # ------------------------------------------------------------------ moje adresy (pro „Vzít na vědomí“)
