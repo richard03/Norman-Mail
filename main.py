@@ -11,7 +11,25 @@ import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
 
-import webview
+
+def unblock_bundled_dlls():
+    """Zip stažený z internetu (nebo přenesený z jiného počítače) nese značku Mark of the Web, kterou po
+    rozbalení zdědí i přibalené knihovny. .NET Framework pak odmítne načíst Python.Runtime.dll (pythonnet)
+    a aplikace spadne s „Failed to resolve Python.Runtime.Loader.Initialize“. Značku (alternativní datový
+    proud Zone.Identifier) proto u knihoven odstraníme dřív, než se .NET načte. Kde do složky zapisovat
+    nejde, pomůže Mailer.exe.config (loadFromRemoteSources)."""
+    if not getattr(sys, "frozen", False):
+        return
+    for dll in Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)).rglob("*.dll"):
+        try:
+            os.remove(f"{dll}:Zone.Identifier")
+        except OSError:
+            pass
+
+
+unblock_bundled_dlls()
+
+import webview  # noqa: E402  (až po odblokování knihoven)
 
 import app as server_app
 import mail
