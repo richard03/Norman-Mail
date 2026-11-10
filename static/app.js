@@ -134,6 +134,7 @@ const keyOf = m => `${m.account_id}|${m.folder}|${m.uid}`;
 const curKey = cur => (cur ? `${cur.accountId}|${cur.folder}|${cur.uid}` : null);
 const selectedItems = () => state.messages.filter(m => state.selected.has(keyOf(m)));
 const SPAM_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg>';
+const SENT_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>';
 const TRASH_ICON = '<svg class="folder-ico" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>';
 
 function folderRole(accountId, folder) {
@@ -168,6 +169,9 @@ function renderSidebar() {
       h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
               <span class="label">${label}</span>${badge(vu[filter])}</div>`;
     }
+    // Odeslané: odeslaná pošta všech účtů
+    h += `<div class="nav-item unified sent-item ${state.view.type === 'sent' ? 'active' : ''}" data-sent
+            title="Odeslané zprávy ze všech účtů">${SENT_ICON}<span class="label">Odeslané</span></div>`;
     // Spam: spam všech účtů (kdyby tam něco spadlo omylem); číslo = nepřečtené
     h += `<div class="nav-item unified spam-item ${state.view.type === 'spam' ? 'active' : ''}" data-spam
             title="Spam ze všech účtů">${SPAM_ICON}<span class="label">Spam</span>
@@ -209,9 +213,10 @@ function renderSidebar() {
 }
 
 $('#accounts').addEventListener('click', e => {
-  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-retry],[data-trash],[data-spam],[data-unified],[data-acc]');
+  const el = e.target.closest('[data-edit-folder],[data-add-folder],[data-ufolder],[data-retry],[data-trash],[data-spam],[data-sent],[data-unified],[data-acc]');
   if (!el) return;
   if (el.hasAttribute('data-trash')) return setView({ type: 'trash' });
+  if (el.hasAttribute('data-sent')) return setView({ type: 'sent' });
   if (el.hasAttribute('data-spam')) return setView({ type: 'spam' });
   if (el.dataset.editFolder) return openFolderDialog(+el.dataset.editFolder);
   if (el.hasAttribute('data-add-folder')) return openFolderDialog(null);
@@ -234,6 +239,9 @@ function navItemInfo(el) {
   if (el.hasAttribute('data-trash'))
     return { label: 'Smazané', target: null, unread: 0, readNote: 'Zprávy ve Smazaných jsou vždy přečtené',
              settings: () => openSettings('trash') };
+  if (el.hasAttribute('data-sent'))
+    return { label: 'Odeslané', target: null, unread: 0, readNote: 'Odeslané zprávy jsou vždy přečtené',
+             settings: null, settingsNote: 'Tato složka nemá žádné nastavení' };
   if (el.hasAttribute('data-spam'))
     return { label: 'Spam', target: { type: 'spam' }, unread: state.spamUnread, settings: () => openSettings('spam') };
   if (el.dataset.unified) {
@@ -415,6 +423,7 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
     else if (v.type === 'spam') res = await api('/api/spam?' + qs);
+    else if (v.type === 'sent') res = await api('/api/sent?' + qs);
     else { qs.set('folder', v.folder); res = await api(`/api/accounts/${v.accountId}/messages?${qs}`); }
     if (token !== listToken) return;
     if (append) {  // další stránka patří před dohledané ze serveru (a bez těch, které už tam jsou)
@@ -458,7 +467,7 @@ function remoteScope() {
   if (v.type === 'search') qs.set('scope', 'all');
   else if (v.type === 'unified') { qs.set('scope', 'unified'); qs.set('filter', v.filter); }
   else if (v.type === 'ufolder') { qs.set('scope', 'ufolder'); qs.set('id', v.id); }
-  else if (v.type === 'trash' || v.type === 'spam') qs.set('scope', v.type);
+  else if (['trash', 'spam', 'sent'].includes(v.type)) qs.set('scope', v.type);
   else { qs.set('scope', 'folder'); qs.set('account', v.accountId); qs.set('folder', v.folder); }
   if (state.unreadOnly) qs.set('unread', '1');
   return qs;
@@ -503,9 +512,9 @@ function renderList() {
   const v = state.view;
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
   const isSearch = v.type === 'search';
-  const multi = ['unified', 'ufolder', 'trash', 'spam', 'search'].includes(v.type);  // zprávy z více účtů
+  const multi = ['unified', 'ufolder', 'trash', 'spam', 'sent', 'search'].includes(v.type);  // zprávy z více účtů
   $('#listTitle').textContent = isSearch ? `Hledání: „${v.q}“` : v.type === 'unified' ? UNIFIED_TITLE[v.filter]
-    : v.type === 'trash' ? 'Smazané' : v.type === 'spam' ? 'Spam' : v.type === 'ufolder' ? v.title
+    : v.type === 'trash' ? 'Smazané' : v.type === 'spam' ? 'Spam' : v.type === 'sent' ? 'Odeslané' : v.type === 'ufolder' ? v.title
     : `${v.title || v.folder} · ${acc?.name || ''}`;
   $('#listTitle').title = $('#listTitle').textContent;
   $('#searchForm').hidden = isSearch;              // výsledky hledání se dál nefiltrují
@@ -513,7 +522,7 @@ function renderList() {
   renderTrashFooter();
   $('#listErrors').innerHTML = state.listErrors.map(e => `<div class="list-error">${esc(e)}</div>`).join('');
 
-  const showTo = v.type === 'folder' && ['sent', 'drafts'].includes(folderRole(v.accountId, v.folder));
+  const showTo = v.type === 'sent' || (v.type === 'folder' && ['sent', 'drafts'].includes(folderRole(v.accountId, v.folder)));
   const cur = state.current;
   const firstRemote = state.messages.findIndex(m => m.remote);
   $('#messages').innerHTML = state.messages.map((m, i) => {
@@ -1455,7 +1464,8 @@ $('#composeForm').addEventListener('submit', async e => {
     $('#composeDialog').close();
     toast(res.warning || 'Zpráva odeslána', !!res.warning);
     const v = state.view;
-    if (v.type === 'folder' && v.accountId === f.account_id.value && folderRole(v.accountId, v.folder) === 'sent')
+    if (v.type === 'sent' || (v.type === 'folder' && v.accountId === f.account_id.value
+                              && folderRole(v.accountId, v.folder) === 'sent'))
       loadList({ quiet: true });
   } catch (err) {
     $('#composeError').textContent = err.message;

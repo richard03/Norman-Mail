@@ -497,6 +497,10 @@ class Database:
         """Počet zpráv v koších daných účtů (číslo u složky Smazané)."""
         return self.role_count("trash", acc_ids)
 
+    def sent_folders(self) -> dict:
+        """{account_id: název složky Odeslané}"""
+        return self.role_folders("sent")
+
     def spam_folders(self) -> dict:
         """{account_id: název složky Spam}"""
         return self.role_folders("junk")
@@ -747,7 +751,7 @@ class Database:
         jejím příjemcům; jinak = adresy z ní (odesílatel i ostatní příjemci) jsem dostal. Spam se přeskakuje."""
         role = (c.execute("SELECT role FROM folders WHERE account_id=? AND name=?", (acc_id, folder)).fetchone()
                 or [None])[0]
-        if role == "spam":
+        if role == "junk":
             return
         if mine is None:
             mine = {r[0] for r in c.execute("SELECT email FROM my_addresses")}

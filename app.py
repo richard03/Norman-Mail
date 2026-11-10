@@ -1025,6 +1025,12 @@ def trash_list():
     return _role_list(database.trash_folders())
 
 
+@app.get("/api/sent")
+def sent_list():
+    """Složka Odeslané: odeslaná pošta všech účtů dohromady (z databáze)."""
+    return _role_list(database.sent_folders())
+
+
 @app.get("/api/spam")
 def spam_list():
     """Složka Spam: spam všech účtů dohromady (z databáze)."""
@@ -1251,7 +1257,8 @@ def message_locate(acc_id, uid):
     if folder == "INBOX":
         view = database.view_of(acc_id, folder, uid)
         return jsonify(view={"type": "unified", "filter": view}, position=pos("INBOX", view))
-    for kind, by_acc in (("spam", database.spam_folders()), ("trash", database.trash_folders())):
+    for kind, by_acc in (("spam", database.spam_folders()), ("trash", database.trash_folders()),
+                         ("sent", database.sent_folders())):
         if by_acc.get(acc_id) == folder:
             locations = {a: by_acc[a] for a in accounts if a in by_acc}
             return jsonify(view={"type": kind}, position=pos(locations))
@@ -1300,8 +1307,9 @@ def _search_locations():
     if scope == "ufolder":
         f = _folder_or_404(request.args.get("id", type=int) or 0)
         return ({f["account_id"]: [f["imap_name"]]} if f["account_id"] and store.get(f["account_id"]) else {}), None
-    if scope in ("spam", "trash"):
-        by_acc = database.spam_folders() if scope == "spam" else database.trash_folders()
+    if scope in ("spam", "trash", "sent"):
+        by_acc = {"spam": database.spam_folders, "trash": database.trash_folders,
+                  "sent": database.sent_folders}[scope]()
         return {a["id"]: [by_acc[a["id"]]] for a in accounts if a["id"] in by_acc}, None
     if scope == "folder":
         acc = account_or_404(request.args.get("account"))
@@ -1457,6 +1465,7 @@ def send():
         database.add_sent_contacts([(a["name"], a["addr"]) for v in (to, cc, bcc) for a in mail.parse_addrs(v)])
     except Exception:
         pass  # zpráva odešla; adresáti se do kontaktů dostanou i synchronizací Odeslaných
+    syncer.trigger()  # kopie v Odeslaných se hned objeví i ve složce Odeslané
     return jsonify(ok=True, warning=warning)
 
 
