@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -19,9 +20,23 @@ except Exception:  # keyring není nainstalovaný nebo nemá backend
 SERVICE = "Mailer"
 
 
+PORTABLE_MARKER = "portable.txt"  # leží-li vedle Mailer.exe, data jsou ve složce data vedle něj
+
+
+def portable_dir():
+    """Složka portable verze (sestavená aplikace se souborem portable.txt vedle exe), jinak None."""
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).resolve().parent
+        if (base / PORTABLE_MARKER).exists():
+            return base
+    return None
+
+
 def _data_dir() -> Path:
     if os.environ.get("MAILER_DATA"):
         return Path(os.environ["MAILER_DATA"])
+    if portable_dir():
+        return portable_dir() / "data"
     target = Path(os.environ.get("APPDATA") or Path.home()) / "Mailer"
     legacy = Path(__file__).resolve().parent / "data"  # dřívější umístění vedle zdrojáků
     if not target.exists() and legacy.is_dir():

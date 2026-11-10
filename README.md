@@ -4,11 +4,15 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 
 ## Spuštění
 
-**Sestavená aplikace:** spusťte `dist\Mailer\Mailer.exe`. Složka `dist\Mailer` obsahuje vše potřebné, takže ji můžete přesunout kamkoli (např. do `C:\Program Files\Mailer`). Zástupce na plochu vytvoříte pravým tlačítkem na `Mailer.exe` → *Zobrazit další možnosti* → *Odeslat* → *Plocha*.
+**Pro Windows bez Pythonu** (Windows 10/11, 64bit) jsou dvě varianty. Obě obsahují vše potřebné včetně Pythonu:
+- **Instalátor** `Mailer-Setup-VERZE.exe`: nainstaluje Mailer jen pro aktuálního uživatele (bez práv správce) do `%LOCALAPPDATA%\Programs\Mailer`, přidá ho do nabídky Start (volitelně i zástupce na plochu) a do *Nainstalované aplikace*, odkud jde odinstalovat. Odinstalace nemaže data (`%APPDATA%\Mailer`) ani hesla.
+- **Portable** `Mailer-VERZE-portable.zip`: rozbalte kamkoli (i na flash disk) a spusťte `Mailer.exe`. Dokud vedle něj leží `portable.txt`, ukládá všechna data do složky `data` vedle sebe. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
+
+Jedinou systémovou součástí, kterou Mailer potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, instalátor i aplikace nabídnou stránku Microsoftu ke stažení.
 
 **Připnutí na hlavní panel:** na běžícím Maileru klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `Mailer.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
 
-**Sestavení `.exe`:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a výsledek uloží do `dist\Mailer\`.
+**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `Mailer\` (aplikace), `Mailer-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`), i instalátor `Mailer-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 
@@ -149,5 +153,7 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | `mail.py` | Práce s IMAP a SMTP, parsování zpráv, sdílení spojení |
 | `store.py` | Ukládání účtů a hesel |
 | `static/` | Uživatelské rozhraní (HTML, CSS, JS) |
+| `build.bat`, `installer.iss`, `version.py` | Sestavení aplikace, portable balíčku a instalátoru |
+| `assets/portable.txt` | Značka portable verze (kopíruje se vedle `Mailer.exe`) |
 
 Port lze změnit proměnnou prostředí `MAILER_PORT`, složku s daty proměnnou `MAILER_DATA`.

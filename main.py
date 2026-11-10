@@ -141,7 +141,43 @@ def pin_identity(window, icon):
         print("Identitu okna pro hlavní panel nelze nastavit:", e)
 
 
+WEBVIEW2_CLIENT = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
+
+
+def webview2_installed() -> bool:
+    """Je nainstalovaný Edge WebView2 Runtime? (systémově, nebo jen pro uživatele)"""
+    import winreg
+    for root, key in ((winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + WEBVIEW2_CLIENT),
+                      (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + WEBVIEW2_CLIENT),
+                      (winreg.HKEY_CURRENT_USER, "Software\\" + WEBVIEW2_CLIENT)):
+        try:
+            with winreg.OpenKey(root, key) as k:
+                version = winreg.QueryValueEx(k, "pv")[0]
+            if version and version != "0.0.0.0":
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def require_webview2() -> bool:
+    """Bez WebView2 se okno nezobrazí – nabídne stažení (Windows 11 ho má vždy, Windows 10 skoro vždy)."""
+    if webview2_installed():
+        return True
+    import ctypes
+    answer = ctypes.windll.user32.MessageBoxW(
+        None, "Mailer potřebuje Microsoft Edge WebView2 Runtime, který na tomto počítači chybí.\n\n"
+              "Chcete otevřít stránku Microsoftu, odkud ho stáhnete (zvolte „Evergreen Bootstrapper“)? "
+              "Po instalaci Mailer spusťte znovu.", "Mailer", 0x04 | 0x30)  # Ano/Ne, ikona upozornění
+    if answer == 6:  # Ano
+        webbrowser.open(WEBVIEW2_DOWNLOAD)
+    return False
+
+
 def main():
+    if not require_webview2():
+        return
     taskbar.set_process_app_id()
     server_app.EMBEDDED = True
     server_app.start_background()
