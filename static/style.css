@@ -12,6 +12,7 @@
   --danger: #c62828;
   --error-bg: #fdecec;
   --banner: #fff6db;
+  --clip: #b45309;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -27,6 +28,7 @@
     --danger: #ef5350;
     --error-bg: #3a1f22;
     --banner: #3a3320;
+    --clip: #f0a14a;
   }
 }
 
@@ -62,6 +64,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg); color: var(--text);
 }
 .global-search input:focus { outline: none; border-color: var(--accent); }
+.global-search .adv-btn { display: flex; align-items: center; padding: 5px; }
+.global-search .adv-btn svg { width: 20px; height: 20px; stroke: currentColor; }
+.global-search .adv-btn.on { color: var(--accent); background: var(--active); }
+/* ikona přílohy v seznamu zpráv a v Kontextu */
+svg.clip {
+  width: 15px; height: 15px; flex: none; align-self: center;
+  fill: none; stroke: var(--clip); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round;
+}
 #sidebar, #list, #context { position: relative; min-width: 0; }
 .col-resizer {
   position: absolute; top: 0; bottom: 0; width: 7px; z-index: 20; cursor: col-resize; touch-action: none;
@@ -442,6 +452,9 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 dialog.confirm { width: min(480px, calc(100vw - 32px)); }
 /* Nastavit pravidlo */
 dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
+/* Pokročilé hledání */
+.adv-search label { position: relative; }  /* kotva pro našeptávání adres */
+.adv-att { display: flex; flex-wrap: wrap; gap: 6px 22px; }
 .rule-kinds { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: center; }
 .rule-kinds legend { grid-column: 1 / -1; }
 .rule-kinds input:disabled, .rule-kinds select:disabled { opacity: .5; }

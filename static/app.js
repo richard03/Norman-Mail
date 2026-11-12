@@ -51,6 +51,9 @@ let listToken = 0;
 const UNIFIED_VIEWS = [['important', 'Důležité'], ['fyi', 'Vzít na vědomí'], ['unimportant', 'Nedůležité'],
                        ['notifications', 'Notifikace']];
 const UNIFIED_TITLE = Object.fromEntries(UNIFIED_VIEWS);
+// Ikona přílohy (sponka) v seznamu zpráv a v Kontextu
+const CLIP_ICON = '<svg class="clip" viewBox="0 0 24 24" role="img" aria-label="Příloha"><title>Má přílohu</title>'
+  + '<path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>';
 // Kategorie, které určuje uživatel (tlačítka v Třídění, pravidla v Nastavení)
 const CATEGORIES = {
   unimportant: { act: 'unimportant', title: 'Nedůležité', flag: 'unimportant', setting: 'unimp',
@@ -418,7 +421,11 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
     else if (reveal) { qs.set('offset', 0); qs.set('limit', reveal.position + 20); }  // rovnou po hledanou zprávu
     else if (keepLoaded && local) { qs.set('offset', 0); qs.set('limit', local); }  // obnovit vše zobrazené
     let res;
-    if (v.type === 'search') { qs.set('q', v.q); res = await api('/api/search?' + qs); }
+    if (v.type === 'search') {
+      if (v.adv) for (const [k, val] of Object.entries(v.adv)) { if (val) qs.set(k, val); }
+      else qs.set('q', v.q);
+      res = await api('/api/search?' + qs);
+    }
     else if (v.type === 'unified') { qs.set('filter', v.filter); res = await api('/api/unified?' + qs); }
     else if (v.type === 'ufolder') res = await api(`/api/user-folders/${v.id}/messages?${qs}`);
     else if (v.type === 'trash') res = await api('/api/trash?' + qs);
@@ -461,6 +468,8 @@ let remoteToken = 0, remoteTimer = null;
 
 /** Text, který se v aktuálním seznamu hledá (hledání ve veškeré poště, nebo filtr složky). */
 const activeQuery = () => (state.view.type === 'search' ? state.view.q : state.query) || '';
+/** Pokročilé hledání: kritéria jsou jen v hlavičkách, takže stačí uložené zprávy (bez dohledání na serveru). */
+const isAdvSearch = () => state.view.type === 'search' && !!state.view.adv;
 
 function remoteScope() {
   const v = state.view, qs = new URLSearchParams({ q: activeQuery() });
@@ -513,12 +522,13 @@ function renderList() {
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
   const isSearch = v.type === 'search';
   const multi = ['unified', 'ufolder', 'trash', 'spam', 'sent', 'search'].includes(v.type);  // zprávy z více účtů
-  $('#listTitle').textContent = isSearch ? `Hledání: „${v.q}“` : v.type === 'unified' ? UNIFIED_TITLE[v.filter]
+  $('#listTitle').textContent = isSearch ? (v.adv ? `Hledání: ${advSummary(v.adv)}` : `Hledání: „${v.q}“`) : v.type === 'unified' ? UNIFIED_TITLE[v.filter]
     : v.type === 'trash' ? 'Smazané' : v.type === 'spam' ? 'Spam' : v.type === 'sent' ? 'Odeslané' : v.type === 'ufolder' ? v.title
     : `${v.title || v.folder} · ${acc?.name || ''}`;
   $('#listTitle').title = $('#listTitle').textContent;
   $('#searchForm').hidden = isSearch;              // výsledky hledání se dál nefiltrují
   $('.unread-toggle').hidden = isSearch;
+  $('#advSearchBtn').classList.toggle('on', isSearch && !!v.adv);
   renderTrashFooter();
   $('#listErrors').innerHTML = state.listErrors.map(e => `<div class="list-error">${esc(e)}</div>`).join('');
 
@@ -534,7 +544,8 @@ function renderList() {
       ${multi ? `<span class="strip" style="background:${accColor(m.account_id)}"></span>` : ''}
       <div class="row1">
         <span class="from">${esc(showTo ? 'Komu: ' + shortAddr(m.to) : shortAddr(m.from))}</span>
-        <span class="date">${m.snoozed_until ? `<span title="Odloženo do ${esc(fmtSnooze(m.snoozed_until))}">⏰</span> ` : ''}${m.flagged ? '★ ' : ''}${m.has_attachments ? '📎 ' : ''}${fmtDate(m.date)}</span>
+        ${m.has_attachments ? CLIP_ICON : ''}
+        <span class="date">${m.snoozed_until ? `<span title="Odloženo do ${esc(fmtSnooze(m.snoozed_until))}">⏰</span> ` : ''}${m.flagged ? '★ ' : ''}${fmtDate(m.date)}</span>
       </div>
       <div class="subject">${esc(m.subject)}</div>
       ${multi ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}${isSearch && m.folder_label
@@ -565,10 +576,12 @@ function listTail() {
   const errs = rs?.errors?.length ? `<div class="error small">${rs.errors.map(esc).join('<br>')}</div>` : '';
   if (rs?.error) return `<li class="list-tail error">Dohledání na serveru selhalo: ${esc(rs.error)}</li>`;
   if (!state.messages.length && state.accounts.length && !state.listErrors.length)
-    return `<li class="list-tail">${activeQuery() ? 'Nic nenalezeno.' : state.unreadOnly ? 'Žádné nepřečtené zprávy.' : 'Žádné zprávy.'}${errs}</li>`;
+    return `<li class="list-tail">${activeQuery() || isAdvSearch() ? 'Nic nenalezeno.' : state.unreadOnly ? 'Žádné nepřečtené zprávy.' : 'Žádné zprávy.'}${errs}</li>`;
   const more = state.searchTruncated ? '<div class="small">Zobrazeny jsou nejnovější výsledky – zpřesněte hledání.</div>' : '';
   if (rs && !rs.found) return `<li class="list-tail muted">Na serveru nic dalšího.${more}${errs}</li>`;
   if (more) return `<li class="list-tail muted">${more}</li>`;
+  if (isAdvSearch() && state.messages.length)
+    return '<li class="list-tail muted small">Hledáno ve stažených zprávách.</li>';
   return errs ? `<li class="list-tail">${errs}</li>` : '';
 }
 
@@ -653,19 +666,66 @@ function applyGlobalSearch() {
     }
     return;
   }
+  startSearch({ type: 'search', q });
+}
+
+/** Zobrazí výsledky hledání; odkud uživatel přišel, si pamatuje pro návrat (prázdné pole hledání). */
+function startSearch(view) {
   if (state.view.type === 'search') {
-    if (state.view.q === q) return;
-    state.view = { type: 'search', q };
+    if (JSON.stringify(state.view) === JSON.stringify(view)) return;
+    state.view = view;
     return loadList({ quiet: true });
   }
   const prev = state.view;
-  setView({ type: 'search', q });
+  setView(view);
   state.beforeSearch = prev;
 }
 $('#globalSearch').addEventListener('submit', e => { e.preventDefault(); applyGlobalSearch(); });
 $('#globalSearchInput').addEventListener('input', () => { clearTimeout(globalTimer); globalTimer = setTimeout(applyGlobalSearch, 250); });
 $('#globalSearchInput').addEventListener('keydown', e => {
   if (e.key === 'Escape' && e.target.value) { e.target.value = ''; applyGlobalSearch(); }
+});
+
+// Pokročilé hledání: odesílatel, příjemce, předmět, příloha (všechna vyplněná kritéria zároveň).
+const ADV_FIELDS = ['from', 'to', 'subject'];
+
+function advSummary(a) {
+  const parts = [];
+  if (a.from) parts.push(`od „${a.from}“`);
+  if (a.to) parts.push(`komu „${a.to}“`);
+  if (a.subject) parts.push(`předmět „${a.subject}“`);
+  if (a.att) parts.push(a.att === '1' ? 's přílohou' : 'bez přílohy');
+  return parts.join(', ');
+}
+
+$('#advSearchBtn').addEventListener('click', () => {
+  const f = $('#advSearchForm'), a = state.view.type === 'search' && state.view.adv || {};
+  for (const k of ADV_FIELDS) f.elements[k].value = a[k] || '';
+  f.elements.att.value = a.att || '';
+  $('#advSearchError').textContent = '';
+  if (!state.contacts.length) loadContacts();
+  $('#advSearchDialog').showModal();
+  f.elements.from.focus();
+});
+$('#advSearchClear').addEventListener('click', () => {
+  const f = $('#advSearchForm');
+  for (const k of ADV_FIELDS) f.elements[k].value = '';
+  f.elements.att.value = '';
+  $('#advSearchError').textContent = '';
+  f.elements.from.focus();
+});
+$('#advSearchForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = e.target, adv = {};
+  for (const k of ADV_FIELDS) adv[k] = f.elements[k].value.trim().split(/\s+/).join(' ');
+  adv.att = f.elements.att.value;
+  if (!ADV_FIELDS.some(k => adv[k])) {
+    $('#advSearchError').textContent = 'Vyplňte odesílatele, příjemce nebo předmět.';
+    return;
+  }
+  $('#advSearchDialog').close();
+  $('#globalSearchInput').value = '';
+  startSearch({ type: 'search', q: '', adv });
 });
 
 function adjustUnseen(accountId, folder, delta) {
@@ -1330,7 +1390,7 @@ function renderContext() {
     if (m.folder_role !== 'inbox')
       tags.unshift(`<span class="tag folder ${m.folder_role === 'junk' ? 'spam' : ''}">${esc(m.folder_display)}</span>`);
     return `<div class="ctx ${m.seen ? '' : 'unread'}" data-i="${i}" title="${esc(m.subject)}">
-      <div class="ctx-row1"><span class="ctx-who">${esc(who)}</span><span class="ctx-date">${fmtDate(m.date)}</span></div>
+      <div class="ctx-row1"><span class="ctx-who">${esc(who)}</span>${m.has_attachments ? CLIP_ICON : ''}<span class="ctx-date">${fmtDate(m.date)}</span></div>
       <div class="ctx-subject">${esc(m.subject)}</div>
       ${tags.length ? `<div class="ctx-tags">${tags.join('')}</div>` : ''}
     </div>`;
@@ -1579,13 +1639,16 @@ function acPick(i) {
   const v = input.value, tok = addrToken(input);
   const before = v.slice(0, tok.start).replace(/\s*$/, '');
   const after = v.slice(tok.end).replace(/^[,;]?\s*/, '');
-  const head = (before ? before + ' ' : '') + fmtContact(c) + ', ';
-  input.value = head + after;
-  input.setSelectionRange(head.length, head.length);
+  if (input.dataset.addr === 'single') input.value = c.email;  // pokročilé hledání: jedna adresa
+  else {
+    const head = (before ? before + ' ' : '') + fmtContact(c) + ', ';
+    input.value = head + after;
+    input.setSelectionRange(head.length, head.length);
+  }
   acClose();
 }
 
-document.querySelectorAll('#composeForm input[data-addr]').forEach(input => {
+document.querySelectorAll('#composeForm input[data-addr], #advSearchForm input[data-addr]').forEach(input => {
   input.addEventListener('input', () => acUpdate(input));
   input.addEventListener('blur', () => { if (ac.input === input) acClose(); });
   input.addEventListener('keydown', e => {
@@ -1605,6 +1668,7 @@ document.querySelectorAll('#composeForm input[data-addr]').forEach(input => {
   });
 });
 $('#composeDialog').addEventListener('close', acClose);
+$('#advSearchDialog').addEventListener('close', acClose);
 
 // ------------------------------------------------------------------ nastavení účtů
 

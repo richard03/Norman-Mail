@@ -1278,12 +1278,17 @@ search_seq = {"n": 0}       # novější hledání ukončí starší, aby se neh
 
 @app.get("/api/search")
 def search_all():
-    """Hledání ve veškeré poště – z lokální databáze (okamžité)."""
+    """Hledání ve veškeré poště – z lokální databáze (okamžité). Pokročilé hledání:
+    ?from= &to= &subject= (část textu) a ?att=1 / 0 (má / nemá přílohu)."""
     q = query_arg()
-    if not q:
+    adv = {k: " ".join((request.args.get(a) or "").split()) or None
+           for k, a in (("sender", "from"), ("recipient", "to"), ("subject", "subject"))}
+    att = request.args.get("att")
+    adv["attachments"] = {"1": True, "0": False}.get(att)
+    if not q and not any(adv[k] for k in ("sender", "recipient", "subject")):
         return jsonify(messages=[], has_more=False, version=database.version)
     version = database.version
-    found, more = database.search_all(q, [a["id"] for a in store.all()])
+    found, more = database.search_all(q, [a["id"] for a in store.all()], **adv)
     return jsonify(messages=found, has_more=more, version=version)
 
 

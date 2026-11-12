@@ -24,6 +24,9 @@
   <form id="globalSearch" class="global-search" role="search" autocomplete="off">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
     <input id="globalSearchInput" type="search" placeholder="Hledat ve veškeré poště…" aria-label="Hledat ve veškeré poště">
+    <button type="button" id="advSearchBtn" class="icon-btn adv-btn" title="Pokročilé hledání" aria-label="Pokročilé hledání">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>
+    </button>
   </form>
 
   <section id="list">
@@ -154,6 +157,30 @@
       <span class="spacer"></span>
       <button type="button" class="btn" id="categoryRuleCancel">Zrušit</button>
       <button type="submit" class="btn primary" id="categoryRuleSave">Uložit</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Pokročilé hledání ve veškeré poště -->
+<dialog id="advSearchDialog" class="confirm adv-search">
+  <form id="advSearchForm" method="dialog" autocomplete="off">
+    <h2>Pokročilé hledání</h2>
+    <label>Odesílatel<input name="from" data-addr="single" placeholder="jméno nebo adresa"></label>
+    <label>Příjemce (Komu / Kopie)<input name="to" data-addr="single" placeholder="jméno nebo adresa"></label>
+    <label>Předmět<input name="subject" placeholder="část předmětu"></label>
+    <fieldset class="adv-att">
+      <legend>Příloha</legend>
+      <label class="option"><input type="radio" name="att" value="" checked> Nezáleží</label>
+      <label class="option"><input type="radio" name="att" value="1"> Má přílohu</label>
+      <label class="option"><input type="radio" name="att" value="0"> Nemá přílohu</label>
+    </fieldset>
+    <p class="note">Hledá se ve všech účtech a složkách. Zpráva musí splnit všechna vyplněná pole.</p>
+    <p id="advSearchError" class="error"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="advSearchClear">Vymazat</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-close>Zrušit</button>
+      <button type="submit" class="btn primary">Hledat</button>
     </div>
   </form>
 </dialog>

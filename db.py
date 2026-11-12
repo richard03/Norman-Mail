@@ -371,16 +371,34 @@ class Database:
                 best[k] = m
         return sorted(best.values(), key=lambda m: (m["date"] or 0, m["uid"]), reverse=True)
 
-    def search_all(self, term, acc_ids, limit=300):
-        """Hledání ve všech uložených zprávách všech účtů (předmět, odesílatel, příjemci).
-        Vrací (zprávy, zda jich je víc)."""
+    def search_all(self, term, acc_ids, limit=300, sender=None, recipient=None, subject=None, attachments=None):
+        """Hledání ve všech uložených zprávách všech účtů. term = kdekoli v předmětu, odesílateli
+        nebo příjemcích; pokročilé hledání: sender / recipient (Komu, Kopie) / subject = část textu,
+        attachments = True (má přílohu) / False (nemá) / None (nezáleží). Všechna zadaná kritéria
+        musí platit zároveň. Vrací (zprávy, zda jich je víc)."""
         if not acc_ids:
             return [], False
-        like = f"%{term}%"
+        conds, params = [], []
+        if term:
+            conds.append("(m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ? OR m.cc_json LIKE ?)")
+            params += [f"%{term}%"] * 4
+        if sender:
+            conds.append("m.from_json LIKE ?")
+            params.append(f"%{sender}%")
+        if recipient:
+            conds.append("(m.to_json LIKE ? OR m.cc_json LIKE ?)")
+            params += [f"%{recipient}%"] * 2
+        if subject:
+            conds.append("m.subject LIKE ?")
+            params.append(f"%{subject}%")
+        if not conds:  # samotné „má / nemá přílohu“ by vrátilo půl schránky – hledá se jen s textem
+            return [], False
+        if attachments is not None:
+            conds.append("m.has_attachments=?")
+            params.append(int(attachments))
         rows = self._q(f"""{self._LABELED}
-            WHERE m.account_id IN ({','.join('?' * len(acc_ids))})
-              AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ? OR m.cc_json LIKE ?)
-            ORDER BY m.date DESC, m.uid DESC LIMIT ?""", (*acc_ids, like, like, like, like, limit * 2 + 1))
+            WHERE m.account_id IN ({','.join('?' * len(acc_ids))}) AND {' AND '.join(conds)}
+            ORDER BY m.date DESC, m.uid DESC LIMIT ?""", (*acc_ids, *params, limit * 2 + 1))
         found = self.dedupe(self._labeled(rows))
         return found[:limit], len(rows) > limit * 2 or len(found) > limit
 
