@@ -2537,6 +2537,9 @@ async function pollSync() {
 
 // ------------------------------------------------------------------ šířka sloupců
 
+// V úzkém okně jsou akce jen ikony – popisek ukáže bublina (tlačítka s vlastní nápovědou si ji nechají).
+document.querySelectorAll('#actions .action').forEach(b => { if (!b.title) b.title = b.textContent.trim(); });
+
 // Šířku lze měnit levému panelu, seznamu a kontextu (tažením úchytu na okraji, dvojklik = výchozí šířka).
 // Čtecí část vezme zbytek (nejméně READER_MIN), sloupec Akce má pevnou šířku.
 const COLUMNS = {

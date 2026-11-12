@@ -205,7 +205,7 @@ def main():
     webview.settings["ALLOW_DOWNLOADS"] = True
     api = Api()
     window = webview.create_window("Mailer", APP_URL, js_api=api, width=1600, height=950,
-                                   min_size=(1200, 600), text_select=True)
+                                   min_size=(960, 600), text_select=True)
     api._window = window
     icon = resource("assets/mailer.ico")
     window.events.shown += lambda: pin_identity(window, icon)

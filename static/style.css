@@ -335,6 +335,14 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 @media (max-width: 1500px) {
   :root { --w-sidebar: 190px; --w-list: 290px; --w-actions: 195px; --w-context: 260px; }
 }
+/* Úzké okno (od 960 px): užší sloupce a Akce jen jako ikony (popisek v bublině), aby zbylo místo na čtení. */
+@media (min-width: 761px) and (max-width: 1199px) {
+  :root { --w-sidebar: 160px; --w-list: 230px; --w-actions: 50px; --w-context: 190px; }
+  #actions { padding: 0 6px; }
+  #actions .col-title { visibility: hidden; padding: 8px 0 4px; }
+  .action { justify-content: center; gap: 0; padding: 8px; font-size: 0; }
+  .action .label { font-size: 0; }
+}
 @media (max-width: 760px) {
   #app { grid-template-columns: 1fr; grid-template-rows: none; height: auto; min-height: 100vh; }
   #app > * { grid-column: 1; grid-row: auto; }
