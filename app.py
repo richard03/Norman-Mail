@@ -1475,13 +1475,93 @@ def send():
 
     msg = mail.build_message(acc, to, cc, str(data.get("subject") or ""), str(data.get("body") or ""),
                              data.get("in_reply_to") or None, data.get("references") or None, attachments)
+    job = lambda: _deliver(acc, msg, recipients, (to, cc, bcc))
+    delay = min(max(float(data.get("delay") or 0), 0), 30)
+    if not delay:
+        return jsonify(ok=True, warning=job())
+    return jsonify(ok=True, pending_id=_schedule_send(job, delay))
+
+
+def _deliver(acc, msg, recipients, fields):
+    """Odeslání připravené zprávy (SMTP + kopie v Odeslaných). Vrací varování, nebo None."""
     warning = mail.send_message(acc, msg, recipients, pool)
     try:
-        database.add_sent_contacts([(a["name"], a["addr"]) for v in (to, cc, bcc) for a in mail.parse_addrs(v)])
+        database.add_sent_contacts([(a["name"], a["addr"]) for v in fields for a in mail.parse_addrs(v)])
     except Exception:
         pass  # zpráva odešla; adresáti se do kontaktů dostanou i synchronizací Odeslaných
     syncer.trigger()  # kopie v Odeslaných se hned objeví i ve složce Odeslané
-    return jsonify(ok=True, warning=warning)
+    return warning
+
+
+# --- odložené odeslání: zpráva je připravená a ověřená, odejde až po prodlevě; do té doby jde zastavit
+
+pending_sends = {}           # id -> {"state": waiting|sending|done, "job", "timer", "done": Event, "result"}
+pending_lock = threading.Lock()
+
+
+def _schedule_send(job, delay):
+    sid = uuid.uuid4().hex
+    entry = {"state": "waiting", "job": job, "done": threading.Event(), "result": None}
+    entry["timer"] = threading.Timer(delay, _run_pending, (sid,))
+    entry["timer"].daemon = True
+    with pending_lock:
+        pending_sends[sid] = entry
+    entry["timer"].start()
+    return sid
+
+
+def _run_pending(sid):
+    with pending_lock:
+        entry = pending_sends.get(sid)
+        if not entry or entry["state"] != "waiting":
+            return
+        entry["state"] = "sending"
+    try:
+        entry["result"] = {"ok": True, "warning": entry["job"]()}
+    except Exception as e:
+        entry["result"] = {"ok": False, "error": str(e) if isinstance(e, mail.MailError) else mail.friendly_error(e)}
+    entry["state"] = "done"
+    entry["done"].set()
+
+
+def flush_pending_sends():
+    """Při ukončení aplikace: zprávy, které ještě čekají na odeslání, odeslat hned (jinak by se ztratily)."""
+    with pending_lock:
+        waiting = [sid for sid, e in pending_sends.items() if e["state"] == "waiting"]
+    for sid in waiting:
+        pending_sends[sid]["timer"].cancel()
+        _run_pending(sid)
+    for e in list(pending_sends.values()):  # i ty, které se právě odesílají
+        e["done"].wait(120)
+
+
+@app.post("/api/send/<sid>/cancel")
+def send_cancel(sid):
+    """Zastavení odloženého odeslání – jen dokud zpráva ještě neodchází."""
+    with pending_lock:
+        entry = pending_sends.get(sid)
+        if not entry:
+            abort(404, "Odeslání už není možné zastavit.")
+        if entry["state"] != "waiting":
+            raise ValidationError("Zpráva se už odesílá – zastavit ji nejde.")
+        entry["timer"].cancel()
+        del pending_sends[sid]
+    return jsonify(ok=True)
+
+
+@app.get("/api/send/<sid>")
+def send_result(sid):
+    """Výsledek odloženého odeslání; počká, až zpráva odejde."""
+    entry = pending_sends.get(sid)
+    if not entry:
+        abort(404, "Odeslání nenalezeno.")
+    if not entry["done"].wait(120):
+        return jsonify(ok=True, pending=True)
+    with pending_lock:
+        pending_sends.pop(sid, None)
+    if not entry["result"]["ok"]:
+        raise mail.MailError(entry["result"]["error"])
+    return jsonify(ok=True, warning=entry["result"]["warning"])
 
 
 @app.get("/api/contacts")

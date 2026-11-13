@@ -1584,17 +1584,15 @@ $('#composeForm').addEventListener('submit', async e => {
     const fwd = c.forward && c.forward.attachments.length
       ? { account_id: c.forward.account_id, folder: c.forward.folder, uid: c.forward.uid,
           indexes: c.forward.attachments.map(a => a.index) } : null;
+    const draft = composeSnapshot();
     const res = await api('/api/send', { method: 'POST', body: {
       account_id: f.account_id.value, to: f.to.value, cc: f.cc.value, bcc: f.bcc.value,
       subject: f.subject.value, body: f.body.value,
-      in_reply_to: c.inReplyTo, references: c.references, attachments, forward: fwd,
+      in_reply_to: c.inReplyTo, references: c.references, attachments, forward: fwd, delay: SEND_DELAY,
     } });
     $('#composeDialog').close();
-    toast(res.warning || 'Zpráva odeslána', !!res.warning);
-    const v = state.view;
-    if (v.type === 'sent' || (v.type === 'folder' && v.accountId === f.account_id.value
-                              && folderRole(v.accountId, v.folder) === 'sent'))
-      loadList({ quiet: true });
+    if (res.pending_id) startPendingSend(res.pending_id, draft);
+    else afterSent(res, draft.fields.account_id);
   } catch (err) {
     $('#composeError').textContent = err.message;
   } finally {
@@ -1604,6 +1602,119 @@ $('#composeForm').addEventListener('submit', async e => {
 });
 
 $('#composeBtn').addEventListener('click', () => openCompose());
+
+// --- odložené odeslání: zpráva odejde až po SEND_DELAY s; do té doby ji jde zastavit (upravit, nebo zrušit)
+
+const SEND_DELAY = 5;
+
+/** Obsah okna Nová zpráva – pro návrat k úpravám, když se odeslání zastaví nebo nepovede. */
+function composeSnapshot() {
+  const f = $('#composeForm').elements;
+  const c = state.compose;
+  return {
+    title: $('#composeTitle').textContent,
+    fields: Object.fromEntries(['account_id', 'to', 'cc', 'bcc', 'subject', 'body'].map(k => [k, f[k].value])),
+    compose: { ...c, files: c.files.slice(),
+               forward: c.forward ? { ...c.forward, attachments: c.forward.attachments.slice() } : null },
+  };
+}
+
+/** Znovu otevře rozepsanou zprávu ze zálohy. */
+function restoreCompose(draft, error = '') {
+  openCompose({ accountId: draft.fields.account_id, title: draft.title });
+  const f = $('#composeForm').elements;
+  for (const [k, v] of Object.entries(draft.fields)) if (k !== 'account_id') f[k].value = v;
+  state.compose = draft.compose;
+  renderComposeAttachments();
+  $('#composeError').textContent = error;
+  f.body.focus();
+}
+
+function afterSent(res, accountId) {
+  toast(res.warning || 'Zpráva odeslána', !!res.warning);
+  const v = state.view;
+  if (v.type === 'sent' || (v.type === 'folder' && v.accountId === accountId && folderRole(v.accountId, v.folder) === 'sent'))
+    loadList({ quiet: true });
+}
+
+/** Adresáti pro lištu: jména / adresy bez lomených závorek, nejvýš dva a počet dalších. */
+function shortRecipients(v) {
+  const parts = v.split(/[,;]/).map(p => p.replace(/<.*?>/, '').replace(/"/g, '').trim() || p.trim()).filter(Boolean);
+  return parts.slice(0, 2).join(', ') + (parts.length > 2 ? ` a ${parts.length - 2} další` : '');
+}
+
+/** Lišta s odpočtem: Upravit = zastavit a vrátit se do okna zprávy, Zrušit odeslání = zahodit. */
+function startPendingSend(id, draft) {
+  const bar = document.createElement('div');
+  bar.className = 'send-bar';
+  bar.innerHTML = `<span class="send-text"></span>
+    <button type="button" class="btn small" data-send="edit">Upravit</button>
+    <button type="button" class="btn small" data-send="cancel">Zrušit odeslání</button>
+    <span class="send-progress" style="animation-duration:${SEND_DELAY}s"></span>`;
+  const text = bar.querySelector('.send-text');
+  const label = esc(draft.fields.subject || '(bez předmětu)');
+  const to = esc(shortRecipients(draft.fields.to || draft.fields.cc || draft.fields.bcc));
+  const end = Date.now() + SEND_DELAY * 1000;
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    text.innerHTML = `<b>${label}</b> <span class="muted">→ ${to}</span> · odešle se za ${left} s`;
+  };
+  tick();
+  const timer = setInterval(tick, 250);
+  $('#sendBars').append(bar);
+  let stopped = false;
+
+  bar.addEventListener('click', async e => {
+    const act = e.target.closest('[data-send]')?.dataset.send;
+    if (!act || stopped) return;
+    if (act === 'edit' && $('#composeDialog').open)
+      return toast('Nejdřív odešlete nebo zavřete rozepsanou zprávu.', true);
+    bar.querySelectorAll('button').forEach(b => (b.disabled = true));
+    try {
+      await api(`/api/send/${id}/cancel`, { method: 'POST' });
+    } catch (err) {  // zpráva už odchází – výsledek ukáže lišta
+      toast(err.message, true);
+      return;
+    }
+    stopped = true;
+    clearInterval(timer);
+    bar.remove();
+    if (act === 'edit') restoreCompose(draft);
+    else toast('Odeslání zrušeno');
+  });
+
+  setTimeout(async () => {  // po prodlevě počkat na výsledek odeslání
+    if (stopped) return;
+    clearInterval(timer);
+    bar.querySelectorAll('button, .send-progress').forEach(el => el.remove());
+    text.innerHTML = `<span class="spinner small" aria-hidden="true"></span> Odesílám <b>${label}</b>…`;
+    let res = { pending: true };
+    try {
+      while (res.pending) res = await api(`/api/send/${id}`);
+    } catch (err) {
+      bar.remove();
+      toast('Zprávu se nepodařilo odeslat – opravte ji a pošlete znovu.', true);
+      if ($('#composeDialog').open) return failedSendBar(draft, err.message);  // jinou rozepsanou nepřepsat
+      return restoreCompose(draft, err.message);
+    }
+    bar.remove();
+    afterSent(res, draft.fields.account_id);
+  }, SEND_DELAY * 1000);
+}
+
+/** Neodeslaná zpráva, zatímco je otevřená jiná: lišta s tlačítkem pro návrat k ní. */
+function failedSendBar(draft, error) {
+  const bar = document.createElement('div');
+  bar.className = 'send-bar error';
+  bar.innerHTML = `<span class="send-text">Neodesláno: <b>${esc(draft.fields.subject || '(bez předmětu)')}</b> – ${esc(error)}</span>
+    <button type="button" class="btn small">Otevřít</button>`;
+  bar.querySelector('button').addEventListener('click', () => {
+    if ($('#composeDialog').open) return toast('Nejdřív odešlete nebo zavřete rozepsanou zprávu.', true);
+    bar.remove();
+    restoreCompose(draft, error);
+  });
+  $('#sendBars').append(bar);
+}
 
 // ------------------------------------------------------------------ našeptávání adres (Komu / Kopie / Skrytá)
 

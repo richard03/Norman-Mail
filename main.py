@@ -211,6 +211,7 @@ def main():
     window.events.shown += lambda: pin_identity(window, icon)
     webview.start(icon=icon if os.path.exists(icon) else None, private_mode=False,
                   storage_path=str(DATA_DIR / "webview"))
+    server_app.flush_pending_sends()  # okno zavřené během odpočtu odloženého odeslání: zprávu přesto odeslat
 
 
 if __name__ == "__main__":

@@ -296,6 +296,24 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.error { background: var(--danger); }
+/* odložené odeslání: lišty s odpočtem nad toastem */
+#sendBars {
+  position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 99;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; width: max-content; max-width: 90vw;
+}
+.send-bar {
+  position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px 8px 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); max-width: 90vw;
+}
+.send-bar.error { border-color: var(--danger); }
+.send-bar .send-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.send-bar .btn.small { padding: 3px 10px; font-size: 13px; }
+.send-progress {
+  position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent);
+  transform-origin: left; animation: send-countdown linear forwards;
+}
+@keyframes send-countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 /* ---------- akce a kontext ---------- */
 #actions, #context {
