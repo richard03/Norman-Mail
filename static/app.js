@@ -2559,6 +2559,42 @@ document.querySelectorAll('dialog').forEach(dlg => {
   dlg.appendChild(b);
 });
 
+// ------------------------------------------------------------------ mazací křížek v textových polích
+
+// Vyplněné textové pole má na konci křížek (kreslí ho CSS jako obrázek pozadí); klik na něj pole vymaže.
+const CLEARABLE = 'input:is(:not([type]), [type="text"], [type="search"], [type="email"], [type="url"], [type="tel"])';
+const CLEAR_ZONE = 26;  // šířka oblasti křížku u pravého okraje (px)
+
+/** Bez placeholderu by CSS nepoznalo, zda je pole vyplněné (:placeholder-shown). */
+function ensurePlaceholders(root = document) {
+  if (root.matches?.(CLEARABLE) && !root.hasAttribute('placeholder')) root.setAttribute('placeholder', ' ');
+  root.querySelectorAll?.(CLEARABLE + ':not([placeholder])').forEach(i => i.setAttribute('placeholder', ' '));
+}
+ensurePlaceholders();
+new MutationObserver(records => records.forEach(r => r.addedNodes.forEach(n => n.nodeType === 1 && ensurePlaceholders(n))))
+  .observe(document.body, { childList: true, subtree: true });
+
+/** Je ukazatel nad křížkem vyplněného pole? */
+function overClear(e) {
+  const i = e.target;
+  if (!(i instanceof HTMLInputElement) || !i.matches(CLEARABLE) || !i.value || i.disabled || i.readOnly) return false;
+  const r = i.getBoundingClientRect();
+  return e.clientX >= r.right - CLEAR_ZONE && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+document.addEventListener('mousemove', e => {
+  if (e.target instanceof HTMLInputElement) e.target.classList.toggle('clear-hover', overClear(e));
+});
+document.addEventListener('mousedown', e => {
+  if (e.button !== 0 || !overClear(e)) return;
+  e.preventDefault();  // žádný kurzor / výběr textu na místě kliku
+  const i = e.target;
+  i.value = '';
+  i.classList.remove('clear-hover');
+  i.focus();
+  i.dispatchEvent(new Event('input', { bubbles: true }));   // filtry, hledání, našeptávání reagují jako na psaní
+  i.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
 // ------------------------------------------------------------------ start
 
 async function refreshAll() {

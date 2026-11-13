@@ -529,3 +529,14 @@ dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
 .spinner.small { width: 12px; height: 12px; border-width: 2px; vertical-align: -2px; display: inline-block; }
 .list-tail .small { font-size: 12px; margin-top: 4px; }
 .list-tail { flex-wrap: wrap; text-align: center; }
+
+/* ---------- mazací křížek na konci vyplněných textových polí ---------- */
+/* Vyplněnost pozná :placeholder-shown (reaguje i na hodnotu nastavenou skriptem); pole bez placeholderu
+   dostanou prázdný placeholder v app.js. Klik do oblasti křížku obsluhuje app.js. */
+input:is(:not([type]), [type="text"], [type="search"], [type="email"], [type="url"], [type="tel"]):not(:placeholder-shown):not(:disabled):not([readonly]) {
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%238a94a3'/%3E%3Cpath d='M8.5 8.5l7 7M15.5 8.5l-7 7' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 7px center; background-size: 15px 15px;
+}
+input.clear-hover { cursor: pointer; }
+input[type="search"]::-webkit-search-cancel-button { display: none; }  /* místo nativního křížku ten náš */
