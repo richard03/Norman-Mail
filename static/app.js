@@ -1078,7 +1078,31 @@ function askCategoryScope(cur, cat) {
   dlg.showModal();
   dlg.querySelector('button[value="message"]').focus();
   return new Promise(resolve => dlg.addEventListener('close', () =>
-    resolve(['message', 'sender', 'subject'].includes(dlg.returnValue) ? dlg.returnValue : null), { once: true }));
+    resolve(['message', 'sender', 'subject', 'custom'].includes(dlg.returnValue) ? dlg.returnValue : null), { once: true }));
+}
+
+/** Vlastní pravidlo: okno úpravy pravidla předvyplněné ze zprávy. submit(rule) uloží pravidlo (chyba zůstane
+ *  v okně); vrací jeho výsledek, nebo null, když uživatel okno zavřel. */
+function askCustomCategoryRule(cur, cat, submit) {
+  const m = cur.data || cur.item || {};
+  const me = (accById(cur.accountId)?.email || '').toLowerCase();
+  const rcpts = [...(m.to || []), ...(m.cc || [])].map(a => a.addr).filter(Boolean);
+  const f = $('#categoryRuleForm').elements;
+  f.sender.value = m.from?.[0]?.addr || '';
+  f.recipient.value = rcpts.find(a => a.toLowerCase() === me) || rcpts[0] || '';  // přednostně moje adresa
+  f.subject.value = m.subject && m.subject !== '(bez předmětu)' ? baseSubject(m.subject) : '';
+  $('#categoryRuleTitle').textContent = `Vlastní pravidlo – ${CATEGORIES[cat].title}`;
+  $('#categoryRuleSave').textContent = 'Zařadit a uložit pravidlo';
+  $('#categoryRuleError').textContent = '';
+  $('#categoryRuleSave').disabled = false;
+  const dlg = $('#categoryRuleDialog');
+  return new Promise(resolve => {
+    let result = null;
+    editingCategoryRule = { cat, create: async rule => { result = await submit(rule); } };
+    dlg.addEventListener('close', () => { editingCategoryRule = null; resolve(result); }, { once: true });
+    dlg.showModal();
+    f.sender.focus();
+  });
 }
 
 /** Nedůležité / Notifikace: zařadit (jen zprávu, nebo pravidlem) – nebo, je-li už zařazená, vyřadit. */
@@ -1087,10 +1111,16 @@ async function categorize(cur, cat, btn) {
   const scope = value ? await askCategoryScope(cur, cat) : 'message';
   if (!scope || state.current !== cur) return;
   const c = CATEGORIES[cat];
+  const send = rule => api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/categorize`,
+    { method: 'POST', body: { folder: cur.folder, category: cat, scope, value, rule } });
+  let custom = null;
+  if (scope === 'custom') {  // chyby (neplatná adresa…) ukazuje okno pravidla, ne toast
+    custom = await askCustomCategoryRule(cur, cat, send);
+    if (!custom) return;
+  }
   btn.classList.add('busy');
   try {
-    const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/categorize`,
-      { method: 'POST', body: { folder: cur.folder, category: cat, scope, value } });
+    const res = custom || await send();
     // kam zpráva teď patří: odpověď serveru (uložená zpráva v doručené poště), jinak odhad
     const now = res.view || (value ? cat : null);
     cur.category = CATEGORIES[now] ? now : null;
@@ -1099,6 +1129,8 @@ async function categorize(cur, cat, btn) {
       : other ? `Pravidlo uloženo, ale zpráva zůstává ${other.title === 'Notifikace' ? 'v Notifikacích' : 'v Nedůležitých'} – `
                 + `odpovídá i jejich pravidlu, které má přednost`
       : scope === 'message' ? `Zpráva zařazena ${c.in}`
+      : scope === 'custom' && res.view && now !== cat ? 'Pravidlo uloženo, ale tato zpráva mu neodpovídá – zůstává, kde byla'
+      : scope === 'custom' ? `Pravidlo uloženo – zprávy, které mu odpovídají, se teď řadí ${c.in}`
       : scope === 'sender' ? `Zprávy od ${res.sender} se teď řadí ${c.in}`
       : `Zprávy s předmětem „${res.subject}“ se teď řadí ${c.in}`);
     const v = state.view;
@@ -2375,7 +2407,7 @@ const categoryRuleText = r => [r.sender && `od ${r.sender}`, r.recipient && `pro
                                r.subject && `předmět obsahuje „${r.subject}“`].filter(Boolean).join(' · ');
 
 // --- úprava pravidla Nedůležitých / Notifikací v modálním okně
-let editingCategoryRule = null;  // { cat, id }
+let editingCategoryRule = null;  // { cat, id } úprava z Nastavení, nebo { cat, create } vlastní pravidlo u zprávy
 $('#settingsDialog').addEventListener('click', e => {
   const b = e.target.closest('[data-edit-category-rule]');
   if (!b) return;
@@ -2388,6 +2420,7 @@ $('#settingsDialog').addEventListener('click', e => {
   f.recipient.value = r.recipient;
   f.subject.value = r.subject;
   $('#categoryRuleTitle').textContent = `Upravit pravidlo – ${CATEGORIES[cat].title}`;
+  $('#categoryRuleSave').textContent = 'Uložit';
   $('#categoryRuleError').textContent = '';
   $('#categoryRuleSave').disabled = false;
   $('#categoryRuleDialog').showModal();
@@ -2396,11 +2429,21 @@ $('#settingsDialog').addEventListener('click', e => {
 $('#categoryRuleCancel').addEventListener('click', () => $('#categoryRuleDialog').close());
 $('#categoryRuleForm').addEventListener('submit', async e => {
   e.preventDefault();
-  const { cat, id } = editingCategoryRule || {};
+  const { cat, id, create } = editingCategoryRule || {};
   if (!cat) return;
   const f = e.target.elements;
   const body = { sender: f.sender.value.trim(), recipient: f.recipient.value.trim(), subject: f.subject.value.trim() };
   $('#categoryRuleSave').disabled = true;
+  if (create) {  // vlastní pravidlo z tlačítka Nedůležité / Notifikace: zprávu zařadí categorize()
+    try {
+      await create(body);
+      $('#categoryRuleDialog').close();
+    } catch (err) {
+      $('#categoryRuleError').textContent = err.message;
+      $('#categoryRuleSave').disabled = false;
+    }
+    return;
+  }
   try {
     await api(`/api/categories/${cat}/rules/${id}`, { method: 'PUT', body });
     $('#categoryRuleDialog').close();

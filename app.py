@@ -556,14 +556,16 @@ def message_unsnooze(acc_id, uid):
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/categorize")
 def message_categorize(acc_id, uid):
     """Notifikace / Nedůležité. scope: message = jen tato zpráva (bez pravidla), sender / subject = pravidlo
-    pro všechny zprávy od odesílatele / se stejným předmětem; value=false zprávu z kategorie vyřadí
-    (zruší i pravidla, která jí odpovídají)."""
+    pro všechny zprávy od odesílatele / se stejným předmětem, custom = vlastní pravidlo z data.rule
+    (odesílatel, příjemce, část předmětu); value=false zprávu z kategorie vyřadí (zruší i pravidla,
+    která jí odpovídají)."""
     acc = account_or_404(acc_id)
     data = request.get_json(force=True)
     folder = folder_arg(data)
     category, scope = data.get("category"), data.get("scope") or "message"
-    if category not in db.CATEGORIES or scope not in ("message", "sender", "subject"):
+    if category not in db.CATEGORIES or scope not in ("message", "sender", "subject", "custom"):
         abort(400, "Neznámá kategorie.")
+    rule = _category_rule_fields(data.get("rule") or {}) if scope == "custom" and data.get("value", True) else None
     rec = database.message(acc_id, folder, uid)
     if rec is None:
         with pool.get(acc) as M:
@@ -579,6 +581,9 @@ def message_categorize(acc_id, uid):
         database.uncategorize(rec, category)
     elif scope == "message":
         database.mark_message(rec, category)
+    elif scope == "custom":
+        database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
+        database.add_category_rule(category, **rule)
     else:
         value = sender if scope == "sender" else subject
         if not value:
@@ -1107,11 +1112,8 @@ def category_rules(category):
     return jsonify(database.category_rules(_category_or_404(category)))
 
 
-@app.put("/api/categories/<category>/rules/<int:rule_id>")
-def category_rule_update(category, rule_id):
-    """Úprava pravidla Nedůležitých / Notifikací: odesílatel, příjemce, část předmětu (vyplněné musí platit všechny)."""
-    _category_or_404(category)
-    data = request.get_json(force=True)
+def _category_rule_fields(data) -> dict:
+    """Ověřené podmínky pravidla Nedůležitých / Notifikací: {sender, recipient, subject}."""
     sender, recipient = (str(data.get(k) or "").strip().lower() for k in ("sender", "recipient"))
     subject = mail.base_subject(str(data.get("subject") or "")).lower()
     for label, addr in (("odesílatele", sender), ("příjemce", recipient)):
@@ -1121,7 +1123,15 @@ def category_rule_update(category, rule_id):
         raise ValidationError("Část předmětu může mít nejvýš 200 znaků.")
     if not (sender or recipient or subject):
         raise ValidationError("Vyplňte aspoň jedno pole.")
-    if not database.update_category_rule(category, rule_id, sender, recipient, subject):
+    return {"sender": sender, "recipient": recipient, "subject": subject}
+
+
+@app.put("/api/categories/<category>/rules/<int:rule_id>")
+def category_rule_update(category, rule_id):
+    """Úprava pravidla Nedůležitých / Notifikací: odesílatel, příjemce, část předmětu (vyplněné musí platit všechny)."""
+    _category_or_404(category)
+    rule = _category_rule_fields(request.get_json(force=True))
+    if not database.update_category_rule(category, rule_id, **rule):
         raise ValidationError("Stejné pravidlo už existuje.")
     database.bump()
     syncer.trigger()
