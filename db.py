@@ -214,13 +214,16 @@ class Database:
                     SELECT ?, CASE kind WHEN 'sender' THEN value ELSE '' END,
                               CASE kind WHEN 'subject' THEN value ELSE '' END, created FROM {table}""", (cat,))
             self._conn.execute("INSERT INTO meta VALUES('category_rules_migrated', '1')")
-        # migrace: pořadí kontaktů podle četnosti i stáří zpráv – kontakty se znovu naplní ze zpráv
+        # migrace: pořadí kontaktů podle četnosti i stáří zpráv
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(contacts)")}
         if "rank_sent" not in cols:
             self._conn.execute("ALTER TABLE contacts ADD COLUMN rank_sent REAL NOT NULL DEFAULT 0")
             self._conn.execute("ALTER TABLE contacts ADD COLUMN rank_received REAL NOT NULL DEFAULT 0")
+        # migrace: i vlastní adresy (zprávy sám sobě) – kontakty se znovu naplní ze zpráv
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='contacts_v3'").fetchone():
             self._conn.execute("DELETE FROM contacts")
             self._conn.execute("DELETE FROM meta WHERE key='contacts_built'")
+            self._conn.execute("INSERT INTO meta VALUES('contacts_v3', '1')")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -788,7 +791,8 @@ class Database:
     @staticmethod
     def _learn_contacts(c, acc_id, folder, records, mine=None, by_me=False):
         """Přičte adresy ze zpráv do kontaktů. Zpráva ode mě (z mé adresy nebo z Odeslaných) = psal jsem
-        jejím příjemcům; jinak = adresy z ní (odesílatel i ostatní příjemci) jsem dostal. Spam se přeskakuje."""
+        jejím příjemcům (i když jsem to já sám); jinak = adresy z ní (odesílatel i ostatní příjemci) jsem dostal.
+        Spam se přeskakuje."""
         role = (c.execute("SELECT role FROM folders WHERE account_id=? AND name=?", (acc_id, folder)).fetchone()
                 or [None])[0]
         if role == "junk":
@@ -803,7 +807,8 @@ class Database:
             seen = set()
             for a in people:
                 addr = (a.get("addr") or "").strip().lower()
-                if "@" not in addr or addr in mine or addr in seen or len(addr) > 254:
+                # vlastní adresa jen ze zpráv, které jsem poslal sám sobě (v přijaté poště jsem příjemcem pořád)
+                if "@" not in addr or (addr in mine and not sent) or addr in seen or len(addr) > 254:
                     continue
                 seen.add(addr)
                 name = (a.get("name") or "").strip().strip("\"'")
