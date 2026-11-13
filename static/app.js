@@ -1492,6 +1492,42 @@ $('#fileInput').addEventListener('change', e => {
   renderComposeAttachments();
 });
 
+// Soubory přetažené z plochy / Průzkumníka do okna Nová zpráva = přílohy.
+const draggingFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+const composeDlg = $('#composeDialog');
+composeDlg.addEventListener('dragover', e => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  composeDlg.classList.add('drop-files');
+});
+composeDlg.addEventListener('dragleave', e => {
+  if (!composeDlg.contains(e.relatedTarget)) composeDlg.classList.remove('drop-files');
+});
+composeDlg.addEventListener('drop', e => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  composeDlg.classList.remove('drop-files');
+  const items = [...e.dataTransfer.items].filter(it => it.kind === 'file');
+  const files = [], folders = [];
+  for (const it of items) {
+    const f = it.getAsFile(), entry = it.webkitGetAsEntry?.();
+    if (entry?.isDirectory) folders.push(entry.name);
+    else if (f) files.push(f);
+  }
+  if (files.length) {
+    state.compose.files.push(...files);
+    renderComposeAttachments();
+  }
+  if (folders.length) toast(`Složky nelze přiložit (${folders.join(', ')}) – přetáhněte jednotlivé soubory.`, true);
+});
+// Soubor puštěný jinam v aplikaci ji nesmí „otevřít“ (prohlížeč by místo aplikace zobrazil soubor).
+document.addEventListener('dragover', e => {
+  if (draggingFiles(e) && !composeDlg.open) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+});
+document.addEventListener('drop', e => { if (draggingFiles(e)) e.preventDefault(); });
+
 const readBase64 = file => new Promise((resolve, reject) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result).split(',', 2)[1] || '');
