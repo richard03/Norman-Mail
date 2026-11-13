@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS contacts(
     email TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
     sent INTEGER NOT NULL DEFAULT 0,       -- kolikrát jsem této adrese psal
     received INTEGER NOT NULL DEFAULT 0,   -- kolikrát se adresa objevila ve zprávě, kterou jsem dostal
-    last REAL NOT NULL DEFAULT 0);         -- datum poslední takové zprávy
+    last REAL NOT NULL DEFAULT 0,          -- datum poslední takové zprávy
+    rank_sent REAL NOT NULL DEFAULT 0,     -- pořadí v našeptávání: součet vah zpráv, které jsem adrese psal,
+    rank_received REAL NOT NULL DEFAULT 0);  -- a které jsem od ní dostal (viz _contact_weight, contacts)
 """
 
 # Kategorie doručené pošty, které určuje uživatel: pravidla nebo označení jedné zprávy.
@@ -166,6 +168,19 @@ def rule_matches(rule, rec) -> bool:
 NO_REPLY_RE = re.compile(r"^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?)([+._-]|@)",
                          re.IGNORECASE)
 MAX_CONTACTS = 5000
+# Pořadí v našeptávání: každá zpráva přispěje váhou, která s jejím stářím exponenciálně klesá (poločas
+# RANK_HALF_LIFE) – nahoře jsou adresy, které se používají často a v poslední době, staré klesají.
+# Váha se ukládá vztažená k pevnému datu RANK_EPOCH: všechny kontakty stárnou stejně rychle, takže pořadí
+# podle uloženého součtu je stejné jako podle aktuálního skóre a nic se nemusí přepočítávat.
+RANK_HALF_LIFE = 90 * 86400
+RANK_EPOCH = 1577836800      # 1. 1. 2020
+RANK_SENT_WEIGHT = 5         # zpráva, kterou jsem adrese napsal, váží víc než zpráva, kterou jsem od ní dostal
+RANK_STRANGER = 0.1          # pošta od adres, kterým jsem nikdy nepsal (newslettery, automaty), váží jen zlomek
+
+
+def _contact_weight(date) -> float:
+    date = min(date or 0, time.time()) or RANK_EPOCH - 20 * 365 * 86400  # bez data = hodně stará
+    return 2.0 ** ((date - RANK_EPOCH) / RANK_HALF_LIFE)
 
 
 def _addrs(lst) -> str:
@@ -199,6 +214,13 @@ class Database:
                     SELECT ?, CASE kind WHEN 'sender' THEN value ELSE '' END,
                               CASE kind WHEN 'subject' THEN value ELSE '' END, created FROM {table}""", (cat,))
             self._conn.execute("INSERT INTO meta VALUES('category_rules_migrated', '1')")
+        # migrace: pořadí kontaktů podle četnosti i stáří zpráv – kontakty se znovu naplní ze zpráv
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(contacts)")}
+        if "rank_sent" not in cols:
+            self._conn.execute("ALTER TABLE contacts ADD COLUMN rank_sent REAL NOT NULL DEFAULT 0")
+            self._conn.execute("ALTER TABLE contacts ADD COLUMN rank_received REAL NOT NULL DEFAULT 0")
+            self._conn.execute("DELETE FROM contacts")
+            self._conn.execute("DELETE FROM meta WHERE key='contacts_built'")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -788,11 +810,13 @@ class Database:
                 if name.lower() == addr:
                     name = ""
                 date = r.get("date") or 0
-                c.execute(f"""INSERT INTO contacts(email, name, {col}, last) VALUES(?, ?, 1, ?)
+                c.execute(f"""INSERT INTO contacts(email, name, {col}, last, rank_{col}) VALUES(?, ?, 1, ?, ?)
                               ON CONFLICT(email) DO UPDATE SET {col}={col}+1,
+                              rank_{col}=contacts.rank_{col}+excluded.rank_{col},
                               name=CASE WHEN excluded.name<>'' AND (contacts.name='' OR excluded.last>=contacts.last)
                                         THEN excluded.name ELSE contacts.name END,
-                              last=MAX(contacts.last, excluded.last)""", (addr, name[:200], date))
+                              last=MAX(contacts.last, excluded.last)""",
+                          (addr, name[:200], date, _contact_weight(date)))
 
     def _build_contacts(self):
         """Jednorázové naplnění kontaktů ze zpráv, které už jsou v cache."""
@@ -817,12 +841,13 @@ class Database:
         self._tx(lambda c: self._learn_contacts(c, None, None, [rec], by_me=True))
 
     def contacts(self) -> list:
-        """Kontakty pro našeptávání, nejčastější první: komu píšu, pak od koho dostávám poštu.
+        """Kontakty pro našeptávání: nahoře adresy používané často a v poslední době (komu píšu váží víc).
         Bez automatických odesílatelů, spammerů a zdrojů Notifikací / Nedůležitých (pokud jsem jim nepsal)."""
         self._build_contacts()
         skip = self.spam_senders() | self.category_senders()
         rows = self._q("SELECT email, name, sent, received FROM contacts "
-                       "ORDER BY (sent > 0) DESC, sent * 5 + received DESC, last DESC")
+                       f"ORDER BY rank_sent * {RANK_SENT_WEIGHT} + rank_received * "
+                       f"CASE WHEN sent > 0 THEN 1 ELSE {RANK_STRANGER} END DESC, last DESC")
         out = []
         for r in rows:
             if not r["sent"] and (r["email"] in skip or NO_REPLY_RE.match(r["email"])):
