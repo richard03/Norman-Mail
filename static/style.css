@@ -231,10 +231,10 @@ dialog {
   box-shadow: 0 20px 50px rgba(0, 0, 0, .3);
 }
 dialog::backdrop { background: rgba(0, 0, 0, .35); }
-dialog form { padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; }
-dialog h2 { margin: 0 0 4px; font-size: 18px; }
-dialog label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
-dialog input, dialog select, dialog textarea {
+:is(dialog, .compose-win) form { padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; }
+:is(dialog, .compose-win) h2 { margin: 0 0 4px; font-size: 18px; }
+:is(dialog, .compose-win) label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+:is(dialog, .compose-win) :is(input, select, textarea) {
   padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);
 }
 dialog fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 8px 12px 12px; }
@@ -245,10 +245,23 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 .note { margin: 0; font-size: 12px; color: var(--muted); }
 .note:empty, .error:empty { display: none; }
 .error { color: var(--danger); margin: 0; font-size: 13px; white-space: pre-wrap; }
-.compose { width: min(780px, calc(100vw - 32px)); }
-.compose label.row { flex-direction: row; align-items: center; gap: 10px; position: relative; }
-.compose .row-label { flex: none; width: 64px; text-align: left; }
-.compose label.row input, .compose label.row select { flex: 1; min-width: 0; }
+/* okna Nová zpráva (víc najednou, posuvná) nad zablokovanou aplikací */
+#composeLayer { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .35); }
+.compose-win {
+  position: absolute; width: min(780px, calc(100vw - 32px)); max-height: calc(100vh - 16px); overflow-y: auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .25);
+}
+.compose-win.front { box-shadow: 0 20px 50px rgba(0, 0, 0, .45); border-color: var(--accent); }
+.compose-head {
+  display: flex; align-items: center; gap: 8px; padding: 14px 12px 0 22px; cursor: move; user-select: none;
+  position: sticky; top: 0; background: var(--panel); z-index: 6;
+}
+.compose-head h2 { flex: 1; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-win form { padding-top: 10px; }
+.compose-win label.row { flex-direction: row; align-items: center; gap: 10px; position: relative; }
+.compose-win .row-label { flex: none; width: 64px; text-align: left; }
+.compose-win label.row input, .compose-win label.row select { flex: 1; min-width: 0; }
 /* našeptávání adres v Komu / Kopie / Skrytá */
 .ac-list {
   position: absolute; top: 100%; z-index: 10; margin-top: 2px; max-height: 280px; overflow-y: auto;
@@ -263,10 +276,10 @@ dialog legend { font-size: 13px; font-weight: 600; padding: 0 4px; }
 /* zavírací křížek v pravém horním rohu modálních oken */
 .dialog-x { position: absolute; top: 12px; right: 12px; z-index: 5; }
 dialog:has(.dialog-x) h2 { padding-right: 36px; }
-.compose textarea { resize: vertical; min-height: 220px; font-family: inherit; }
+.compose-win textarea { resize: vertical; min-height: 220px; font-family: inherit; }
 /* soubory přetahované z plochy nad oknem Nová zpráva */
-.compose.drop-files { outline: 3px dashed var(--accent); outline-offset: -8px; }
-.compose.drop-files::after {
+.compose-win.drop-files { outline: 3px dashed var(--accent); outline-offset: -8px; }
+.compose-win.drop-files::after {
   content: "Pusťte soubory – přidají se jako přílohy"; position: absolute; inset: 8px; z-index: 20;
   display: flex; align-items: center; justify-content: center; border-radius: 6px; pointer-events: none;
   background: color-mix(in srgb, var(--panel) 85%, transparent); color: var(--accent); font-size: 18px; font-weight: 600;
@@ -296,9 +309,9 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.error { background: var(--danger); }
-/* odložené odeslání: lišty s odpočtem nad toastem */
+/* odložené odeslání: lišty s odpočtem nahoře (nad okny zprávy) */
 #sendBars {
-  position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); z-index: 99;
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 99;
   display: flex; flex-direction: column; gap: 8px; align-items: center; width: max-content; max-width: 90vw;
 }
 .send-bar {

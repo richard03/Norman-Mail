@@ -1493,7 +1493,11 @@ def _deliver(acc, msg, recipients, fields):
     return warning
 
 
-# --- odložené odeslání: zpráva je připravená a ověřená, odejde až po prodlevě; do té doby jde zastavit
+# --- odložené odeslání: zpráva je připravená a ověřená a čeká. Klient po odpočtu (a zavření lišty s tlačítkem
+# Zrušit odeslání) pošle commit – teprve pak zpráva odejde. Časovač je jen pojistka pro případ, že se klient
+# už neozve (obnovená stránka); při ukončení aplikace čekající zprávy odejdou hned (flush_pending_sends).
+
+SEND_FALLBACK = 60          # s navíc k prodlevě, po kterých zpráva odejde i bez commitu
 
 pending_sends = {}           # id -> {"state": waiting|sending|done, "job", "timer", "done": Event, "result"}
 pending_lock = threading.Lock()
@@ -1502,7 +1506,7 @@ pending_lock = threading.Lock()
 def _schedule_send(job, delay):
     sid = uuid.uuid4().hex
     entry = {"state": "waiting", "job": job, "done": threading.Event(), "result": None}
-    entry["timer"] = threading.Timer(delay, _run_pending, (sid,))
+    entry["timer"] = threading.Timer(delay + SEND_FALLBACK, _run_pending, (sid,))
     entry["timer"].daemon = True
     with pending_lock:
         pending_sends[sid] = entry
@@ -1537,7 +1541,7 @@ def flush_pending_sends():
 
 @app.post("/api/send/<sid>/cancel")
 def send_cancel(sid):
-    """Zastavení odloženého odeslání – jen dokud zpráva ještě neodchází."""
+    """Zrušení odloženého odeslání – jen dokud zpráva ještě neodchází."""
     with pending_lock:
         entry = pending_sends.get(sid)
         if not entry:
@@ -1549,19 +1553,22 @@ def send_cancel(sid):
     return jsonify(ok=True)
 
 
-@app.get("/api/send/<sid>")
-def send_result(sid):
-    """Výsledek odloženého odeslání; počká, až zpráva odejde."""
-    entry = pending_sends.get(sid)
+@app.post("/api/send/<sid>/commit")
+def send_commit(sid):
+    """Odpočet skončil: odeslat čekající zprávu hned a vrátit výsledek."""
+    with pending_lock:
+        entry = pending_sends.get(sid)
     if not entry:
         abort(404, "Odeslání nenalezeno.")
-    if not entry["done"].wait(120):
-        return jsonify(ok=True, pending=True)
+    entry["timer"].cancel()
+    _run_pending(sid)        # nic neudělá, pokud už zprávu odeslala pojistka – pak jen počkáme na výsledek
+    entry["done"].wait(120)
     with pending_lock:
         pending_sends.pop(sid, None)
-    if not entry["result"]["ok"]:
-        raise mail.MailError(entry["result"]["error"])
-    return jsonify(ok=True, warning=entry["result"]["warning"])
+    result = entry["result"] or {"ok": False, "error": "Odeslání trvá příliš dlouho – zkontrolujte složku Odeslané."}
+    if not result["ok"]:
+        raise mail.MailError(result["error"])
+    return jsonify(ok=True, warning=result["warning"])
 
 
 @app.get("/api/contacts")

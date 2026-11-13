@@ -43,7 +43,6 @@ const state = {
   showImages: false,
   originalColors: false,  // otevřená HTML zpráva v tmavém režimu bez inverze barev („Zobrazit v původních barvách“)
   editingId: null,
-  compose: null,          // { inReplyTo, references, files: [], forward }
 };
 let listToken = 0;
 
@@ -1174,7 +1173,7 @@ $('#actions').addEventListener('click', e => {
 // Klávesa Delete smaže zobrazenou zprávu – ale ne při psaní (dialogy, textová pole).
 document.addEventListener('keydown', e => {
   if (e.key !== 'Delete' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
-  if (document.querySelector('dialog[open]')) return;
+  if (anyModalOpen()) return;
   const el = document.activeElement;
   if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
   const btn = $('#actions [data-act="delete"]');
@@ -1186,7 +1185,7 @@ document.addEventListener('keydown', e => {
 // Ctrl+A v seznamu vybere všechny načtené zprávy (ne při psaní).
 document.addEventListener('keydown', e => {
   if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-  if (document.querySelector('dialog[open]')) return;
+  if (anyModalOpen()) return;
   const el = document.activeElement;
   if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
   if (!state.messages.length) return;
@@ -1479,84 +1478,149 @@ function forward() {
   });
 }
 
+// --- okna Nová zpráva: může jich být otevřených víc; jdou posouvat (za záhlaví) a kliknutím přepínat.
+// Zbytek aplikace je pod nimi zablokovaný (vrstva #composeLayer, #app je inert), jako u modálního okna.
+
+state.composeWins = [];  // [{el, form, data: {inReplyTo, references, files: [], forward}}], poslední = navrchu
+let composeZ = 1;
+
+const composeOpen = () => state.composeWins.length > 0;
+/** Je otevřené nějaké modální okno (dialog nebo okno zprávy)? Pak klávesové zkratky seznamu neplatí. */
+const anyModalOpen = () => !!document.querySelector('dialog[open]') || composeOpen();
+
 function openCompose(opts = {}) {
   if (!state.accounts.length) { toast('Nejdřív přidejte emailový účet.', true); return openAccountDialog(); }
-  const f = $('#composeForm');
-  f.reset();
+  const el = $('#composeTpl').content.firstElementChild.cloneNode(true);
+  const f = el.querySelector('form');
+  const win = { el, form: f,
+    data: { inReplyTo: opts.inReplyTo || '', references: opts.references || '', files: opts.files || [], forward: opts.forward || null } };
   const defaultAcc = opts.accountId || (state.view.type === 'folder' ? state.view.accountId : state.accounts[0].id);
-  $('#fromSelect').innerHTML = state.accounts.map(a =>
+  f.account_id.innerHTML = state.accounts.map(a =>
     `<option value="${a.id}" ${a.id === defaultAcc ? 'selected' : ''}>${esc(a.display_name ? `${a.display_name} <${a.email}>` : a.email)}</option>`).join('');
-  f.to.value = opts.to || '';
-  f.cc.value = opts.cc || '';
-  f.subject.value = opts.subject || '';
-  f.body.value = opts.body || '';
-  $('#composeTitle').textContent = opts.title || 'Nová zpráva';
-  $('#composeError').textContent = '';
-  state.compose = { inReplyTo: opts.inReplyTo || '', references: opts.references || '', files: [], forward: opts.forward || null };
-  renderComposeAttachments();
+  for (const k of ['to', 'cc', 'bcc', 'subject', 'body']) f[k].value = opts[k] || '';
+  el.querySelector('.compose-title').textContent = opts.title || 'Nová zpráva';
+  el.querySelector('.compose-error').textContent = opts.error || '';
+  wireComposeWindow(win);
+  renderComposeAttachments(win);
   loadContacts();
-  $('#composeDialog').showModal();
-  (opts.to ? f.body : f.to).focus();
-  if (opts.to) f.body.setSelectionRange(0, 0);
+
+  const layer = $('#composeLayer');
+  layer.hidden = false;
+  $('#app').inert = true;
+  layer.append(el);
+  // nové okno doprostřed, každé další o kus posunuté, aby byla vidět i ta pod ním
+  const n = state.composeWins.length, r = el.getBoundingClientRect();
+  el.style.left = Math.max(8, (innerWidth - r.width) / 2 + n * 28) + 'px';
+  el.style.top = Math.max(8, (innerHeight - r.height) / 2 - 40 + n * 28) + 'px';
+  state.composeWins.push(win);
+  focusCompose(win);
+  const focusEl = opts.focus === 'body' || (opts.to && opts.focus !== 'to') ? f.body : f.to;
+  focusEl.focus();
+  if (focusEl === f.body && !opts.keepCaret) f.body.setSelectionRange(0, 0);
+  return win;
 }
 
-function renderComposeAttachments() {
-  const c = state.compose;
+/** Okno dopředu (kliknutím do něj nebo po otevření). */
+function focusCompose(win) {
+  win.el.style.zIndex = ++composeZ;
+  state.composeWins = state.composeWins.filter(w => w !== win).concat(win);
+  for (const w of state.composeWins) w.el.classList.toggle('front', w === win);
+}
+
+function closeCompose(win) {
+  acClose();
+  win.el.remove();
+  state.composeWins = state.composeWins.filter(w => w !== win);
+  const top = state.composeWins.at(-1);
+  if (top) { focusCompose(top); top.form.body.focus(); return; }
+  $('#composeLayer').hidden = true;
+  $('#app').inert = false;
+}
+
+function renderComposeAttachments(win) {
+  const c = win.data;
   const fwd = (c.forward?.attachments || []).map((a, i) =>
     `<span class="chip">📎 ${esc(a.filename)} <button type="button" class="x" data-fwd="${i}">×</button></span>`);
   const files = c.files.map((file, i) =>
     `<span class="chip">📎 ${esc(file.name)} <span class="muted">${fmtSize(file.size)}</span>
        <button type="button" class="x" data-file="${i}">×</button></span>`);
-  $('#composeAttachments').innerHTML = fwd.concat(files).join('');
+  win.el.querySelector('.compose-attachments').innerHTML = fwd.concat(files).join('');
 }
 
-$('#composeAttachments').addEventListener('click', e => {
-  const b = e.target.closest('button.x');
-  if (!b) return;
-  if (b.dataset.fwd !== undefined) state.compose.forward.attachments.splice(+b.dataset.fwd, 1);
-  else state.compose.files.splice(+b.dataset.file, 1);
-  renderComposeAttachments();
-});
-
-$('#fileInput').addEventListener('change', e => {
-  state.compose.files.push(...e.target.files);
-  e.target.value = '';
-  renderComposeAttachments();
-});
-
-// Soubory přetažené z plochy / Průzkumníka do okna Nová zpráva = přílohy.
 const draggingFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
-const composeDlg = $('#composeDialog');
-composeDlg.addEventListener('dragover', e => {
-  if (!draggingFiles(e)) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-  composeDlg.classList.add('drop-files');
-});
-composeDlg.addEventListener('dragleave', e => {
-  if (!composeDlg.contains(e.relatedTarget)) composeDlg.classList.remove('drop-files');
-});
-composeDlg.addEventListener('drop', e => {
-  if (!draggingFiles(e)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  composeDlg.classList.remove('drop-files');
-  const items = [...e.dataTransfer.items].filter(it => it.kind === 'file');
-  const files = [], folders = [];
-  for (const it of items) {
-    const f = it.getAsFile(), entry = it.webkitGetAsEntry?.();
-    if (entry?.isDirectory) folders.push(entry.name);
-    else if (f) files.push(f);
-  }
-  if (files.length) {
-    state.compose.files.push(...files);
-    renderComposeAttachments();
-  }
-  if (folders.length) toast(`Složky nelze přiložit (${folders.join(', ')}) – přetáhněte jednotlivé soubory.`, true);
-});
-// Soubor puštěný jinam v aplikaci ji nesmí „otevřít“ (prohlížeč by místo aplikace zobrazil soubor).
+
+/** Ovládání jednoho okna: přílohy, přetahování souborů, posouvání, zavření, odeslání. */
+function wireComposeWindow(win) {
+  const { el, form: f } = win;
+  el.addEventListener('pointerdown', () => { if (state.composeWins.at(-1) !== win) focusCompose(win); }, true);
+  el.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeCompose(win)));
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); closeCompose(win); }
+  });
+
+  // posouvání za záhlaví
+  el.querySelector('.compose-head').addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    const head = e.currentTarget, sx = e.clientX - el.offsetLeft, sy = e.clientY - el.offsetTop;
+    head.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const maxX = innerWidth - 80, maxY = innerHeight - 40;
+      el.style.left = Math.min(Math.max(ev.clientX - sx, 80 - el.offsetWidth), maxX) + 'px';
+      el.style.top = Math.min(Math.max(ev.clientY - sy, 0), maxY) + 'px';
+    };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', () => head.removeEventListener('pointermove', move), { once: true });
+    head.addEventListener('pointercancel', () => head.removeEventListener('pointermove', move), { once: true });
+  });
+
+  el.querySelector('.compose-attachments').addEventListener('click', e => {
+    const b = e.target.closest('button.x');
+    if (!b) return;
+    if (b.dataset.fwd !== undefined) win.data.forward.attachments.splice(+b.dataset.fwd, 1);
+    else win.data.files.splice(+b.dataset.file, 1);
+    renderComposeAttachments(win);
+  });
+  el.querySelector('.file-input').addEventListener('change', e => {
+    win.data.files.push(...e.target.files);
+    e.target.value = '';
+    renderComposeAttachments(win);
+  });
+
+  // soubory přetažené z plochy / Průzkumníka = přílohy tohoto okna
+  el.addEventListener('dragover', e => {
+    if (!draggingFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    el.classList.add('drop-files');
+  });
+  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-files'); });
+  el.addEventListener('drop', e => {
+    if (!draggingFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('drop-files');
+    const files = [], folders = [];
+    for (const it of [...e.dataTransfer.items].filter(it => it.kind === 'file')) {
+      const file = it.getAsFile(), entry = it.webkitGetAsEntry?.();
+      if (entry?.isDirectory) folders.push(entry.name);
+      else if (file) files.push(file);
+    }
+    if (files.length) {
+      win.data.files.push(...files);
+      renderComposeAttachments(win);
+      focusCompose(win);
+    }
+    if (folders.length) toast(`Složky nelze přiložit (${folders.join(', ')}) – přetáhněte jednotlivé soubory.`, true);
+  });
+
+  el.querySelectorAll('input[data-addr]').forEach(bindAddrInput);
+  f.addEventListener('submit', e => { e.preventDefault(); sendCompose(win); });
+}
+
+// Soubor puštěný mimo okno zprávy aplikaci nesmí „otevřít“ (prohlížeč by místo aplikace zobrazil soubor).
 document.addEventListener('dragover', e => {
-  if (draggingFiles(e) && !composeDlg.open) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+  if (draggingFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
 });
 document.addEventListener('drop', e => { if (draggingFiles(e)) e.preventDefault(); });
 
@@ -1567,16 +1631,15 @@ const readBase64 = file => new Promise((resolve, reject) => {
   r.readAsDataURL(file);
 });
 
-$('#composeForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  const f = e.target, c = state.compose, btn = $('#sendBtn');
+async function sendCompose(win) {
+  const f = win.form, c = win.data, btn = f.querySelector('.send-btn'), err = win.el.querySelector('.compose-error');
   if (!f.to.value.trim() && !f.cc.value.trim() && !f.bcc.value.trim()) {
-    $('#composeError').textContent = 'Zadejte alespoň jednoho adresáta.';
+    err.textContent = 'Zadejte alespoň jednoho adresáta.';
     return;
   }
   btn.disabled = true;
   btn.textContent = 'Odesílám…';
-  $('#composeError').textContent = '';
+  err.textContent = '';
   try {
     const attachments = await Promise.all(c.files.map(async file => ({
       filename: file.name, content_type: file.type || 'application/octet-stream', data: await readBase64(file),
@@ -1584,50 +1647,46 @@ $('#composeForm').addEventListener('submit', async e => {
     const fwd = c.forward && c.forward.attachments.length
       ? { account_id: c.forward.account_id, folder: c.forward.folder, uid: c.forward.uid,
           indexes: c.forward.attachments.map(a => a.index) } : null;
-    const draft = composeSnapshot();
+    const draft = composeSnapshot(win);
     const res = await api('/api/send', { method: 'POST', body: {
       account_id: f.account_id.value, to: f.to.value, cc: f.cc.value, bcc: f.bcc.value,
       subject: f.subject.value, body: f.body.value,
       in_reply_to: c.inReplyTo, references: c.references, attachments, forward: fwd, delay: SEND_DELAY,
     } });
-    $('#composeDialog').close();
+    closeCompose(win);
     if (res.pending_id) startPendingSend(res.pending_id, draft);
     else afterSent(res, draft.fields.account_id);
-  } catch (err) {
-    $('#composeError').textContent = err.message;
-  } finally {
+  } catch (e) {
+    err.textContent = e.message;
     btn.disabled = false;
     btn.textContent = 'Odeslat';
   }
-});
+}
 
 $('#composeBtn').addEventListener('click', () => openCompose());
 
-// --- odložené odeslání: zpráva odejde až po SEND_DELAY s; do té doby ji jde zastavit (upravit, nebo zrušit)
+// --- odložené odeslání: zpráva je na serveru připravená a čeká; lišta nahoře odpočítává SEND_DELAY s.
+// Zrušit odeslání = zpráva se znovu otevře k úpravám. Odeslat se serveru řekne až po zavření lišty,
+// takže zrušení nikdy nepřijde pozdě.
 
 const SEND_DELAY = 5;
 
-/** Obsah okna Nová zpráva – pro návrat k úpravám, když se odeslání zastaví nebo nepovede. */
-function composeSnapshot() {
-  const f = $('#composeForm').elements;
-  const c = state.compose;
+/** Obsah okna – pro návrat k úpravám, když se odeslání zruší nebo nepovede. */
+function composeSnapshot(win) {
+  const f = win.form, c = win.data;
   return {
-    title: $('#composeTitle').textContent,
+    title: win.el.querySelector('.compose-title').textContent,
     fields: Object.fromEntries(['account_id', 'to', 'cc', 'bcc', 'subject', 'body'].map(k => [k, f[k].value])),
-    compose: { ...c, files: c.files.slice(),
-               forward: c.forward ? { ...c.forward, attachments: c.forward.attachments.slice() } : null },
+    data: { ...c, files: c.files.slice(),
+            forward: c.forward ? { ...c.forward, attachments: c.forward.attachments.slice() } : null },
   };
 }
 
-/** Znovu otevře rozepsanou zprávu ze zálohy. */
+/** Znovu otevře zprávu ze zálohy v novém okně (se vším: adresáti, předmět, text, přílohy). */
 function restoreCompose(draft, error = '') {
-  openCompose({ accountId: draft.fields.account_id, title: draft.title });
-  const f = $('#composeForm').elements;
-  for (const [k, v] of Object.entries(draft.fields)) if (k !== 'account_id') f[k].value = v;
-  state.compose = draft.compose;
-  renderComposeAttachments();
-  $('#composeError').textContent = error;
-  f.body.focus();
+  const { account_id, ...fields } = draft.fields;
+  return openCompose({ ...fields, ...draft.data, accountId: account_id, title: draft.title, error,
+                       focus: 'body', keepCaret: true });
 }
 
 function afterSent(res, accountId) {
@@ -1643,13 +1702,11 @@ function shortRecipients(v) {
   return parts.slice(0, 2).join(', ') + (parts.length > 2 ? ` a ${parts.length - 2} další` : '');
 }
 
-/** Lišta s odpočtem: Upravit = zastavit a vrátit se do okna zprávy, Zrušit odeslání = zahodit. */
 function startPendingSend(id, draft) {
   const bar = document.createElement('div');
   bar.className = 'send-bar';
   bar.innerHTML = `<span class="send-text"></span>
-    <button type="button" class="btn small" data-send="edit">Upravit</button>
-    <button type="button" class="btn small" data-send="cancel">Zrušit odeslání</button>
+    <button type="button" class="btn small">Zrušit odeslání</button>
     <span class="send-progress" style="animation-duration:${SEND_DELAY}s"></span>`;
   const text = bar.querySelector('.send-text');
   const label = esc(draft.fields.subject || '(bez předmětu)');
@@ -1662,58 +1719,36 @@ function startPendingSend(id, draft) {
   tick();
   const timer = setInterval(tick, 250);
   $('#sendBars').append(bar);
-  let stopped = false;
+  let done = false;  // lišta zavřená: zrušeno, nebo předáno k odeslání
 
-  bar.addEventListener('click', async e => {
-    const act = e.target.closest('[data-send]')?.dataset.send;
-    if (!act || stopped) return;
-    if (act === 'edit' && $('#composeDialog').open)
-      return toast('Nejdřív odešlete nebo zavřete rozepsanou zprávu.', true);
-    bar.querySelectorAll('button').forEach(b => (b.disabled = true));
+  bar.querySelector('button').addEventListener('click', async () => {
+    if (done) return;
+    done = true;
+    clearInterval(timer);
+    bar.remove();
     try {
       await api(`/api/send/${id}/cancel`, { method: 'POST' });
-    } catch (err) {  // zpráva už odchází – výsledek ukáže lišta
-      toast(err.message, true);
-      return;
+    } catch (err) {  // nemělo by nastat (odeslání se spouští až po zavření lišty)
+      return toast(err.message, true);
     }
-    stopped = true;
-    clearInterval(timer);
-    bar.remove();
-    if (act === 'edit') restoreCompose(draft);
-    else toast('Odeslání zrušeno');
+    restoreCompose(draft);
   });
 
-  setTimeout(async () => {  // po prodlevě počkat na výsledek odeslání
-    if (stopped) return;
+  setTimeout(async () => {
+    if (done) return;
+    done = true;
     clearInterval(timer);
-    bar.querySelectorAll('button, .send-progress').forEach(el => el.remove());
-    text.innerHTML = `<span class="spinner small" aria-hidden="true"></span> Odesílám <b>${label}</b>…`;
-    let res = { pending: true };
+    bar.remove();  // nejdřív zavřít lištu, teprve pak odeslat
+    toast(`Odesílám „${draft.fields.subject || '(bez předmětu)'}“…`);
+    let res;
     try {
-      while (res.pending) res = await api(`/api/send/${id}`);
+      res = await api(`/api/send/${id}/commit`, { method: 'POST' });
     } catch (err) {
-      bar.remove();
       toast('Zprávu se nepodařilo odeslat – opravte ji a pošlete znovu.', true);
-      if ($('#composeDialog').open) return failedSendBar(draft, err.message);  // jinou rozepsanou nepřepsat
       return restoreCompose(draft, err.message);
     }
-    bar.remove();
     afterSent(res, draft.fields.account_id);
   }, SEND_DELAY * 1000);
-}
-
-/** Neodeslaná zpráva, zatímco je otevřená jiná: lišta s tlačítkem pro návrat k ní. */
-function failedSendBar(draft, error) {
-  const bar = document.createElement('div');
-  bar.className = 'send-bar error';
-  bar.innerHTML = `<span class="send-text">Neodesláno: <b>${esc(draft.fields.subject || '(bez předmětu)')}</b> – ${esc(error)}</span>
-    <button type="button" class="btn small">Otevřít</button>`;
-  bar.querySelector('button').addEventListener('click', () => {
-    if ($('#composeDialog').open) return toast('Nejdřív odešlete nebo zavřete rozepsanou zprávu.', true);
-    bar.remove();
-    restoreCompose(draft, error);
-  });
-  $('#sendBars').append(bar);
 }
 
 // ------------------------------------------------------------------ našeptávání adres (Komu / Kopie / Skrytá)
@@ -1827,7 +1862,8 @@ function acPick(i) {
   acClose();
 }
 
-document.querySelectorAll('#composeForm input[data-addr], #advSearchForm input[data-addr]').forEach(input => {
+/** Našeptávání adres v poli (okna zprávy si ho zapínají při vytvoření). */
+function bindAddrInput(input) {
   input.addEventListener('input', () => acUpdate(input));
   input.addEventListener('blur', () => { if (ac.input === input) acClose(); });
   input.addEventListener('keydown', e => {
@@ -1845,8 +1881,8 @@ document.querySelectorAll('#composeForm input[data-addr], #advSearchForm input[d
       acClose();
     }
   });
-});
-$('#composeDialog').addEventListener('close', acClose);
+}
+document.querySelectorAll('#advSearchForm input[data-addr]').forEach(bindAddrInput);
 $('#advSearchDialog').addEventListener('close', acClose);
 
 // ------------------------------------------------------------------ nastavení účtů

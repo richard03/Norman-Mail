@@ -430,26 +430,32 @@
   </div>
 </dialog>
 
-<!-- Nová zpráva -->
-<dialog id="composeDialog" class="compose">
-  <form id="composeForm" method="dialog">
-    <h2 id="composeTitle">Nová zpráva</h2>
-    <label class="row"><span class="row-label">Od</span><select name="account_id" id="fromSelect"></select></label>
-    <label class="row"><span class="row-label">Komu</span><input name="to" data-addr autocomplete="off" placeholder="adresa@example.cz, další@example.cz"></label>
-    <label class="row"><span class="row-label">Kopie</span><input name="cc" data-addr autocomplete="off"></label>
-    <label class="row"><span class="row-label">Skrytá</span><input name="bcc" data-addr autocomplete="off"></label>
-    <label class="row"><span class="row-label">Předmět</span><input name="subject"></label>
-    <textarea name="body" rows="14"></textarea>
-    <div id="composeAttachments" class="chips"></div>
-    <p id="composeError" class="error"></p>
-    <div class="dialog-actions">
-      <label class="btn file-btn">Přiložit soubor<input type="file" id="fileInput" multiple hidden></label>
-      <span class="spacer"></span>
-      <button type="button" class="btn" data-close>Zahodit</button>
-      <button type="submit" id="sendBtn" class="btn primary">Odeslat</button>
+<!-- Okna Nová zpráva: šablona; otevřených oken může být víc (vrstva #composeLayer) -->
+<div id="composeLayer" hidden></div>
+<template id="composeTpl">
+  <div class="compose-win" role="dialog" aria-modal="true">
+    <div class="compose-head" title="Tažením okno posunete">
+      <h2 class="compose-title">Nová zpráva</h2>
+      <button type="button" class="icon-btn close-x" data-close title="Zavřít (Esc)" aria-label="Zavřít">✕</button>
     </div>
-  </form>
-</dialog>
+    <form class="compose-form" autocomplete="off">
+      <label class="row"><span class="row-label">Od</span><select name="account_id"></select></label>
+      <label class="row"><span class="row-label">Komu</span><input name="to" data-addr autocomplete="off" placeholder="adresa@example.cz, další@example.cz"></label>
+      <label class="row"><span class="row-label">Kopie</span><input name="cc" data-addr autocomplete="off"></label>
+      <label class="row"><span class="row-label">Skrytá</span><input name="bcc" data-addr autocomplete="off"></label>
+      <label class="row"><span class="row-label">Předmět</span><input name="subject"></label>
+      <textarea name="body" rows="14"></textarea>
+      <div class="compose-attachments chips"></div>
+      <p class="compose-error error"></p>
+      <div class="dialog-actions">
+        <label class="btn file-btn">Přiložit soubor<input type="file" class="file-input" multiple hidden></label>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-close>Zahodit</button>
+        <button type="submit" class="btn primary send-btn">Odeslat</button>
+      </div>
+    </form>
+  </div>
+</template>
 
 <div id="sendBars" aria-live="polite"></div>
 <div id="toast"></div>
