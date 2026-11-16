@@ -222,6 +222,7 @@ body.resizing iframe { pointer-events: none; }  /* rámec se zprávou by jinak �
   text-decoration: none; color: var(--text); font-size: 13px; background: var(--bg);
 }
 a.chip:hover { background: var(--hover); }
+.chip.risky { border-color: var(--danger); color: var(--danger); }
 .chip .x { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 15px; padding: 0 2px; }
 .banner { margin-top: 10px; background: var(--banner); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
 .body-frame { flex: 1; border: none; width: 100%; background: #fff; }

@@ -105,6 +105,57 @@ def map_static_folder(folder):
     edgechromium.EdgeChrome.on_webview_ready = on_webview_ready
 
 
+APP_PREFIX = f"https://{APP_HOST}/"
+
+
+def navigation_allowed(uri: str) -> bool:
+    """Hlavní okno smí zobrazovat jen aplikaci. Cizí stránka by dostala most window.pywebview.api
+    (pywebview ho vkládá do každé stránky) a s ním přístup k poště – třeba po přetažení odkazu do okna."""
+    return uri.startswith(APP_PREFIX) or uri == "about:blank"
+
+
+def frame_navigation_allowed(uri: str) -> bool:
+    """Rámec zprávy smí obsahovat jen vložené HTML (srcdoc), nikdy cizí stránku (odkaz s target="_self")."""
+    return uri in ("about:srcdoc", "about:blank")
+
+
+def _guard(check):
+    def handler(_sender, args):
+        try:
+            if not check(str(args.Uri)):
+                args.Cancel = True
+        except Exception:
+            args.Cancel = True  # při chybě raději nepustit
+    return handler
+
+
+def lock_navigation():
+    """Zruší každou navigaci okna nebo rámce mimo aplikaci (WebView2 NavigationStarting / FrameNavigationStarting)."""
+    from webview.platforms import edgechromium
+
+    original = edgechromium.EdgeChrome.on_webview_ready
+
+    def on_webview_ready(self, sender, args):
+        if args.IsSuccess:
+            core = sender.CoreWebView2
+            core.NavigationStarting += _guard(navigation_allowed)
+            core.FrameNavigationStarting += _guard(frame_navigation_allowed)
+        original(self, sender, args)
+
+    edgechromium.EdgeChrome.on_webview_ready = on_webview_ready
+
+
+def mark_from_internet(path):
+    """Značka Mark of the Web (jako u stažených souborů): Windows pak u přílohy z cizího mailu varují –
+    SmartScreen zkontroluje spustitelné soubory, Office otevře dokument v chráněném zobrazení.
+    Na disku bez NTFS (FAT na flashce) značku uložit nejde – nevadí."""
+    try:
+        with open(f"{path}:Zone.Identifier", "wb") as f:
+            f.write(b"[ZoneTransfer]\r\nZoneId=3\r\n")
+    except OSError:
+        pass
+
+
 class Api:
     """Funkce volatelné z JavaScriptu přes window.pywebview.api.*"""
 
@@ -132,6 +183,7 @@ class Api:
                 return {"ok": False}
             path = path if isinstance(path, str) else path[0]
             Path(path).write_bytes(data)
+            mark_from_internet(path)
             return {"ok": True, "path": path}
         except Exception as e:
             return {"error": mail.friendly_error(e)}
@@ -200,6 +252,7 @@ def main():
     server_app.EMBEDDED = True
     server_app.start_background()
     harden_link_handling()
+    lock_navigation()
     disable_tracking_prevention()
     map_static_folder(resource("static"))
     webview.settings["ALLOW_DOWNLOADS"] = True

@@ -828,6 +828,8 @@ function buildFrameDoc(html, allowRemote, theme = 'light') {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   doc.querySelectorAll(FRAME_DROP).forEach(el => el.remove());
   doc.querySelectorAll('form').forEach(form => form.replaceWith(...form.childNodes));  // obsah zůstane
+  // odkazy vždy do prohlížeče: vlastní target (_self, pojmenovaný rámec) by cizí stránku načetl do rámce zprávy
+  doc.querySelectorAll('a, area').forEach(a => a.setAttribute('target', '_blank'));
   for (const el of doc.querySelectorAll('*')) {
     for (const { name } of [...el.attributes]) {
       if (name.startsWith('on') || name === 'ping' || name === 'formaction' || name === 'http-equiv') el.removeAttribute(name);
@@ -842,14 +844,20 @@ function buildFrameDoc(html, allowRemote, theme = 'light') {
   return '<!doctype html>' + doc.documentElement.outerHTML;
 }
 
+// Přílohy, které se po otevření spustí (programy, skripty, zástupci, obrazy disků, dokumenty s makry).
+const RISKY_EXT = /\.(exe|scr|com|pif|bat|cmd|msi|msp|msix|appx|appxbundle|application|js|jse|vbs|vbe|wsf|wsh|ps1|psm1|hta|cpl|jar|reg|lnk|url|scf|chm|iso|img|vhdx?|docm|dotm|xlsm|xltm|xlam|pptm|potm|ppam)$/i;
+const RISKY_TITLE = 'Spustitelný soubor nebo dokument s makry – otevírejte jen od odesílatele, kterému věříte a od kterého ho čekáte.';
+
 function renderReader() {
   const { data, accountId } = state.current;
   const acc = accById(accountId);
   const line = (label, list) => (list && list.length
     ? `<div><span class="muted">${label}:</span> ${list.map(a => esc(a.name ? `${a.name} <${a.addr}>` : a.addr)).join(', ')}</div>` : '');
-  const atts = data.attachments.map(a =>
-    `<a class="chip" data-index="${a.index}" href="/api/accounts/${accountId}/messages/${data.uid}/attachments/${a.index}?folder=${enc(data.folder)}"
-        download="${esc(a.filename)}">📎 ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span></a>`).join('');
+  const atts = data.attachments.map(a => {
+    const risky = RISKY_EXT.test(a.filename);
+    return `<a class="chip ${risky ? 'risky' : ''}" data-index="${a.index}" href="/api/accounts/${accountId}/messages/${data.uid}/attachments/${a.index}?folder=${enc(data.folder)}"
+        download="${esc(a.filename)}" ${risky ? `title="${esc(RISKY_TITLE)}"` : ''}>${risky ? '⚠' : '📎'} ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span></a>`;
+  }).join('');
   const remote = data.html && hasRemoteContent(data.html);
   const theme = data.html ? frameTheme(data.html) : 'light';
   const role = folderRole(accountId, data.folder);
@@ -1641,10 +1649,13 @@ function wireComposeWindow(win) {
 }
 
 // Soubor puštěný mimo okno zprávy aplikaci nesmí „otevřít“ (prohlížeč by místo aplikace zobrazil soubor).
+// Soubory a odkazy přetažené zvenku mimo okno zprávy / textové pole: nic (výchozí akce by okno přesměrovala).
+// Zprávy přetahované uvnitř aplikace (state.dragItems) obsluhují vlastní handlery.
+const foreignDrop = e => draggingFiles(e) || (!state.dragItems && !e.target.closest?.('input, textarea, [contenteditable]'));
 document.addEventListener('dragover', e => {
-  if (draggingFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
+  if (foreignDrop(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; }
 });
-document.addEventListener('drop', e => { if (draggingFiles(e)) e.preventDefault(); });
+document.addEventListener('drop', e => { if (foreignDrop(e)) e.preventDefault(); });
 
 const readBase64 = file => new Promise((resolve, reject) => {
   const r = new FileReader();

@@ -501,6 +501,22 @@ def _leaves(msg):
     return [p for p in msg.walk() if not p.is_multipart()]
 
 
+# Neviditelné a řídicí znaky v názvech příloh: obrácení směru textu (U+202E) by z „faktura‮fdp.exe“ udělalo
+# na obrazovce „fakturaexe.pdf“; nulové mezery a řídicí znaky skrývají skutečnou příponu.
+INVISIBLE_RE = re.compile("[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e"
+                          "\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]")
+UNSAFE_NAME_RE = re.compile(r'[\\/:*?"<>|]')  # znaky, které Windows v názvu souboru nedovolí
+
+
+def clean_filename(name, fallback="priloha") -> str:
+    """Název přílohy pro zobrazení a uložení: bez neviditelných znaků, cest a shluků mezer
+    (dlouhé mezery před „.exe“ by příponu odsunuly z dohledu)."""
+    name = INVISIBLE_RE.sub("", name or "")
+    name = UNSAFE_NAME_RE.sub("_", name)
+    name = " ".join(name.split()).strip(" .")
+    return name[:200] or fallback
+
+
 def _filename(part):
     try:
         return part.get_filename()
@@ -544,7 +560,7 @@ def parse_message(raw: bytes, uid, folder, flags) -> dict:
         filename = _filename(part)
         if filename or part.get_content_disposition() == "attachment" or part.get_content_maintype() != "text":
             payload = part.get_payload(decode=True) or b""
-            attachments.append({"index": idx, "filename": dec(filename) if filename else f"priloha-{idx}",
+            attachments.append({"index": idx, "filename": clean_filename(dec(filename) if filename else "", f"priloha-{idx}"),
                                 "content_type": ctype, "size": len(payload)})
 
     if html:
@@ -587,7 +603,7 @@ def attachments_from_raw(raw: bytes, indexes) -> list:
             raise MailError("Příloha nebyla nalezena.")
         part = leaves[i]
         name = _filename(part)
-        out.append((dec(name) if name else f"priloha-{i}", part.get_content_type(), part.get_payload(decode=True) or b""))
+        out.append((clean_filename(dec(name) if name else "", f"priloha-{i}"), part.get_content_type(), part.get_payload(decode=True) or b""))
     return out
 
 
