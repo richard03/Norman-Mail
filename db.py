@@ -224,6 +224,11 @@ class Database:
             self._conn.execute("DELETE FROM contacts")
             self._conn.execute("DELETE FROM meta WHERE key='contacts_built'")
             self._conn.execute("INSERT INTO meta VALUES('contacts_v3', '1')")
+        # migrace: kontakty se už neučí ze Smazaných – přepočítat bez nich
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='contacts_v4'").fetchone():
+            self._conn.execute("DELETE FROM contacts")
+            self._conn.execute("DELETE FROM meta WHERE key='contacts_built'")
+            self._conn.execute("INSERT INTO meta VALUES('contacts_v4', '1')")
         self.version = 0  # zvyšuje se při každé změně viditelné v UI
 
     def bump(self):
@@ -804,10 +809,10 @@ class Database:
     def _learn_contacts(c, acc_id, folder, records, mine=None, by_me=False):
         """Přičte adresy ze zpráv do kontaktů. Zpráva ode mě (z mé adresy nebo z Odeslaných) = psal jsem
         jejím příjemcům (i když jsem to já sám); jinak = adresy z ní (odesílatel i ostatní příjemci) jsem dostal.
-        Spam se přeskakuje."""
+        Spam a Smazané se přeskakují."""
         role = (c.execute("SELECT role FROM folders WHERE account_id=? AND name=?", (acc_id, folder)).fetchone()
                 or [None])[0]
-        if role == "junk":
+        if role in ("junk", "trash"):
             return
         if mine is None:
             mine = {r[0] for r in c.execute("SELECT email FROM my_addresses")}
@@ -857,17 +862,31 @@ class Database:
         rec = {"from": [], "to": [{"name": n, "addr": a} for n, a in addrs], "date": time.time()}
         self._tx(lambda c: self._learn_contacts(c, None, None, [rec], by_me=True))
 
+    def _live_addresses(self) -> set:
+        """Adresy ze zpráv mimo Spam a Smazané (odesílatelé i příjemci)."""
+        live = set()
+        for row in self._q("""SELECT m.from_addrs, m.to_addrs, m.cc_addrs FROM messages m
+                              LEFT JOIN folders f ON f.account_id=m.account_id AND f.name=m.folder
+                              WHERE COALESCE(f.role, '') NOT IN ('junk', 'trash')"""):
+            for s in row:
+                if s:
+                    live.update(s.strip(",").split(","))
+        return live
+
     def contacts(self) -> list:
-        """Kontakty pro našeptávání: nahoře adresy používané často a v poslední době (komu píšu váží víc).
-        Bez automatických odesílatelů, spammerů a zdrojů Notifikací / Nedůležitých (pokud jsem jim nepsal)."""
+        """Kontakty pro našeptávání: nejdřív adresy, kterým jsem psal, pak adresy jen z přijaté pošty;
+        v obou skupinách nahoře používané často a v poslední době.
+        Adresy jen z přijaté pošty se vynechají, když jsou dnes už jen ve zprávách ve Spamu nebo ve Smazaných,
+        když jde o automat, spammera nebo zdroj Notifikací / Nedůležitých."""
         self._build_contacts()
         skip = self.spam_senders() | self.category_senders()
+        live = self._live_addresses()
         rows = self._q("SELECT email, name, sent, received FROM contacts "
-                       f"ORDER BY rank_sent * {RANK_SENT_WEIGHT} + rank_received * "
+                       f"ORDER BY sent > 0 DESC, rank_sent * {RANK_SENT_WEIGHT} + rank_received * "
                        f"CASE WHEN sent > 0 THEN 1 ELSE {RANK_STRANGER} END DESC, last DESC")
         out = []
         for r in rows:
-            if not r["sent"] and (r["email"] in skip or NO_REPLY_RE.match(r["email"])):
+            if not r["sent"] and (r["email"] in skip or NO_REPLY_RE.match(r["email"]) or r["email"] not in live):
                 continue
             out.append({"email": r["email"], "name": r["name"]})
             if len(out) >= MAX_CONTACTS:
