@@ -427,6 +427,15 @@ FLAGS_RE = re.compile(rb"FLAGS \(([^)]*)\)")
 SIZE_RE = re.compile(rb"RFC822\.SIZE (\d+)")
 NEW_ITEM_RE = re.compile(rb"^\d+ \(")
 
+# Zpráva se do paměti stahuje nejvýš v této velikosti (server by jinak mohl aplikaci zahltit obří zprávou).
+# Větší zprávu (běžní poskytovatelé přijímají nejvýš 25–50 MB) zobrazíme jen zčásti, bez příloh.
+MAX_MESSAGE = 50 * 1024 * 1024
+TRANSFER_BATCH_BYTES = 50 * 1024 * 1024  # přesun mezi účty: kolik dat najednou v paměti
+
+
+class MessageTooLarge(MailError):
+    """Zpráva je větší než MAX_MESSAGE – celá se nestahuje."""
+
 
 def _parse_fetch(data) -> list:
     """Převede odpověď FETCH na seznam [meta, literál]."""
@@ -481,12 +490,20 @@ def list_messages(M, folder, page=0, page_size=50, query=None) -> dict:
 
 
 def _fetch_raw(M, uid):
-    typ, data = M.uid("FETCH", str(uid), "(UID FLAGS BODY.PEEK[])")
+    """Zpráva ze serveru: (raw, flags, celková velikost). Stáhne se nejvýš MAX_MESSAGE bajtů –
+    je-li velikost větší, raw je jen začátek zprávy."""
+    typ, data = M.uid("FETCH", str(uid), f"(UID FLAGS RFC822.SIZE BODY.PEEK[]<0.{MAX_MESSAGE}>)")
     for meta, lit in _parse_fetch(data):
         m = UID_RE.search(meta)
         if lit and m and int(m.group(1)) == uid:
-            return lit, _flags(meta)
+            size = SIZE_RE.search(meta)
+            return lit, _flags(meta), int(size.group(1)) if size else len(lit)
     raise MessageGone("Zpráva už na serveru není (byla smazána nebo přesunuta).")
+
+
+def too_large_text(size) -> str:
+    return (f"Zpráva má {size / 1024 / 1024:.0f} MB, víc než Mailer stahuje ({MAX_MESSAGE // 1024 // 1024} MB). "
+            "Zobrazen je jen začátek; přílohy si stáhněte ve webmailu poskytovatele.")
 
 
 def _safe_body(msg, prefs):
@@ -536,21 +553,24 @@ def _filename(part):
 
 
 def fetch_raw_mark_seen(M, folder, uid):
-    """Stáhne celou zprávu a označí ji jako přečtenou. Vrací (raw, flags)."""
+    """Stáhne zprávu a označí ji jako přečtenou. Vrací (raw, flags, velikost) – u zprávy nad MAX_MESSAGE
+    je raw jen začátek (velikost > len(raw))."""
     _select(M, folder, readonly=False)
-    raw, flags = _fetch_raw(M, uid)
+    raw, flags, size = _fetch_raw(M, uid)
     if "\\Seen" not in flags:
         M.uid("STORE", str(uid), "+FLAGS", "(\\Seen)")
         flags.append("\\Seen")
-    return raw, flags
+    return raw, flags, size
 
 
 def get_message(M, folder, uid) -> dict:
-    raw, flags = fetch_raw_mark_seen(M, folder, uid)
-    return parse_message(raw, uid, folder, flags)
+    raw, flags, size = fetch_raw_mark_seen(M, folder, uid)
+    return parse_message(raw, uid, folder, flags, size)
 
 
-def parse_message(raw: bytes, uid, folder, flags) -> dict:
+def parse_message(raw: bytes, uid, folder, flags, size=None) -> dict:
+    """size > MAX_MESSAGE: raw je jen začátek zprávy – text se zobrazí, přílohy (mohou být useknuté) ne."""
+    truncated = bool(size and size > MAX_MESSAGE)
     msg = email.message_from_bytes(raw, policy=policy.default)
 
     html_part = _safe_body(msg, ("html",))
@@ -593,7 +613,8 @@ def parse_message(raw: bytes, uid, folder, flags) -> dict:
         "references": " ".join(get_header(msg, "References").split()),
         "html": html,
         "text": text or "",
-        "attachments": attachments,
+        "attachments": [] if truncated else attachments,
+        "truncated": too_large_text(size) if truncated else None,
         "seen": "\\Seen" in flags,
         "flagged": "\\Flagged" in flags,
     }
@@ -602,7 +623,9 @@ def parse_message(raw: bytes, uid, folder, flags) -> dict:
 def get_attachments(M, folder, uid, indexes) -> list:
     """Vrátí [(filename, content_type, data)] pro dané indexy částí."""
     _select(M, folder, readonly=True)
-    raw, _ = _fetch_raw(M, uid)
+    raw, _, size = _fetch_raw(M, uid)
+    if size > MAX_MESSAGE:
+        raise MessageTooLarge(too_large_text(size))
     return attachments_from_raw(raw, indexes)
 
 
@@ -635,12 +658,80 @@ def set_flag(M, folder, uid, flag, value):
 # --------------------------------------------------------------------------
 
 LIST_FIELDS = {"uid", "subject", "from", "to", "date", "seen", "flagged", "has_attachments", "size"}
-HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE"
+HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE AUTHENTICATION-RESULTS"
+
+AUTH_PASS = {"pass", "bestguesspass"}  # bestguesspass: Gmail u domén bez DMARC, SPF/DKIM zarovnané s Od
+
+
+def _strip_comments(s: str) -> str:
+    """Bez komentářů v závorkách (i vnořených) – např. „dmarc=pass (p=NONE sp=NONE)“."""
+    prev = None
+    while prev != s:
+        prev, s = s, re.sub(r"\([^()]*\)", " ", s)
+    return s
+
+
+def auth_results(h, from_addr: str) -> tuple:
+    """Ověření odesílatele podle nejvyšší hlavičky Authentication-Results: (authserv-id, ověřeno).
+    Nejvyšší hlavičku přidal poslední server na cestě – u důvěryhodného poskytovatele schránky on sám;
+    níže položené mohl vložit kdokoli. Ověřeno = dmarc=pass pro doménu z Od, nebo dkim=pass podpisem
+    domény z Od (či nadřazené / podřízené). Komu hlavička patří, rozhoduje volající (authserv-id)."""
+    values = h.get_all("Authentication-Results") or []
+    if not values:
+        return "", False
+    parts = [p.strip() for p in _strip_comments(" ".join(str(values[0]).split())).split(";")]
+    head = parts[0].split()
+    authserv = head[0].lower() if head and "=" not in head[0] else ""
+    results = parts[1:] if authserv else parts  # Microsoft authserv-id neuvádí – všechno jsou výsledky
+    domain = from_addr.rsplit("@", 1)[-1].lower() if "@" in from_addr else ""
+
+    def aligned(d):
+        d = (d or "").lower().strip('"').rsplit("@", 1)[-1]
+        return bool(domain and d) and (d == domain or domain.endswith("." + d) or d.endswith("." + domain))
+
+    for res in results:
+        m = re.match(r"([\w-]+)\s*=\s*([\w-]+)", res)
+        if not m or m.group(2).lower() not in AUTH_PASS:
+            continue
+        props = {k.lower(): v for k, v in re.findall(r"([\w-]+\.[\w-]+)\s*=\s*(\S+)", res[m.end():])}
+        method = m.group(1).lower()
+        if method == "dmarc" and aligned(props.get("header.from", domain)):
+            return authserv, True
+        if method == "dkim" and aligned(props.get("header.d") or props.get("header.i")):
+            return authserv, True
+    return authserv, False
+
+
+def probe_authserv(M, sample=40) -> tuple:
+    """Kdo ve schránce přidává hlavičky Authentication-Results: nejčastější authserv-id nejvyšší hlavičky
+    u posledních zpráv doručené pošty. Vrací (authserv-id nebo "", počet zpráv s ním, počet zpráv)."""
+    typ, data = M.select(q("INBOX"), readonly=True)
+    try:
+        n = int(data[0]) if typ == "OK" and data and data[0] else 0
+    except ValueError:
+        n = 0
+    if not n:
+        return "", 0, 0
+    typ, data = M.fetch(f"{max(1, n - sample + 1)}:{n}", "(BODY.PEEK[HEADER.FIELDS (AUTHENTICATION-RESULTS)])")
+    ids, total = {}, 0
+    for _meta, lit in _parse_fetch(data):
+        if not isinstance(lit, bytes):
+            continue
+        total += 1
+        aid, _ = auth_results(email.message_from_bytes(lit, policy=policy.compat32), "")
+        if aid:
+            ids[aid] = ids.get(aid, 0) + 1
+    if not ids:
+        return "", 0, total
+    aid = max(ids, key=ids.get)
+    return aid, ids[aid], total
 
 
 def header_record(uid, flags, size, h) -> dict:
     """Metadata zprávy z hlaviček (compat32) – pro seznam i databázi."""
     subject = get_header(h, "Subject")
+    sender = parse_addrs(str(h.get("From") or ""))
+    auth_id, auth_ok = auth_results(h, sender[0]["addr"] if sender else "")
     return {
         "uid": uid,
         "message_id": get_header(h, "Message-ID").strip(),
@@ -655,6 +746,8 @@ def header_record(uid, flags, size, h) -> dict:
         "deleted": "\\Deleted" in flags,
         "has_attachments": "multipart/mixed" in get_header(h, "Content-Type").lower(),
         "size": size,
+        "auth_id": auth_id,   # kdo odesílatele ověřoval (authserv-id nejvyšší Authentication-Results)
+        "auth_ok": auth_ok,   # DMARC / DKIM pro doménu z Od prošel
     }
 
 
@@ -832,8 +925,34 @@ INTERNALDATE_RE = re.compile(rb'INTERNALDATE "([^"]+)"')
 TRANSFER_FLAGS = ("\\Seen", "\\Flagged", "\\Answered")
 
 
+def message_sizes(M, folder, uids) -> dict:
+    """{uid: velikost v bajtech} pro zprávy ve složce."""
+    _select(M, folder, readonly=True)
+    typ, data = M.uid("FETCH", ",".join(str(u) for u in uids), "(UID RFC822.SIZE)")
+    out = {}
+    for meta, _ in _parse_fetch(data):
+        m, s = UID_RE.search(meta), SIZE_RE.search(meta)
+        if m and s:
+            out[int(m.group(1))] = int(s.group(1))
+    return out
+
+
+def size_batches(uids, sizes, limit=TRANSFER_BATCH_BYTES) -> list:
+    """Rozdělí UID do dávek, z nichž každá má dohromady nejvýš limit bajtů (aspoň jedna zpráva v dávce)."""
+    batches, cur, total = [], [], 0
+    for u in uids:
+        s = sizes.get(u, 0)
+        if cur and total + s > limit:
+            batches.append(cur)
+            cur, total = [], 0
+        cur.append(u)
+        total += s
+    return batches + ([cur] if cur else [])
+
+
 def fetch_for_transfer(M, folder, uids) -> list:
-    """Celé zprávy pro přesun na jiný účet: [(uid, raw, flags, internaldate)]."""
+    """Celé zprávy pro přesun na jiný účet: [(uid, raw, flags, internaldate)].
+    Volající stahuje po dávkách (size_batches) a bez zpráv nad MAX_MESSAGE."""
     _select(M, folder, readonly=True)
     typ, data = M.uid("FETCH", ",".join(str(u) for u in uids), "(UID FLAGS INTERNALDATE BODY.PEEK[])")
     out = []

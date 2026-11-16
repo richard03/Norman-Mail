@@ -12,6 +12,12 @@ import mail
 
 log = logging.getLogger("mailer.sync")
 
+# Ověření odesílatele (Authentication-Results): kolik zpráv doručené pošty musí mít nejvyšší hlavičku od stejného
+# serveru, aby se mu věřilo, a jak často to přezkoumat (poskytovatel se může změnit).
+AUTH_MIN_SAMPLE = 10
+AUTH_SHARE = 0.8
+AUTH_RECHECK = 7 * 86400
+
 BATCH = 200                 # hlaviček na jeden FETCH
 BACKFILL_BATCHES = 10       # max. dávek historie na složku v jednom cyklu (ať doručená pošta nečeká)
 FULL_FLAGS_LIMIT = 5000     # do této velikosti složky kontrolujeme příznaky všech zpráv
@@ -342,8 +348,13 @@ class SyncManager:
             return records
         sender = lambda r: r["from"][0]["addr"].lower() if r["from"] else ""
         safe = self.db.safe_senders({sender(r) for r in fresh})
+        trusted = self._trusted_authserv(acc) if safe else None
+        # Adresu v Od lze podvrhnout: „bezpečný“ odesílatel se filtru vyhne, jen když ho ověřil poskytovatel
+        # schránky (DMARC/DKIM). Poskytovatel, který ověření nezapisuje, nedává jak rozlišit – tam jako dřív.
+        verified = (lambda r: r.get("auth_ok") and r.get("auth_id") == trusted) if trusted else (lambda r: True)
         frules = self.db.folder_rules_active()
-        cands = [r for r in fresh if sender(r) not in safe and not any(db_module.rule_matches(x, r) for x in frules)]
+        cands = [r for r in fresh if not (sender(r) in safe and verified(r))
+                 and not any(db_module.rule_matches(x, r) for x in frules)]
         if not cands:
             return records
         try:
@@ -374,6 +385,26 @@ class SyncManager:
         log.info("Bayes: přesunuto do spamu %d zpráv (účet %s)", len(spam), acc["name"])
         moved = set(spam)
         return [r for r in records if r["uid"] not in moved]
+
+    def _trusted_authserv(self, acc):
+        """authserv-id serveru, který u tohoto účtu zapisuje Authentication-Results (např. mx.google.com),
+        nebo None, když to poskytovatel nedělá. Zjistí se z posledních zpráv doručené pošty: musí ho mít
+        nejvyšší hlavička aspoň u AUTH_SHARE z nich. Výsledek platí AUTH_RECHECK."""
+        key = "authserv:" + acc["id"]
+        cached = self.db.meta_get(key)
+        if cached and time.time() - cached.get("ts", 0) < AUTH_RECHECK:
+            return cached.get("id")
+        try:
+            with self.pool.get(acc) as M:
+                aid, hits, total = mail.probe_authserv(M)
+        except Exception as e:
+            log.warning("Ověřování odesílatelů nejde zjistit (%s): %s", acc["name"], e)
+            return cached.get("id") if cached else None
+        trusted = aid if total >= AUTH_MIN_SAMPLE and hits >= AUTH_SHARE * total else None
+        self.db.meta_set(key, {"id": trusted, "ts": time.time()})
+        log.info("Ověřování odesílatelů (%s): %s (%d z %d zpráv)", acc["name"], trusted or "poskytovatel neověřuje",
+                 hits, total)
+        return trusted
 
     def bayes_learn(self, M, acc, folder, uids, is_spam):
         """Učení z akce uživatele (Spam / Není spam). Chyba učení nesmí zastavit samotný přesun."""
@@ -418,15 +449,29 @@ class SyncManager:
         if dst_acc is None:
             raise mail.MailError(f"Cílový účet složky {target['name']} už neexistuje – upravte její nastavení.")
         with self.pool.get(src_acc) as M:
-            items = mail.fetch_for_transfer(M, src_folder, uids)
-        with self.pool.get(dst_acc) as M:
-            done, error = mail.append_messages(M, imap_name, items, mark_read)
-        if done:
+            sizes = mail.message_sizes(M, src_folder, uids)
+        too_big = [u for u in uids if sizes.get(u, 0) > mail.MAX_MESSAGE]
+        done, error = [], None
+        # po dávkách omezených velikostí – v paměti nikdy víc než TRANSFER_BATCH_BYTES (+ jedna zpráva)
+        for batch in mail.size_batches([u for u in uids if u not in too_big], sizes):
             with self.pool.get(src_acc) as M:
-                mail.trash_uids(M, src_folder, done)
+                items = mail.fetch_for_transfer(M, src_folder, batch)
+            with self.pool.get(dst_acc) as M:
+                ok, error = mail.append_messages(M, imap_name, items, mark_read)
+            del items
+            if ok:
+                with self.pool.get(src_acc) as M:
+                    mail.trash_uids(M, src_folder, ok)
+                done += ok
+            if error:
+                break
+        if done:
             self._sync_target(dst_acc, imap_name)
         if error:
             raise error
+        if too_big:
+            raise mail.MessageTooLarge(f"{len(too_big)} z vybraných zpráv má víc než "
+                                       f"{mail.MAX_MESSAGE // 1024 // 1024} MB – mezi účty je přesuňte ve webmailu.")
         return done
 
     def _apply_folder_rules_new(self, acc, records, frules):

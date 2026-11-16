@@ -444,18 +444,20 @@ def message(acc_id, uid):
     if raw is None:
         try:
             with pool.get(acc) as M:
-                raw, flags = mail.fetch_raw_mark_seen(M, folder, uid)
+                raw, flags, size = mail.fetch_raw_mark_seen(M, folder, uid)
         except mail.MessageGone as e:  # zastaralá cache – zprávu odebrat, ať zmizí i ze seznamu
             database.remove_message(acc_id, folder, uid)
             database.bump()
             return jsonify(error=str(e), gone=True), 404
-        database.put_body(acc_id, folder, uid, raw)
+        if size <= mail.MAX_MESSAGE:  # useknutý začátek obří zprávy se neukládá
+            database.put_body(acc_id, folder, uid, raw)
     else:
+        size = None
         flags = ["\\Seen"] + (["\\Flagged"] if row and row["flagged"] else [])
         if row and not row["seen"]:
             _mark_seen_in_background(acc, folder, uid)
     database.set_flag(acc_id, folder, uid, "seen", True)
-    data = mail.parse_message(raw, uid, folder, flags)
+    data = mail.parse_message(raw, uid, folder, flags, size)
     data["snoozed_until"] = row["snoozed_until"] if row else None
     if row:
         data["notification"], data["unimportant"] = row["notification"], row["unimportant"]

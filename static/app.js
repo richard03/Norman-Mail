@@ -876,6 +876,7 @@ function renderReader() {
           <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${bayesNote}</div>
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
+      ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
       ${data.snoozed_until ? `<div class="banner snooze">⏰ Odloženo – ${esc(fmtSnooze(data.snoozed_until))} se zpráva znovu
           označí jako nepřečtená. <button class="link" data-act="unsnooze">Zrušit odložení</button></div>` : ''}
       ${remote && !state.showImages ? `<div class="banner">Vzdálené obrázky byly zablokovány kvůli soukromí.

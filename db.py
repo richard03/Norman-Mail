@@ -654,6 +654,18 @@ class Database:
     def add_rule_hits(self, sender, count=1):
         self._q("UPDATE spam_rules SET hits=hits+? WHERE kind='sender' AND value=?", (count, sender.lower()))
 
+    # ------------------------------------------------------------------ obecné hodnoty (meta)
+
+    def meta_get(self, key):
+        rows = self._q("SELECT value FROM meta WHERE key=?", (key,))
+        try:
+            return json.loads(rows[0][0]) if rows else None
+        except ValueError:
+            return None
+
+    def meta_set(self, key, value):
+        self._q("INSERT OR REPLACE INTO meta VALUES(?, ?)", (key, json.dumps(value)))
+
     # ------------------------------------------------------------------ nastavení
 
     def settings(self) -> dict:
