@@ -877,10 +877,32 @@ function renderReader() {
         : data.html && state.originalColors && darkQuery.matches ? `<div class="colors-note muted">Zpráva je v původních barvách.
           <button class="link" data-act="dark-colors">Zobrazit tmavě</button></div>` : ''}`;
   $('#reader').innerHTML = `
-    ${data.html ? `<iframe class="body-frame ${theme}" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>`
+    ${data.html ? `<iframe class="body-frame ${theme}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+                   <div class="link-status" hidden></div>`
                 : '<div class="body-text"></div>'}`;
-  if (data.html) $('#reader iframe').srcdoc = buildFrameDoc(data.html, state.showImages, theme);
+  if (data.html) {
+    const frame = $('#reader iframe');
+    frame.addEventListener('load', () => watchFrameLinks(frame));
+    frame.srcdoc = buildFrameDoc(data.html, state.showImages, theme);
+  }
   else $('#reader .body-text').textContent = data.text || '(prázdná zpráva)';
+}
+
+/** Při najetí na odkaz ve zprávě ukáže jeho skutečný cíl v liště vlevo dole (jako prohlížeč).
+ *  Rámec má allow-same-origin jen kvůli tomuto čtení DOM zvenku; skripty v něm dál neběží
+ *  (sandbox bez allow-scripts a CSP default-src 'none'). */
+function watchFrameLinks(frame) {
+  const doc = frame.contentDocument;
+  const bar = frame.parentElement?.querySelector('.link-status');
+  if (!doc || !bar) return;
+  doc.addEventListener('mouseover', e => {
+    const a = e.target.closest?.('a[href]');
+    if (!a) return void (bar.hidden = true);
+    bar.textContent = a.href;            // vyřešená adresa; doména s diakritikou jako punycode (proti podvrhům)
+    bar.hidden = false;
+  });
+  doc.addEventListener('mouseleave', () => { bar.hidden = true; });
+  frame.addEventListener('mouseleave', () => { bar.hidden = true; });
 }
 
 // Přepnutí světlého / tmavého režimu Windows za běhu: otevřenou HTML zprávu vykreslit v novém režimu.

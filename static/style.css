@@ -197,7 +197,14 @@ body.resizing iframe { pointer-events: none; }  /* rámec se zprávou by jinak �
   flex: 1; min-height: 0;
   display: grid; grid-template-columns: minmax(320px, 1fr) var(--w-actions);
 }
-#reader { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); }
+#reader { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); position: relative; }
+/* cíl odkazu pod myší (lišta vlevo dole jako v prohlížeči) */
+.link-status {
+  position: absolute; left: 0; bottom: 0; max-width: min(100%, 640px); z-index: 5;
+  padding: 3px 9px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border); border-left: 0; border-bottom: 0;
+  border-top-right-radius: 6px; box-shadow: 0 -1px 4px rgba(0, 0, 0, .12); pointer-events: none;
+}
 .empty { margin: auto; color: var(--muted); padding: 20px; text-align: center; }
 .empty.error { color: var(--danger); }
 .reader-head { padding: 12px 20px; border-bottom: 1px solid var(--border); }
