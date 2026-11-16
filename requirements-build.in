@@ -1,0 +1,4 @@
+# Nástroje pro sestavení exe (build.bat). Zafixováno v requirements-build.txt:
+#   pip-compile --generate-hashes --allow-unsafe requirements-build.in
+-c requirements.txt
+pyinstaller

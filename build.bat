@@ -6,7 +6,7 @@ rem   dist\Mailer-Setup-VERZE.exe             - instalator (jen pokud je nainsta
 setlocal
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe python -m venv .venv || goto :error
-.venv\Scripts\python -m pip install -q -r requirements.txt pyinstaller || goto :error
+.venv\Scripts\python -m pip install -q --require-hashes -r requirements.txt -r requirements-build.txt || goto :error
 for /f %%v in ('.venv\Scripts\python -c "import version; print(version.VERSION)"') do set VER=%%v
 
 .venv\Scripts\pyinstaller --noconfirm --clean --windowed --name Mailer ^

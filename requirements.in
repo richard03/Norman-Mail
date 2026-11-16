@@ -1,0 +1,6 @@
+# Přímé závislosti aplikace. Zafixované verze s kontrolními součty jsou v requirements.txt:
+#   pip-compile --generate-hashes --allow-unsafe requirements.in
+# (aktualizace vědomě: pip-compile --generate-hashes --allow-unsafe --upgrade requirements.in)
+flask
+keyring
+pywebview

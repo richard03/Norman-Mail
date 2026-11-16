@@ -31,38 +31,6 @@ poskytovatele hlásí `dmarc=pass` (nebo `dkim=pass` pro doménu odesílatele).
 
 ---
 
-## 6. Příkazy IMAP nekontrolují zalomení řádku (nízká)
-
-**Problém:** Funkce `q()` dá do uvozovek i text se znaky `\r\n`, takže hledaný výraz nebo název složky mohou
-do spojení vložit další příkaz IMAP. Týká se to jen vlastní schránky a vstupy zadává uživatel – jde o zpevnění.
-Ověřeno 16. 11.: data z přijatých mailů se k `q()` se zalomením řádku nedostanou (adresy čistí `getaddresses`,
-předmět `base_subject`).
-
-**Kde:** `mail.py` – `q()`, `_search()`.
-
-**Oprava:** V `q()` a ve vyhledávání odmítnout znaky `\r`, `\n` a `\0`.
-
----
-
-## 7. Verze závislostí nejsou zafixované (nízká)
-
-**Problém:** `requirements.txt` obsahuje `flask>=3.0` apod. Každé sestavení tak může přibalit jinou,
-i problematickou verzi.
-
-**Oprava:** Zafixovat přesné verze s kontrolními součty (`pip-compile --generate-hashes`) a aktualizovat vědomě.
-
----
-
-## 8. V adresáři projektu zůstala stará data (nízká)
-
-**Problém:** `C:\Dev\Mailer\data` je kopie z doby před přesunem dat do `%APPDATA%`. Obsahuje
-`google_client.json` s Client Secret a starý `accounts.json` (bez hesel – ta jsou v klíčence). Při sdílení
-projektu nebo nahrání do gitu by Client Secret unikl.
-
-**Oprava:** Složku smazat (jen na pokyn uživatele).
-
----
-
 ## 9. Nešifrovaná data na disku (informativní)
 
 **Problém:** `%APPDATA%\Mailer\mailer.db` obsahuje stažené zprávy nešifrovaně; chrání je jen účet Windows

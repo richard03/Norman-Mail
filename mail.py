@@ -34,8 +34,19 @@ class MessageGone(MailError):
 # Pomocné funkce
 # --------------------------------------------------------------------------
 
+IMAP_FORBIDDEN = ("\r", "\n", "\0")
+
+
+def check_imap_text(text: str) -> str:
+    """Zalomení řádku by v IMAP ukončilo příkaz a zbytek textu by server provedl jako další příkaz."""
+    if any(c in text for c in IMAP_FORBIDDEN):
+        raise MailError("Text obsahuje nepovolené znaky (zalomení řádku).")
+    return text
+
+
 def q(name: str) -> str:
-    """Uvozovky kolem názvu složky pro IMAP příkazy."""
+    """Uvozovky kolem názvu složky / hledaného textu pro IMAP příkazy."""
+    check_imap_text(name)
     return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -448,7 +459,7 @@ def _search(M, query):
     elif query.isascii():
         typ, data = M.uid("SEARCH", "TEXT", q(query))
     else:
-        M.literal = query.encode("utf-8")
+        M.literal = check_imap_text(query).encode("utf-8")
         typ, data = M.uid("SEARCH", "CHARSET", "UTF-8", "TEXT")
     if typ != "OK":
         raise MailError("Vyhledávání selhalo.")
