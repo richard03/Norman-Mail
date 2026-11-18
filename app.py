@@ -112,14 +112,14 @@ def handle_error(e):
 def account_or_404(acc_id):
     acc = store.get(acc_id)
     if acc is None:
-        abort(404, tr("err.account_missing"))
+        abort(404, tr("err.accountMissing"))
     return acc
 
 
 def folder_arg(data=None):
     folder = (data or request.args).get("folder")
     if not folder:
-        abort(400, tr("err.folder_param_missing"))
+        abort(400, tr("err.folderParamMissing"))
     return folder
 
 
@@ -163,7 +163,7 @@ def app_shortcut():
     """Zástupce v nabídce Start / na ploše (aplikace je jediný exe bez instalátoru)."""
     where = (request.get_json(force=True) or {}).get("where")
     if not EMBEDDED or where not in taskbar.CSIDL:
-        return jsonify(error=tr("error.desktop_only")), 400
+        return jsonify(error=tr("error.desktopOnly")), 400
     try:
         taskbar.create_shortcut(where, SHORTCUT_NAME)
     except OSError as e:
@@ -193,10 +193,10 @@ def _save_account(acc_id):
     if existing and not password:
         if acc["auth"] != "oauth2" and _login_target(acc) != _login_target(existing):
             # uložené heslo se smí poslat jen tam, kam patří – na nový server nebo pro jiné jméno ho nepoužijeme
-            raise ValidationError(tr("err.password_again"))
+            raise ValidationError(tr("err.passwordAgain"))
         password = existing["password"]
     if not password:
-        raise ValidationError(tr("err.password_missing"))
+        raise ValidationError(tr("err.passwordMissing"))
     mail.test_account({**acc, "password": password, "id": acc_id or "test"})
     new_id = store.save(acc_id, acc, password)
     refresh_my_addresses()
@@ -311,7 +311,7 @@ def oauth_start():
 def oauth_status():
     entry = google_oauth.get_pending(request.args.get("state"))
     if not entry:
-        return jsonify(status="error", error=tr("err.oauth_expired"))
+        return jsonify(status="error", error=tr("err.oauthExpired"))
     return jsonify(status=entry["status"], error=entry["error"], account_id=entry["account_id"])
 
 
@@ -323,9 +323,9 @@ box-shadow:0 4px 20px rgba(0,0,0,.08)}}h1{{font-size:20px;color:{color}}}</style
 
 
 def callback_page(ok, text):
-    title, color = (tr("oauth.page_ok"), "#059669") if ok else (tr("oauth.page_failed"), "#c62828")
+    title, color = (tr("oauth.pageOk"), "#059669") if ok else (tr("oauth.pageFailed"), "#c62828")
     html = CALLBACK_PAGE.format(title=escape(title), color=color, text=escape(text), lang=escape(i18n.current()),
-                                page_title=escape(tr("oauth.page_title")))
+                                page_title=escape(tr("oauth.pageTitle")))
     return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
@@ -334,10 +334,10 @@ def oauth_callback():
     state = request.args.get("state")
     entry = google_oauth.get_pending(state)
     if not entry or entry["status"] != "pending":
-        return callback_page(False, tr("oauth.invalid_request"))
+        return callback_page(False, tr("oauth.invalidRequest"))
     if request.args.get("error") or not request.args.get("code"):
         google_oauth.finish(state, error=tr("oauth.cancelled"))
-        return callback_page(False, tr("oauth.cancelled_close"))
+        return callback_page(False, tr("oauth.cancelledClose"))
     try:
         tok = google_oauth.exchange(request.args["code"], entry)
         email_addr = tok["email"]
@@ -345,7 +345,7 @@ def oauth_callback():
             existing = store.get(entry["target_id"])
             if existing and existing["email"].lower() != email_addr.lower():
                 raise google_oauth.OAuthError(
-                    tr("oauth.wrong_account", email=email_addr, expected=existing["email"]))
+                    tr("oauth.wrongAccount", email=email_addr, expected=existing["email"]))
         else:
             existing = store.find_by_email(email_addr)
         existing = existing or {}
@@ -439,7 +439,7 @@ def unified():
     page = max(0, request.args.get("page", 0, type=int))
     view = request.args.get("filter", "all")
     if view not in db.VIEW_FILTERS:
-        abort(400, tr("err.unknown_view"))
+        abort(400, tr("err.unknownView"))
     accounts = store.all()
     if not accounts:
         return jsonify(messages=[], has_more=False, errors=[])
@@ -455,7 +455,7 @@ def unified():
                 errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
     for acc in accounts:
         if acc["id"] in syncer.errors and acc not in fresh:
-            errors.append(tr("err.showing_cached", account=acc["name"], error=syncer.errors[acc["id"]]))
+            errors.append(tr("err.showingCached", account=acc["name"], error=syncer.errors[acc["id"]]))
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
     res = database.list_messages([a["id"] for a in accounts], "INBOX", page, limit, view, offset=offset,
@@ -464,7 +464,7 @@ def unified():
 
 
 def _mark_seen_in_background(acc, folder, uid):
-    syncer.enqueue(acc, folder, uid, tr("op.mark_read"),
+    syncer.enqueue(acc, folder, uid, tr("op.markRead"),
                    lambda M: mail.set_flag(M, folder, uid, "\\Seen", True))
 
 
@@ -565,9 +565,9 @@ def message_snooze(acc_id, uid):
     try:
         until = float(data.get("until"))
     except (TypeError, ValueError):
-        abort(400, tr("err.snooze_missing"))
+        abort(400, tr("err.snoozeMissing"))
     if until <= time.time():
-        abort(400, tr("err.snooze_past"))
+        abort(400, tr("err.snoozePast"))
     row = database.message(acc_id, folder, uid)
     if row:
         message_id = row["message_id"]
@@ -600,7 +600,7 @@ def message_categorize(acc_id, uid):
     folder = folder_arg(data)
     category, scope = data.get("category"), data.get("scope") or "message"
     if category not in db.CATEGORIES or scope not in ("message", "sender", "subject", "custom"):
-        abort(400, tr("err.unknown_category"))
+        abort(400, tr("err.unknownCategory"))
     rule = _category_rule_fields(data.get("rule") or {}) if scope == "custom" and data.get("value", True) else None
     rec = database.message(acc_id, folder, uid)
     if rec is None:
@@ -608,7 +608,7 @@ def message_categorize(acc_id, uid):
             mail._select(M, folder, readonly=True)
             recs = mail.fetch_header_records(M, [uid])
         if not recs:
-            raise mail.MailError(tr("err.message_gone_short"))
+            raise mail.MailError(tr("err.messageGoneShort"))
         rec = {**recs[0], "account_id": acc_id, "folder": folder}
     sender = (rec["from"][0]["addr"] if rec["from"] else "").lower()
     subject = rec.get("base_subject") or ""
@@ -623,7 +623,7 @@ def message_categorize(acc_id, uid):
     else:
         value = sender if scope == "sender" else subject
         if not value:
-            raise mail.MailError(tr("err.no_sender") if scope == "sender" else tr("err.no_subject"))
+            raise mail.MailError(tr("err.noSender") if scope == "sender" else tr("err.noSubject"))
         database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
         database.add_category_rule(category, **{scope: value})
     database.bump()
@@ -641,7 +641,7 @@ RESERVED_FOLDER_NAMES = {"inbox"} | {n for names in mail.ROLE_NAMES.values() for
 def _folder_or_404(folder_id):
     f = database.user_folder(folder_id)
     if f is None:
-        abort(404, tr("err.folder_missing"))
+        abort(404, tr("err.folderMissing"))
     return f
 
 
@@ -649,29 +649,29 @@ def _folder_config(data, current_id=None):
     """Ověří konfiguraci složky: (název, účet, imap název složky, po přečtení, označit přečtené)."""
     name = " ".join(str(data.get("name") or "").split())
     if not name or len(name) > 60:
-        raise ValidationError(tr("err.folder_name"))
+        raise ValidationError(tr("err.folderName"))
     if any(f["name"].lower() == name.lower() and f["id"] != current_id for f in database.user_folders()):
-        raise ValidationError(tr("err.folder_exists", name=name))
+        raise ValidationError(tr("err.folderExists", name=name))
     acc_id = data.get("account_id")
     if not acc_id or store.get(acc_id) is None:
-        raise ValidationError(tr("err.folder_account"))
+        raise ValidationError(tr("err.folderAccount"))
     if data.get("new_folder"):  # nová složka na serveru
         new = " ".join(str(data["new_folder"]).split())
         if len(new) > 60 or any(ch in new for ch in '/\\"*%'):
-            raise ValidationError(tr("err.server_folder_name"))
+            raise ValidationError(tr("err.serverFolderName"))
         if new.lower() in RESERVED_FOLDER_NAMES:
-            raise ValidationError(tr("err.folder_reserved", name=new))
+            raise ValidationError(tr("err.folderReserved", name=new))
         imap_name = mail.encode_utf7(new)
     else:  # existující složka na serveru
         imap_name = str(data.get("server_folder") or "")
         known = {f["name"]: f for f in database.folders(acc_id)}
         if imap_name not in known:
-            raise ValidationError(tr("err.server_folder_choose"))
+            raise ValidationError(tr("err.serverFolderChoose"))
         if known[imap_name]["role"] in ("inbox", "trash", "junk", "drafts", "sent"):
-            raise ValidationError(tr("err.system_folder"))
+            raise ValidationError(tr("err.systemFolder"))
     if any(f["account_id"] == acc_id and f["imap_name"] == imap_name and f["id"] != current_id
            for f in database.user_folders()):
-        raise ValidationError(tr("err.folder_taken"))
+        raise ValidationError(tr("err.folderTaken"))
     return name, acc_id, imap_name, bool(data.get("after_read")), bool(data.get("mark_read"))
 
 
@@ -704,7 +704,7 @@ def user_folder_delete(folder_id):
     on_server = request.args.get("server") == "1"
     acc = store.get(f["account_id"]) if f["account_id"] else None
     if on_server and acc is None:
-        raise ValidationError(tr("err.folder_no_account_delete"))
+        raise ValidationError(tr("err.folderNoAccountDelete"))
     database.delete_user_folder(folder_id)
     if on_server:
         database.clear_folder(acc["id"], f["imap_name"])  # z UI hned
@@ -735,17 +735,17 @@ def _rule_arg(data):
     kind = data.get("kind") or "sender"
     value = " ".join(str(data.get("value") or data.get("sender") or "").split()).lower()
     if kind not in db.RULE_KINDS:
-        raise ValidationError(tr("err.unknown_rule_kind"))
+        raise ValidationError(tr("err.unknownRuleKind"))
     if kind in ("sender", "recipient") and not mail.ADDR_RE.match(value):
-        raise ValidationError(tr("err.invalid_email"))
+        raise ValidationError(tr("err.invalidEmail"))
     if kind == "subject" and not 2 <= len(value) <= 100:
-        raise ValidationError(tr("err.subject_rule_length"))
+        raise ValidationError(tr("err.subjectRuleLength"))
     return kind, value
 
 
 def _update_rule(table, rule_id, kind, value, after_read=None):
     if not database.update_rule(table, rule_id, kind, value, after_read):
-        raise ValidationError(tr("err.rule_exists"))
+        raise ValidationError(tr("err.ruleExists"))
     database.bump()
     syncer.trigger()  # zprávy podle upraveného pravidla
     return jsonify(ok=True, kind=kind, value=value)
@@ -769,7 +769,7 @@ def user_folder_messages(folder_id):
     f = _folder_or_404(folder_id)
     if not f["account_id"] or store.get(f["account_id"]) is None:
         return jsonify(messages=[], has_more=False, version=database.version,
-                       errors=[tr("err.folder_no_account_config")])
+                       errors=[tr("err.folderNoAccountConfig")])
     page = max(0, request.args.get("page", 0, type=int))
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
@@ -788,7 +788,7 @@ def message_to_folder(acc_id, uid):
     folder = folder_arg(data)
     target = _folder_or_404(int(data.get("target_id") or 0))
     if not target["account_id"]:
-        raise ValidationError(tr("err.folder_no_account_named", name=target["name"]))
+        raise ValidationError(tr("err.folderNoAccountNamed", name=target["name"]))
     row = database.message(acc_id, folder, uid)
     if not data.get("value"):  # původní chování: pravidlo podle odesílatele zprávy
         data = {**data, "kind": "sender", "value": row["from"][0]["addr"] if row and row["from"] else ""}
@@ -798,7 +798,7 @@ def message_to_folder(acc_id, uid):
     if row and not in_target and db.rule_matches({"kind": kind, "value": value}, row):
         database.add_folder_rule_hits(rule_id, 1)
     if not in_target:
-        syncer.enqueue(acc, folder, uid, tr("op.move_to_folder", folder=target["name"]),
+        syncer.enqueue(acc, folder, uid, tr("op.moveToFolder", folder=target["name"]),
                        lambda: syncer.move_messages(acc, folder, [uid], target), remove=True, use_conn=False)
         database.remove_message(acc_id, folder, uid)
     database.bump()
@@ -824,20 +824,20 @@ def _parse_move(data):
     elif kind == "ufolder":
         f = _folder_or_404(int(t.get("id") or 0))
         if not f["account_id"] or store.get(f["account_id"]) is None:
-            raise ValidationError(tr("err.folder_no_account_named", name=f["name"]))
+            raise ValidationError(tr("err.folderNoAccountNamed", name=f["name"]))
         target = {"type": "ufolder", "folder": f}
     elif kind == "inbox":
         view = t.get("view") or "all"
         if view not in INBOX_VIEWS:
-            abort(400, tr("err.unknown_view"))
+            abort(400, tr("err.unknownView"))
         if t.get("account_id"):
             account_or_404(t["account_id"])
         target = {"type": "inbox", "view": view, "account_id": t.get("account_id") or None}
     else:
-        abort(400, tr("err.unknown_target"))
+        abort(400, tr("err.unknownTarget"))
     raw = data.get("items") or []
     if not raw or len(raw) > MAX_BULK:
-        abort(400, tr("err.nothing_to_move") if not raw else tr("err.too_many", count=MAX_BULK))
+        abort(400, tr("err.nothingToMove") if not raw else tr("err.tooMany", count=MAX_BULK))
     trash, junk = database.trash_folders(), database.spam_folders()
     items, seen_keys = [], set()
     for it in raw:
@@ -866,7 +866,7 @@ def _parse_move(data):
         items.append({"account_id": acc_id, "folder": folder, "uid": uid, "dst": dst,
                       "stays": dst == (acc_id, folder), "from_spam": junk.get(acc_id) == folder, **info})
     if not items:
-        abort(400, tr("err.nothing_to_move"))
+        abort(400, tr("err.nothingToMove"))
     return items, target
 
 
@@ -876,14 +876,14 @@ def _move_warnings(items, target):
     if target["type"] == "trash":
         final = [i for i in items if i["dst"][1] is None or i["stays"]]
         if final:
-            warnings.append(tr("warn.already_in_trash", count=len(final)))
+            warnings.append(tr("warn.alreadyInTrash", count=len(final)))
         return warnings
     settings = database.settings()
     if target["type"] == "spam":
         age = db.delete_age(settings, "spam")
         old = [i for i in items if age and i["date"] and i["date"] < time.time() - age]
         if old:
-            key = "warn.spam_old_week" if age == db.WEEK else "warn.spam_old_month"
+            key = "warn.spamOldWeek" if age == db.WEEK else "warn.spamOldMonth"
             warnings.append(tr(key, count=len(old)))
         return warnings
     if target["type"] != "inbox":
@@ -911,7 +911,7 @@ def _move_warnings(items, target):
             by_folder[rule["name"]] = by_folder.get(rule["name"], 0) + 1
             moved_away.add((i["account_id"], i["folder"], i["uid"]))
     for name, n in by_folder.items():
-        warnings.append(tr("warn.folder_rule", count=n, folder=name))
+        warnings.append(tr("warn.folderRule", count=n, folder=name))
     now = time.time()
 
     def doomed(cat, seen, date, snoozed):
@@ -928,14 +928,14 @@ def _move_warnings(items, target):
             dragged[(cat, age)] = dragged.get((cat, age), 0) + 1
     for (cat, age), n in dragged.items():
         period = "week" if age == db.WEEK else "month"
-        warnings.append(tr(f"warn.{cat}_old_{period}", count=n))
+        warnings.append(tr(f"warn.oldAs.{cat}.{period}", count=n))
     if new_senders:
         keys = {(i["account_id"], i["folder"], i["uid"]) for i in items}
         others = {(r["account_id"], r["uid"]) for r in database.inbox_from_senders(new_senders)
                   if (r["account_id"], "INBOX", r["uid"]) not in keys
                   and doomed(view, r["seen"], r["date"], r["snoozed"])}
         if others:
-            warnings.append(tr("warn.same_senders", count=len(others)))
+            warnings.append(tr("warn.sameSenders", count=len(others)))
     return warnings
 
 
@@ -979,7 +979,7 @@ def messages_move():
     for (acc_id, folder), uids in groups.items():
         acc = store.get(acc_id)
         if target["type"] == "trash":
-            syncer.enqueue(acc, folder, uids, tr("op.delete_many"),
+            syncer.enqueue(acc, folder, uids, tr("op.deleteMany"),
                            lambda a=acc, f=folder, u=uids: syncer.trash_messages(a, f, u), remove=True, use_conn=False)
         elif target["type"] == "spam":
             syncer.enqueue(acc, folder, uids, tr("op.spam"),
@@ -993,7 +993,7 @@ def messages_move():
                 dest = {"account_id": target["account_id"] or acc_id, "imap_name": "INBOX", "mark_read": False,
                         "name": tr("folder.inbox")}
             ham = database.spam_folders().get(acc_id) == folder  # ze spamu ven = „Není spam“ (učení)
-            syncer.enqueue(acc, folder, uids, tr("op.move_to_folder", folder=dest["name"]),
+            syncer.enqueue(acc, folder, uids, tr("op.moveToFolder", folder=dest["name"]),
                            lambda a=acc, f=folder, u=uids, d=dest, h=ham: syncer.move_messages(a, f, u, d, learn_ham=h),
                            remove=True, use_conn=False)
         database.delete_uids(acc_id, folder, uids)
@@ -1010,7 +1010,7 @@ def mark_all_read():
     kind = t.get("type")
     if kind == "unified":
         if t.get("view") not in db.VIEW_FILTERS:
-            abort(400, tr("err.unknown_view"))
+            abort(400, tr("err.unknownView"))
         groups = database.unseen_in("INBOX", t["view"])
         folder = "INBOX"
     elif kind == "account":
@@ -1019,12 +1019,12 @@ def mark_all_read():
     elif kind == "ufolder":
         f = _folder_or_404(int(t.get("id") or 0))
         if not f["account_id"] or store.get(f["account_id"]) is None:
-            raise ValidationError(tr("err.folder_no_account"))
+            raise ValidationError(tr("err.folderNoAccount"))
         groups, folder = database.unseen_in(f["imap_name"], acc_id=f["account_id"]), f["imap_name"]
     elif kind == "spam":
         groups, folder = {}, None
     else:
-        abort(400, tr("err.unknown_target"))
+        abort(400, tr("err.unknownTarget"))
     # [(účet, složka, uid)] – Spam má na každém účtu jinou složku
     work = [(acc_id, folder, uids) for acc_id, uids in groups.items()]
     if kind == "spam":
@@ -1035,7 +1035,7 @@ def mark_all_read():
         if acc is None or not uids:
             continue
         database.set_seen_bulk(acc_id, folder, uids)
-        syncer.enqueue(acc, folder, uids, tr("op.mark_read_many"),
+        syncer.enqueue(acc, folder, uids, tr("op.markReadMany"),
                        lambda M, f=folder, u=uids: mail.mark_seen_uids(M, f, u))
         total += len(uids)
     if total:
@@ -1085,7 +1085,7 @@ def trash_empty():
                 errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
     syncer.trigger()
     if errors:
-        raise mail.MailError(tr("err.empty_trash_failed", errors="; ".join(errors)))
+        raise mail.MailError(tr("err.emptyTrashFailed", errors="; ".join(errors)))
     return jsonify(ok=True, deleted=deleted)
 
 
@@ -1120,7 +1120,7 @@ def i18n_get():
 def i18n_open_folder():
     """Otevře složku s jazyky v Průzkumníku (vytvoří ji). Jen desktopová aplikace."""
     if not EMBEDDED:
-        return jsonify(error=i18n.t("error.desktop_only")), 400
+        return jsonify(error=i18n.t("error.desktopOnly")), 400
     folder = i18n.user_dirs()[0]
     try:
         folder.mkdir(parents=True, exist_ok=True)
@@ -1142,7 +1142,7 @@ def i18n_template():
             return jsonify(path=str(path))
         except OSError:
             continue
-    return jsonify(error=i18n.t("error.template_failed")), 500
+    return jsonify(error=i18n.t("error.templateFailed")), 500
 
 
 @app.get("/api/bayes")
@@ -1160,7 +1160,7 @@ def bayes_reset():
 
 def _category_or_404(category):
     if category not in db.CATEGORIES:
-        abort(404, tr("err.unknown_category"))
+        abort(404, tr("err.unknownCategory"))
     return category
 
 
@@ -1179,13 +1179,13 @@ def _category_rule_fields(data) -> dict:
     """Ověřené podmínky pravidla Nedůležitých / Notifikací: {sender, recipient, subject}."""
     sender, recipient = (str(data.get(k) or "").strip().lower() for k in ("sender", "recipient"))
     subject = mail.base_subject(str(data.get("subject") or "")).lower()
-    for key, addr in (("err.invalid_sender", sender), ("err.invalid_recipient", recipient)):
+    for key, addr in (("err.invalidSender", sender), ("err.invalidRecipient", recipient)):
         if addr and not mail.ADDR_RE.match(addr):
             raise ValidationError(tr(key))
     if len(subject) > 200:
-        raise ValidationError(tr("err.subject_too_long"))
+        raise ValidationError(tr("err.subjectTooLong"))
     if not (sender or recipient or subject):
-        raise ValidationError(tr("err.fill_one"))
+        raise ValidationError(tr("err.fillOne"))
     return {"sender": sender, "recipient": recipient, "subject": subject}
 
 
@@ -1195,7 +1195,7 @@ def category_rule_update(category, rule_id):
     _category_or_404(category)
     rule = _category_rule_fields(request.get_json(force=True))
     if not database.update_category_rule(category, rule_id, **rule):
-        raise ValidationError(tr("err.rule_exists"))
+        raise ValidationError(tr("err.ruleExists"))
     database.bump()
     syncer.trigger()
     return jsonify(ok=True)
@@ -1217,7 +1217,7 @@ def spam_rules():
 def spam_rule_update(rule_id):
     value = str(request.get_json(force=True).get("value") or "").strip().lower()
     if not mail.ADDR_RE.match(value):
-        raise ValidationError(tr("err.invalid_email"))
+        raise ValidationError(tr("err.invalidEmail"))
     return _update_rule("spam_rules", rule_id, "sender", value)
 
 
@@ -1253,7 +1253,7 @@ def message_spam(acc_id, uid):
             mail._select(M, folder, readonly=True)
             recs = mail.fetch_header_records(M, [uid])
         if not recs:
-            raise mail.MailError(tr("err.message_not_found_deleted"))
+            raise mail.MailError(tr("err.messageNotFoundDeleted"))
         row = recs[0]
     sender = row["from"][0]["addr"].lower() if row["from"] else None
     ts = row["date"]
@@ -1305,7 +1305,7 @@ def job_status(job_id):
     with jobs_lock:
         job = jobs.get(job_id)
         if job is None:
-            abort(404, tr("err.job_missing"))
+            abort(404, tr("err.jobMissing"))
         result = dict(job)
         if job["status"] == "done":
             del jobs[job_id]
@@ -1380,7 +1380,7 @@ def _search_locations():
     if scope == "unified":
         view = request.args.get("filter") or "all"
         if view not in db.VIEW_FILTERS:
-            abort(400, tr("err.unknown_view"))
+            abort(400, tr("err.unknownView"))
         return {a["id"]: ["INBOX"] for a in accounts}, view
     if scope == "ufolder":
         f = _folder_or_404(request.args.get("id", type=int) or 0)
@@ -1392,7 +1392,7 @@ def _search_locations():
     if scope == "folder":
         acc = account_or_404(request.args.get("account"))
         return {acc["id"]: [folder_arg()]}, None
-    abort(400, tr("err.unknown_scope"))
+    abort(400, tr("err.unknownScope"))
 
 
 def _local_match(m, term):
@@ -1494,7 +1494,7 @@ def message_context(acc_id, uid):
         mail._select(M, folder, readonly=True)
         headers = mail._fetch_headers(M, [uid])
         if not headers:
-            raise mail.MailError(tr("err.message_not_found"))
+            raise mail.MailError(tr("err.messageNotFound"))
         _, _, h = headers[0]
         me = acc["email"].lower()
         frm, to = mail.parse_addrs(str(h.get("From") or "")), mail.parse_addrs(str(h.get("To") or ""))
@@ -1527,7 +1527,7 @@ def send():
         try:
             content = base64.b64decode(a["data"], validate=True)
         except Exception:
-            raise mail.MailError(tr("err.bad_attachment", name=a.get("filename")))
+            raise mail.MailError(tr("err.badAttachment", name=a.get("filename")))
         attachments.append((a.get("filename") or "priloha", a.get("content_type") or "application/octet-stream", content))
 
     fwd = data.get("forward")  # přílohy z přeposílané zprávy
@@ -1608,9 +1608,9 @@ def send_cancel(sid):
     with pending_lock:
         entry = pending_sends.get(sid)
         if not entry:
-            abort(404, tr("err.send_cannot_stop"))
+            abort(404, tr("err.sendCannotStop"))
         if entry["state"] != "waiting":
-            raise ValidationError(tr("err.send_in_progress"))
+            raise ValidationError(tr("err.sendInProgress"))
         entry["timer"].cancel()
         del pending_sends[sid]
     return jsonify(ok=True)
@@ -1622,13 +1622,13 @@ def send_commit(sid):
     with pending_lock:
         entry = pending_sends.get(sid)
     if not entry:
-        abort(404, tr("err.send_missing"))
+        abort(404, tr("err.sendMissing"))
     entry["timer"].cancel()
     _run_pending(sid)        # nic neudělá, pokud už zprávu odeslala pojistka – pak jen počkáme na výsledek
     entry["done"].wait(120)
     with pending_lock:
         pending_sends.pop(sid, None)
-    result = entry["result"] or {"ok": False, "error": tr("err.send_timeout")}
+    result = entry["result"] or {"ok": False, "error": tr("err.sendTimeout")}
     if not result["ok"]:
         raise mail.MailError(result["error"])
     return jsonify(ok=True, warning=result["warning"])

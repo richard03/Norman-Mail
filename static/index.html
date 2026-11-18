@@ -12,38 +12,38 @@
 <div id="app">
   <aside id="sidebar">
     <div class="brand">Norman Mail</div>
-    <button id="composeBtn" class="btn primary wide" data-i18n="composeBtn.napsat_zpravu"></button>
+    <button id="composeBtn" class="btn primary wide" data-i18n="sidebar.newMessage"></button>
     <nav id="accounts"></nav>
     <div class="sidebar-bottom">
-      <button id="addAccountBtn" class="btn wide" data-i18n="addAccountBtn.pridat_ucet"></button>
-      <button id="settingsBtn" class="btn wide" data-i18n="settingsBtn.nastaveni"></button>
+      <button id="addAccountBtn" class="btn wide" data-i18n="sidebar.addAccount"></button>
+      <button id="settingsBtn" class="btn wide" data-i18n="sidebar.settings"></button>
     </div>
   </aside>
 
   <!-- Hledání ve veškeré poště (nad seznamem, čtením a tlačítky) -->
   <form id="globalSearch" class="global-search" role="search" autocomplete="off">
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
-    <input id="globalSearchInput" type="search" data-i18n-placeholder="globalSearchInput.hledat_ve_veskere_poste" data-i18n-aria-label="globalSearchInput.hledat_ve_veskere_poste_2">
-    <button type="button" id="advSearchBtn" class="icon-btn adv-btn" data-i18n-title="common.pokrocile_hledani" data-i18n-aria-label="common.pokrocile_hledani">
+    <input id="globalSearchInput" type="search" data-i18n-placeholder="search.allMailPlaceholder" data-i18n-aria-label="search.allMail">
+    <button type="button" id="advSearchBtn" class="icon-btn adv-btn" data-i18n-title="search.advanced" data-i18n-aria-label="search.advanced">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg>
     </button>
   </form>
 
   <section id="list">
     <header class="list-head">
-      <h1 id="listTitle" data-i18n="listTitle.dulezite"></h1>
-      <label class="unread-toggle" data-i18n-title="list-head.skryje_prectene_zpravy_jen">
-        <input type="checkbox" id="unreadOnly" role="switch"> <span data-i18n="list-head.jen_neprectene"></span></label>
-      <button id="refreshBtn" class="icon-btn" data-i18n-title="refreshBtn.obnovit">⟳</button>
+      <h1 id="listTitle" data-i18n="list.defaultTitle"></h1>
+      <label class="unread-toggle" data-i18n-title="list.unreadOnlyTitle">
+        <input type="checkbox" id="unreadOnly" role="switch"> <span data-i18n="list.unreadOnly"></span></label>
+      <button id="refreshBtn" class="icon-btn" data-i18n-title="list.refresh">⟳</button>
     </header>
     <form id="searchForm" class="search">
-      <input id="searchInput" type="search" data-i18n-placeholder="searchInput.filtrovat" data-i18n-aria-label="searchInput.filtrovat_seznam">
+      <input id="searchInput" type="search" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList">
     </form>
     <div id="listErrors"></div>
     <ul id="messages"></ul>
     <div id="listFooter" class="list-footer" hidden>
       <span id="trashInfo" class="muted"></span>
-      <button id="emptyTrashBtn" class="btn danger" data-i18n-title="emptyTrashBtn.natrvalo_smaze_vsechny_zpravy" data-i18n="emptyTrashBtn.vyprazdnit"></button>
+      <button id="emptyTrashBtn" class="btn danger" data-i18n-title="trash.emptyButtonTitle" data-i18n="trash.empty"></button>
     </div>
   </section>
 
@@ -51,41 +51,41 @@
   <header id="messageHead" class="reader-head" hidden></header>
   <div id="detailBody">
   <section id="reader">
-    <div class="empty" data-i18n="common.vyberte_zpravu"></div>
+    <div class="empty" data-i18n="common.selectMessage"></div>
   </section>
 
   <aside id="actions">
-    <div class="col-title" data-i18n="actions.akce"></div>
+    <div class="col-title" data-i18n="actions.title"></div>
     <button class="action" data-act="replyAll" disabled>
-      <svg viewBox="0 0 24 24"><path d="M7 17l-5-5 5-5M12 17l-5-5 5-5M7 12h9a6 6 0 0 1 6 6v1"/></svg><span data-i18n="actions.odpovedet_vsem"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M7 17l-5-5 5-5M12 17l-5-5 5-5M7 12h9a6 6 0 0 1 6 6v1"/></svg><span data-i18n="actions.replyAll"></span></button>
     <button class="action" data-act="forward" disabled>
-      <svg viewBox="0 0 24 24"><path d="M15 17l5-5-5-5M20 12H9a6 6 0 0 0-6 6v1"/></svg><span data-i18n="actions.preposlat"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M15 17l5-5-5-5M20 12H9a6 6 0 0 0-6 6v1"/></svg><span data-i18n="actions.forward"></span></button>
     <div class="action-sep"></div>
-    <button class="action" data-act="snoozeDay" disabled data-i18n-title="actions.oznaci_jako_prectene_zitra">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span data-i18n="actions.odlozit_o_den"></span></button>
-    <button class="action" data-act="snoozeWeek" disabled data-i18n-title="actions.oznaci_jako_prectene_za">
-      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 14v3"/></svg><span data-i18n="actions.odlozit_o_tyden"></span></button>
+    <button class="action" data-act="snoozeDay" disabled data-i18n-title="actions.snoozeDayTitle">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M5 3L2 6M19 3l3 3"/></svg><span data-i18n="actions.snoozeDay"></span></button>
+    <button class="action" data-act="snoozeWeek" disabled data-i18n-title="actions.snoozeWeekTitle">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M12 14v3"/></svg><span data-i18n="actions.snoozeWeek"></span></button>
     <button class="action" data-act="archive" disabled>
-      <svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4"/></svg><span data-i18n="actions.archivovat"></span></button>
-    <div class="col-title" data-i18n="actions.trideni"></div>
+      <svg viewBox="0 0 24 24"><path d="M3 4h18v4H3zM5 8v12h14V8M10 12h4"/></svg><span data-i18n="actions.archive"></span></button>
+    <div class="col-title" data-i18n="actions.sorting"></div>
     <button class="action" data-act="unimportant" disabled>
-      <svg viewBox="0 0 24 24"><path d="M12 4v14M6 12l6 6 6-6"/></svg><span class="label" data-i18n="common.nedulezite"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M12 4v14M6 12l6 6 6-6"/></svg><span class="label" data-i18n="view.unimportantLabel"></span></button>
     <button class="action" data-act="notification" disabled>
-      <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span class="label" data-i18n="common.notifikace"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span class="label" data-i18n="view.notificationsLabel"></span></button>
     <button class="action" data-act="spam" disabled>
-      <svg viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg><span class="label" data-i18n="common.spam"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M12 2l9 4v6c0 5-4 9-9 10-5-1-9-5-9-10V6zM12 8v5M12 16v.5"/></svg><span class="label" data-i18n="view.spamLabel"></span></button>
     <button class="action" data-act="rule" disabled
-            data-i18n-title="actions.zatridi_zpravu_do_slozky">
-      <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13l3 3 3-3"/></svg><span data-i18n="actions.nastavit_pravidlo"></span></button>
+            data-i18n-title="actions.ruleTitle">
+      <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13l3 3 3-3"/></svg><span data-i18n="actions.rule"></span></button>
     <button class="action danger action-bottom" data-act="delete" disabled>
-      <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg><span data-i18n="actions.smazat"></span></button>
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg><span data-i18n="common.delete"></span></button>
   </aside>
   </div>
   </section>
 
   <aside id="context">
-    <div class="col-title"><span data-i18n="context.kontext"></span> <span id="contextCount" class="muted"></span></div>
-    <div id="contextBody"><div class="empty small" data-i18n="common.vyberte_zpravu"></div></div>
+    <div class="col-title"><span data-i18n="context.title"></span> <span id="contextCount" class="muted"></span></div>
+    <div id="contextBody"><div class="empty small" data-i18n="common.selectMessage"></div></div>
   </aside>
 </div>
 
@@ -95,31 +95,31 @@
 <!-- Nastavit pravidlo: zatřídění zprávy do složky + pravidlo pro další zprávy -->
 <dialog id="ruleDialog" class="rule-dialog">
   <form id="ruleForm" method="dialog" autocomplete="off">
-    <h2 data-i18n="ruleForm.nastavit_pravidlo"></h2>
+    <h2 data-i18n="rule.dialogTitle"></h2>
     <p id="ruleMessage" class="note"></p>
-    <label><span data-i18n="ruleForm.do_ktere_slozky_zpravu"></span>
+    <label><span data-i18n="rule.targetFolder"></span>
       <select name="target" id="ruleFolder"></select></label>
-    <p class="note"><button type="button" class="link" id="ruleNewFolder" data-i18n="ruleNewFolder.vytvorit_novou_slozku"></button></p>
+    <p class="note"><button type="button" class="link" id="ruleNewFolder" data-i18n="rule.newFolder"></button></p>
     <fieldset>
-      <legend data-i18n="common.kdy_zpravy_podle_pravidla"></legend>
-      <label class="option"><input type="radio" name="when" value="now" checked> <span data-i18n="ruleForm.ihned_po_doruceni"></span></label>
-      <label class="option"><input type="radio" name="when" value="read"> <span data-i18n="ruleForm.az_po_precteni"></span></label>
+      <legend data-i18n="rule.whenToMove"></legend>
+      <label class="option"><input type="radio" name="when" value="now" checked> <span data-i18n="rule.onDelivery"></span></label>
+      <label class="option"><input type="radio" name="when" value="read"> <span data-i18n="rule.afterReading"></span></label>
     </fieldset>
     <fieldset class="rule-kinds">
-      <legend data-i18n="ruleForm.podle_ceho_dalsi_zpravy"></legend>
-      <label class="option"><input type="radio" name="kind" value="sender" checked> <span data-i18n="common.odesilatel"></span></label>
-      <input name="sender" id="ruleSender" data-i18n-placeholder="common.odesilatel_example_cz">
-      <label class="option"><input type="radio" name="kind" value="recipient"> <span data-i18n="common.prijemce_komu_kopie"></span></label>
+      <legend data-i18n="rule.recogniseBy"></legend>
+      <label class="option"><input type="radio" name="kind" value="sender" checked> <span data-i18n="common.sender"></span></label>
+      <input name="sender" id="ruleSender" data-i18n-placeholder="common.senderPlaceholder">
+      <label class="option"><input type="radio" name="kind" value="recipient"> <span data-i18n="common.recipientToCc"></span></label>
       <select name="recipient" id="ruleRecipient"></select>
-      <label class="option"><input type="radio" name="kind" value="subject"> <span data-i18n="common.cast_predmetu"></span></label>
-      <input name="subject" id="ruleSubject" maxlength="100" data-i18n-placeholder="ruleSubject.napr_projekt_alfa">
+      <label class="option"><input type="radio" name="kind" value="subject"> <span data-i18n="common.subjectPart"></span></label>
+      <input name="subject" id="ruleSubject" maxlength="100" data-i18n-placeholder="rule.subjectPlaceholder">
     </fieldset>
     <p id="ruleNote" class="note"></p>
     <p id="ruleError" class="error"></p>
     <div class="dialog-actions">
       <span class="spacer"></span>
-      <button type="button" class="btn" id="ruleCancel" data-i18n="common.zrusit"></button>
-      <button type="submit" class="btn primary" id="ruleSave" data-i18n="ruleSave.zatridit_a_ulozit_pravidlo"></button>
+      <button type="button" class="btn" id="ruleCancel" data-i18n="common.cancel"></button>
+      <button type="submit" class="btn primary" id="ruleSave" data-i18n="rule.save"></button>
     </div>
   </form>
 </dialog>
@@ -127,21 +127,21 @@
 <!-- Nedůležité / Notifikace: jen tato zpráva, nebo pravidlo podle odesílatele / předmětu -->
 <dialog id="categoryDialog" class="confirm category-dialog">
   <form method="dialog">
-    <h2 id="categoryTitle" data-i18n="common.nedulezite"></h2>
+    <h2 id="categoryTitle" data-i18n="view.unimportantLabel"></h2>
     <p id="categoryMessage" class="note"></p>
     <div class="category-choices">
-      <button value="message" class="btn"><span data-i18n="categoryDialog.jen_tento_email"></span>
-        <span class="muted small" data-i18n="categoryDialog.zaradi_jen_tuto_zpravu"></span></button>
-      <button value="sender" class="btn" id="categorySender"><span data-i18n="categorySender.vse_od_tohoto_odesilatele"></span>
+      <button value="message" class="btn"><span data-i18n="category.onlyThisMessage"></span>
+        <span class="muted small" data-i18n="category.onlyThisMessageNote"></span></button>
+      <button value="sender" class="btn" id="categorySender"><span data-i18n="category.allFromSender"></span>
         <span class="muted small" id="categorySenderNote"></span></button>
-      <button value="subject" class="btn" id="categorySubject"><span data-i18n="categorySubject.vse_s_timto_subjektem"></span>
+      <button value="subject" class="btn" id="categorySubject"><span data-i18n="category.allWithSubject"></span>
         <span class="muted small" id="categorySubjectNote"></span></button>
-      <button value="custom" class="btn"><span data-i18n="categoryDialog.vlastni_pravidlo"></span>
-        <span class="muted small" data-i18n="categoryDialog.odesilatel_prijemce_a_predmet"></span></button>
+      <button value="custom" class="btn"><span data-i18n="category.customRule"></span>
+        <span class="muted small" data-i18n="category.customRuleNote"></span></button>
     </div>
     <div class="dialog-actions">
       <span class="spacer"></span>
-      <button value="cancel" class="btn" data-i18n="common.zrusit"></button>
+      <button value="cancel" class="btn" data-i18n="common.cancel"></button>
     </div>
   </form>
 </dialog>
@@ -149,16 +149,16 @@
 <!-- Úprava pravidla Nedůležitých / Notifikací (z Nastavení) -->
 <dialog id="categoryRuleDialog" class="confirm">
   <form id="categoryRuleForm" method="dialog" autocomplete="off">
-    <h2 id="categoryRuleTitle" data-i18n="categoryRuleTitle.upravit_pravidlo"></h2>
-    <label><span data-i18n="common.odesilatel"></span><input name="sender" data-i18n-placeholder="common.odesilatel_example_cz"></label>
-    <label><span data-i18n="categoryRuleForm.prijemce"></span><input name="recipient" data-i18n-placeholder="categoryRuleForm.adresa_v_komu_nebo"></label>
-    <label><span data-i18n="common.cast_predmetu"></span><input name="subject" maxlength="200" data-i18n-placeholder="categoryRuleForm.napr_faktura"></label>
-    <p class="note" data-i18n="categoryRuleForm.zprava_musi_splnit_vsechna"></p>
+    <h2 id="categoryRuleTitle" data-i18n="rule.editDialogTitle"></h2>
+    <label><span data-i18n="common.sender"></span><input name="sender" data-i18n-placeholder="common.senderPlaceholder"></label>
+    <label><span data-i18n="common.recipient"></span><input name="recipient" data-i18n-placeholder="category.recipientPlaceholder"></label>
+    <label><span data-i18n="common.subjectPart"></span><input name="subject" maxlength="200" data-i18n-placeholder="category.subjectPlaceholder"></label>
+    <p class="note" data-i18n="category.allFieldsNote"></p>
     <p id="categoryRuleError" class="error"></p>
     <div class="dialog-actions">
       <span class="spacer"></span>
-      <button type="button" class="btn" id="categoryRuleCancel" data-i18n="common.zrusit"></button>
-      <button type="submit" class="btn primary" id="categoryRuleSave" data-i18n="common.ulozit"></button>
+      <button type="button" class="btn" id="categoryRuleCancel" data-i18n="common.cancel"></button>
+      <button type="submit" class="btn primary" id="categoryRuleSave" data-i18n="common.save"></button>
     </div>
   </form>
 </dialog>
@@ -166,23 +166,23 @@
 <!-- Pokročilé hledání ve veškeré poště -->
 <dialog id="advSearchDialog" class="confirm adv-search">
   <form id="advSearchForm" method="dialog" autocomplete="off">
-    <h2 data-i18n="common.pokrocile_hledani"></h2>
-    <label><span data-i18n="common.odesilatel"></span><input name="from" data-addr="single" data-i18n-placeholder="common.jmeno_nebo_adresa"></label>
-    <label><span data-i18n="common.prijemce_komu_kopie"></span><input name="to" data-addr="single" data-i18n-placeholder="common.jmeno_nebo_adresa"></label>
-    <label><span data-i18n="common.predmet"></span><input name="subject" data-i18n-placeholder="advSearchForm.cast_predmetu"></label>
+    <h2 data-i18n="search.advanced"></h2>
+    <label><span data-i18n="common.sender"></span><input name="from" data-addr="single" data-i18n-placeholder="search.nameOrAddress"></label>
+    <label><span data-i18n="common.recipientToCc"></span><input name="to" data-addr="single" data-i18n-placeholder="search.nameOrAddress"></label>
+    <label><span data-i18n="common.subject"></span><input name="subject" data-i18n-placeholder="search.subjectPlaceholder"></label>
     <fieldset class="adv-att">
-      <legend data-i18n="advSearchForm.priloha"></legend>
-      <label class="option"><input type="radio" name="att" value="" checked> <span data-i18n="advSearchForm.nezalezi"></span></label>
-      <label class="option"><input type="radio" name="att" value="1"> <span data-i18n="advSearchForm.ma_prilohu"></span></label>
-      <label class="option"><input type="radio" name="att" value="0"> <span data-i18n="advSearchForm.nema_prilohu"></span></label>
+      <legend data-i18n="search.attachment"></legend>
+      <label class="option"><input type="radio" name="att" value="" checked> <span data-i18n="search.attachmentAny"></span></label>
+      <label class="option"><input type="radio" name="att" value="1"> <span data-i18n="search.attachmentYes"></span></label>
+      <label class="option"><input type="radio" name="att" value="0"> <span data-i18n="search.attachmentNo"></span></label>
     </fieldset>
-    <p class="note" data-i18n="advSearchForm.hleda_se_ve_vsech"></p>
+    <p class="note" data-i18n="search.advancedNote"></p>
     <p id="advSearchError" class="error"></p>
     <div class="dialog-actions">
-      <button type="button" class="btn" id="advSearchClear" data-i18n="advSearchClear.vymazat"></button>
+      <button type="button" class="btn" id="advSearchClear" data-i18n="search.clear"></button>
       <span class="spacer"></span>
-      <button type="button" class="btn" data-close data-i18n="common.zrusit"></button>
-      <button type="submit" class="btn primary" data-i18n="advSearchForm.hledat"></button>
+      <button type="button" class="btn" data-close data-i18n="common.cancel"></button>
+      <button type="submit" class="btn primary" data-i18n="search.submit"></button>
     </div>
   </form>
 </dialog>
@@ -190,13 +190,13 @@
 <!-- Upozornění / potvrzení (přesun, který by zprávy hned smazal; definitivní smazání) -->
 <dialog id="confirmDialog" class="confirm">
   <form method="dialog">
-    <h2 id="confirmTitle" data-i18n="confirmTitle.upozorneni"></h2>
+    <h2 id="confirmTitle" data-i18n="confirm.warning"></h2>
     <ul id="confirmLines" class="confirm-lines"></ul>
     <p id="confirmQuestion"></p>
     <div class="dialog-actions">
       <span class="spacer"></span>
-      <button value="cancel" id="confirmCancel" class="btn" data-i18n="common.zrusit"></button>
-      <button value="ok" id="confirmOk" class="btn danger" data-i18n="confirmOk.pokracovat"></button>
+      <button value="cancel" id="confirmCancel" class="btn" data-i18n="common.cancel"></button>
+      <button value="ok" id="confirmOk" class="btn danger" data-i18n="confirm.continue"></button>
     </div>
   </form>
 </dialog>
@@ -204,10 +204,10 @@
 <!-- Nastavení účtu -->
 <dialog id="accountDialog">
   <form id="accountForm" method="dialog">
-    <h2 id="accountTitle" data-i18n="accountTitle.pridat_ucet"></h2>
-    <label><span data-i18n="accountForm.poskytovatel"></span>
+    <h2 id="accountTitle" data-i18n="account.addTitle"></h2>
+    <label><span data-i18n="account.provider"></span>
       <select name="preset" id="presetSelect">
-        <option value="" data-i18n="presetSelect.vlastni_nastaveni"></option>
+        <option value="" data-i18n="account.customSettings"></option>
         <option value="gmail">Gmail</option>
         <option value="seznam">Seznam.cz / Email.cz</option>
         <option value="centrum">Centrum.cz</option>
@@ -221,48 +221,48 @@
       <div class="google-row">
         <button type="button" id="googleLoginBtn" class="btn google">
           <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 7l7.3 5.7c4.3-4 7-9.9 7-17.2z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.5 0 20.1 0 24s1 7.5 2.6 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.7 2.3-8.6 2.3-6.3 0-11.6-4.1-13.5-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg>
-          <span id="googleBtnText" data-i18n="googleBtnText.prihlasit_pres_google"></span>
+          <span id="googleBtnText" data-i18n="account.googleSignIn"></span>
         </button>
-        <span id="googleHint" class="muted small" data-i18n="googleHint.bez_hesla_adresa_a"></span>
+        <span id="googleHint" class="muted small" data-i18n="account.googleHint"></span>
       </div>
       <div id="googleConfig" class="google-config" hidden>
-        <p class="note" data-i18n="googleConfig.nejdriv_zadejte_oauth_klienta"></p>
-        <label>Client ID<input id="gClientId" autocomplete="off" data-i18n-placeholder="gClientId.apps_googleusercontent_com"></label>
+        <p class="note" data-i18n="account.googleClientNote"></p>
+        <label>Client ID<input id="gClientId" autocomplete="off" data-i18n-placeholder="account.googleClientIdPlaceholder"></label>
         <label>Client Secret<input id="gClientSecret" type="password" autocomplete="off"></label>
-        <div><button type="button" id="gSaveConfig" class="btn" data-i18n="gSaveConfig.ulozit_a_prihlasit"></button></div>
+        <div><button type="button" id="gSaveConfig" class="btn" data-i18n="account.googleSaveAndSignIn"></button></div>
       </div>
       <p id="googleStatus" class="note"></p>
-      <p id="googleOrPassword" class="note" data-i18n="googleOrPassword.nebo_vyplnte_formular_nize"></p>
+      <p id="googleOrPassword" class="note" data-i18n="account.orPassword"></p>
     </div>
     <div class="grid2">
-      <label><span data-i18n="accountForm.emailova_adresa"></span><input name="email" type="email" required autocomplete="off"></label>
-      <label><span data-i18n="accountForm.nazev_uctu"></span><input name="name" data-i18n-placeholder="accountForm.napr_prace"></label>
-      <label><span data-i18n="accountForm.vase_jmeno_odesilatel"></span><input name="display_name"></label>
-      <label><span data-i18n="accountForm.uzivatelske_jmeno"></span><input name="username" data-i18n-placeholder="accountForm.obvykle_emailova_adresa" autocomplete="off"></label>
+      <label><span data-i18n="account.email"></span><input name="email" type="email" required autocomplete="off"></label>
+      <label><span data-i18n="account.name"></span><input name="name" data-i18n-placeholder="account.namePlaceholder"></label>
+      <label><span data-i18n="account.displayName"></span><input name="display_name"></label>
+      <label><span data-i18n="account.username"></span><input name="username" data-i18n-placeholder="account.usernamePlaceholder" autocomplete="off"></label>
     </div>
-    <label id="passwordLabel"><span data-i18n="passwordLabel.heslo"></span> <span id="pwHint" class="muted"></span><input name="password" type="password" autocomplete="new-password"></label>
+    <label id="passwordLabel"><span data-i18n="account.password"></span> <span id="pwHint" class="muted"></span><input name="password" type="password" autocomplete="new-password"></label>
     <fieldset>
-      <legend data-i18n="accountForm.prichozi_posta_imap"></legend>
+      <legend data-i18n="account.incoming"></legend>
       <div class="grid3">
-        <label><span data-i18n="common.server"></span><input name="imap_host" required></label>
-        <label><span data-i18n="common.port"></span><input name="imap_port" type="number" required value="993"></label>
-        <label><span data-i18n="common.zabezpeceni"></span><select name="imap_security"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
+        <label><span data-i18n="account.server"></span><input name="imap_host" required></label>
+        <label><span data-i18n="account.port"></span><input name="imap_port" type="number" required value="993"></label>
+        <label><span data-i18n="account.security"></span><select name="imap_security"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
       </div>
     </fieldset>
     <fieldset>
-      <legend data-i18n="accountForm.odchozi_posta_smtp"></legend>
+      <legend data-i18n="account.outgoing"></legend>
       <div class="grid3">
-        <label><span data-i18n="common.server"></span><input name="smtp_host" required></label>
-        <label><span data-i18n="common.port"></span><input name="smtp_port" type="number" required value="465"></label>
-        <label><span data-i18n="common.zabezpeceni"></span><select name="smtp_security"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
+        <label><span data-i18n="account.server"></span><input name="smtp_host" required></label>
+        <label><span data-i18n="account.port"></span><input name="smtp_port" type="number" required value="465"></label>
+        <label><span data-i18n="account.security"></span><select name="smtp_security"><option value="ssl">SSL/TLS</option><option value="starttls">STARTTLS</option></select></label>
       </div>
     </fieldset>
     <p id="accountError" class="error"></p>
     <div class="dialog-actions">
-      <button type="button" id="deleteAccountBtn" class="btn danger" data-i18n="deleteAccountBtn.smazat_ucet"></button>
+      <button type="button" id="deleteAccountBtn" class="btn danger" data-i18n="account.delete"></button>
       <span class="spacer"></span>
-      <button type="button" class="btn" data-close data-i18n="common.zrusit"></button>
-      <button type="submit" id="saveAccountBtn" class="btn primary" data-i18n="common.ulozit"></button>
+      <button type="button" class="btn" data-close data-i18n="common.cancel"></button>
+      <button type="submit" id="saveAccountBtn" class="btn primary" data-i18n="common.save"></button>
     </div>
   </form>
 </dialog>
@@ -270,92 +270,92 @@
 <!-- Nastavení: témata | nastavení | pravidla -->
 <dialog id="settingsDialog" class="settings">
   <div class="settings-head">
-    <h2 data-i18n="settingsDialog.nastaveni"></h2>
-    <button type="button" class="icon-btn close-x" data-close data-i18n-title="common.zavrit_esc">✕</button>
+    <h2 data-i18n="settings.title"></h2>
+    <button type="button" class="icon-btn close-x" data-close data-i18n-title="common.closeEsc">✕</button>
   </div>
   <div class="settings-body">
     <nav class="settings-nav">
-      <button type="button" data-section="app" data-i18n="app.o_aplikaci"></button>
-      <button type="button" data-section="unimportant" data-i18n="common.nedulezite"></button>
-      <button type="button" data-section="notifications" data-i18n="common.notifikace"></button>
-      <button type="button" data-section="spam" data-i18n="common.spam"></button>
-      <button type="button" data-section="trash" data-i18n="common.smazane"></button>
-      <div class="settings-nav-section" data-i18n="settingsDialog.slozky"></div>
+      <button type="button" data-section="app" data-i18n="settings.nav.about"></button>
+      <button type="button" data-section="unimportant" data-i18n="view.unimportantLabel"></button>
+      <button type="button" data-section="notifications" data-i18n="view.notificationsLabel"></button>
+      <button type="button" data-section="spam" data-i18n="view.spamLabel"></button>
+      <button type="button" data-section="trash" data-i18n="view.trashLabel"></button>
+      <div class="settings-nav-section" data-i18n="settings.nav.folders"></div>
       <div id="settingsFolders"></div>
-      <button type="button" class="nav-new" data-new-folder data-i18n="settingsDialog.nova_slozka"></button>
+      <button type="button" class="nav-new" data-new-folder data-i18n="settings.nav.newFolder"></button>
     </nav>
 
     <section class="settings-main">
       <div data-panel="unimportant">
-        <h3 data-i18n="common.nedulezite"></h3>
-        <p class="note" data-i18n="unimportant.zpravy_odpovidajici_pravidlum_odesilatel"></p>
+        <h3 data-i18n="view.unimportantLabel"></h3>
+        <p class="note" data-i18n="settings.unimportant.intro"></p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="unimp_mark_read_on_leave">
-            <span data-i18n="unimportant.kdyz_opustim_sekci_nedulezite"></span></label>
+            <span data-i18n="settings.unimportant.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_week">
-            <span data-i18n="unimportant.mazat_prectene_nedulezite_zpravy"></span></label>
+            <span data-i18n="settings.unimportant.deleteReadWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_month">
-            <span data-i18n="unimportant.mazat_prectene_nedulezite_zpravy_2"></span></label>
+            <span data-i18n="settings.unimportant.deleteReadMonth"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_unread_after_week">
-            <span data-i18n="unimportant.mazat_neprectene_nedulezite_zpravy"></span></label>
+            <span data-i18n="settings.unimportant.deleteUnreadWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_unread_after_month">
-            <span data-i18n="unimportant.mazat_neprectene_nedulezite_zpravy_2"></span></label>
+            <span data-i18n="settings.unimportant.deleteUnreadMonth"></span></label>
         </div>
-        <p class="note" data-i18n="unimportant.mazanim_se_zpravy_presouvaji"></p>
+        <p class="note" data-i18n="settings.unimportant.deleteNote"></p>
       </div>
       <div data-panel="spam">
-        <h3 data-i18n="common.spam"></h3>
-        <p class="note" data-i18n="spam.pravidla_vznikaji_oznacenim_zpravy"></p>
-        <p class="note" data-i18n="spam.smazanim_pravidla_se_uz"></p>
+        <h3 data-i18n="view.spamLabel"></h3>
+        <p class="note" data-i18n="settings.spam.intro"></p>
+        <p class="note" data-i18n="settings.spam.rulesNote"></p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="spam_delete_after_week">
-            <span data-i18n="spam.mazat_zpravy_starsi_nez"></span></label>
+            <span data-i18n="settings.spam.deleteWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="spam_delete_after_month">
-            <span data-i18n="spam.mazat_zpravy_starsi_nez_2"></span></label>
+            <span data-i18n="settings.spam.deleteMonth"></span></label>
         </div>
-        <p class="note" data-i18n="spam.mazanim_se_zpravy_ze"></p>
-        <h3 class="sub-head" data-i18n="spam.bayesovsky_filtr"></h3>
-        <p class="note" data-i18n="spam.pozna_spam_podle_obsahu"></p>
-        <p class="note" data-i18n="spam.nikdy_nepresune_zpravy_od"></p>
+        <p class="note" data-i18n="settings.spam.deleteNote"></p>
+        <h3 class="sub-head" data-i18n="settings.spam.bayesTitle"></h3>
+        <p class="note" data-i18n="settings.spam.bayesIntro"></p>
+        <p class="note" data-i18n="settings.spam.bayesNever"></p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="bayes_enabled">
-            <span data-i18n="spam.automaticky_presouvat_do_spamu"></span></label>
-          <label class="option select-option"><span data-i18n="spam.citlivost"></span>
+            <span data-i18n="settings.spam.bayesEnabled"></span></label>
+          <label class="option select-option"><span data-i18n="settings.spam.sensitivity"></span>
             <select id="bayesSensitivity">
-              <option value="high" data-i18n="bayesSensitivity.vysoka_zachyti_vic_spamu"></option>
-              <option value="medium" data-i18n="bayesSensitivity.stredni"></option>
-              <option value="low" data-i18n="bayesSensitivity.nizka_presune_jen_uplne"></option>
+              <option value="high" data-i18n="settings.spam.sensitivityHigh"></option>
+              <option value="medium" data-i18n="settings.spam.sensitivityMedium"></option>
+              <option value="low" data-i18n="settings.spam.sensitivityLow"></option>
             </select></label>
         </div>
         <p id="bayesStatus" class="note"></p>
-        <div class="bayes-actions"><button type="button" class="btn" id="bayesReset" data-i18n="bayesReset.zapomenout_a_naucit_znovu"></button></div>
+        <div class="bayes-actions"><button type="button" class="btn" id="bayesReset" data-i18n="settings.spam.bayesReset"></button></div>
       </div>
       <div data-panel="notifications">
-        <h3 data-i18n="common.notifikace"></h3>
-        <p class="note" data-i18n="notifications.zpravy_odpovidajici_pravidlum_odesilatel"></p>
+        <h3 data-i18n="view.notificationsLabel"></h3>
+        <p class="note" data-i18n="settings.notifications.intro"></p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="notify_mark_read_on_leave">
-            <span data-i18n="notifications.kdyz_opustim_sekci_notifikace"></span></label>
+            <span data-i18n="settings.notifications.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_week">
-            <span data-i18n="notifications.mazat_prectene_notifikace_starsi"></span></label>
+            <span data-i18n="settings.notifications.deleteReadWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_month">
-            <span data-i18n="notifications.mazat_prectene_notifikace_starsi_2"></span></label>
+            <span data-i18n="settings.notifications.deleteReadMonth"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_unread_after_week">
-            <span data-i18n="notifications.mazat_neprectene_notifikace_starsi"></span></label>
+            <span data-i18n="settings.notifications.deleteUnreadWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_unread_after_month">
-            <span data-i18n="notifications.mazat_neprectene_notifikace_starsi_2"></span></label>
+            <span data-i18n="settings.notifications.deleteUnreadMonth"></span></label>
         </div>
-        <p class="note" data-i18n="notifications.mazanim_se_notifikace_presouvaji"></p>
+        <p class="note" data-i18n="settings.notifications.deleteNote"></p>
       </div>
       <div data-panel="trash">
-        <h3 data-i18n="common.smazane"></h3>
-        <p class="note" data-i18n="trash.smazane_zpravy_ze_vsech"></p>
-        <p class="note" data-i18n="trash.tlacitko_vyprazdnit_pod_seznamem"></p>
+        <h3 data-i18n="view.trashLabel"></h3>
+        <p class="note" data-i18n="settings.trash.intro"></p>
+        <p class="note" data-i18n="settings.trash.emptyNote"></p>
       </div>
       <div data-panel="app">
         <h3>Norman Mail <span id="appVersion" class="muted"></span></h3>
-        <p class="note" data-i18n="app.norman_mail_je_jednoduchy"></p>
-        <p class="note" data-i18n="app.aplikace_bezi_jen_ve"></p>
+        <p class="note" data-i18n="settings.app.intro"></p>
+        <p class="note" data-i18n="settings.app.privacy"></p>
         <h3 class="sub-head" data-i18n="settings.language.label"></h3>
         <div class="options">
           <label class="option select-option"><span data-i18n="settings.language.label"></span>
@@ -365,47 +365,47 @@
         <div id="languageProblems" class="note bad" hidden></div>
         <p class="note" data-i18n="settings.language.help"></p>
         <div class="bayes-actions">
-          <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.open_folder"></button>
+          <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
           <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
         </div>
-        <p id="appPortable" class="note" hidden data-i18n="appPortable.portable_verze_vsechna_data"></p>
+        <p id="appPortable" class="note" hidden data-i18n="settings.app.portable"></p>
         <div id="appShortcuts" hidden>
-          <h3 class="sub-head" data-i18n="appShortcuts.zastupci"></h3>
-          <p class="note" data-i18n="appShortcuts.aplikace_je_jediny_soubor"></p>
+          <h3 class="sub-head" data-i18n="settings.shortcut.title"></h3>
+          <p class="note" data-i18n="settings.shortcut.note"></p>
           <div class="bayes-actions">
-            <button type="button" class="btn" data-shortcut="programs" data-i18n="appShortcuts.pridat_do_nabidky_start"></button>
-            <button type="button" class="btn" data-shortcut="desktop" data-i18n="appShortcuts.pridat_na_plochu"></button>
+            <button type="button" class="btn" data-shortcut="programs" data-i18n="settings.shortcut.addStart"></button>
+            <button type="button" class="btn" data-shortcut="desktop" data-i18n="settings.shortcut.addDesktop"></button>
           </div>
           <p id="appShortcutStatus" class="note"></p>
         </div>
       </div>
       <div data-panel="folder">
         <form id="folderForm" class="folder-form" autocomplete="off">
-          <h3 id="folderTitle" data-i18n="folderTitle.nova_slozka"></h3>
-          <label><span data-i18n="folderForm.nazev_slozky_v_aplikaci"></span><input name="name" maxlength="60" data-i18n-placeholder="folderForm.napr_projekt_alfa"></label>
+          <h3 id="folderTitle" data-i18n="folder.newTitle"></h3>
+          <label><span data-i18n="folder.name"></span><input name="name" maxlength="60" data-i18n-placeholder="folder.namePlaceholder"></label>
           <fieldset>
-            <legend data-i18n="folderForm.kam_zpravy_presouvat"></legend>
+            <legend data-i18n="folder.target"></legend>
             <div class="grid2">
-              <label><span data-i18n="folderForm.ucet"></span><select name="account_id" id="folderAccount"></select></label>
-              <label><span data-i18n="folderForm.slozka_na_serveru"></span><select name="server_folder" id="folderServer"></select></label>
+              <label><span data-i18n="folder.account"></span><select name="account_id" id="folderAccount"></select></label>
+              <label><span data-i18n="folder.serverFolder"></span><select name="server_folder" id="folderServer"></select></label>
             </div>
-            <label id="folderNewWrap" hidden><span data-i18n="folderNewWrap.nazev_nove_slozky_na"></span>
-              <input name="new_folder" maxlength="60" data-i18n-placeholder="folderNewWrap.vznikne_pri_prvnim_presunu"></label>
+            <label id="folderNewWrap" hidden><span data-i18n="folder.newServerFolder"></span>
+              <input name="new_folder" maxlength="60" data-i18n-placeholder="folder.newServerFolderPlaceholder"></label>
             <p id="folderTargetNote" class="note"></p>
           </fieldset>
-          <label class="option"><input type="checkbox" name="mark_read"> <span data-i18n="folderForm.zpravy_presunute_ihned_po"></span></label>
-          <p class="note" data-i18n="folderForm.kdy_se_zpravy_presouvaji"></p>
+          <label class="option"><input type="checkbox" name="mark_read"> <span data-i18n="folder.markRead"></span></label>
+          <p class="note" data-i18n="folder.whenNote"></p>
           <p id="folderError" class="error"></p>
           <div class="dialog-actions">
-            <button type="button" id="folderDeleteBtn" class="btn danger" hidden data-i18n="folderDeleteBtn.smazat_slozku"></button>
+            <button type="button" id="folderDeleteBtn" class="btn danger" hidden data-i18n="folder.delete"></button>
             <span class="spacer"></span>
-            <button type="submit" id="folderSaveBtn" class="btn primary" data-i18n="folderSaveBtn.vytvorit_slozku"></button>
+            <button type="submit" id="folderSaveBtn" class="btn primary" data-i18n="folder.create"></button>
           </div>
           <div id="folderDeletePanel" class="delete-panel" hidden>
-            <p><span data-i18n="folderDeletePanel.jak_chcete_slozku_smazat"></span></p>
-            <button type="button" class="btn" data-del="local" data-i18n="folderDeletePanel.jen_v_aplikaci_slozka"></button>
-            <button type="button" class="btn danger" data-del="server" id="folderDeleteServer" data-i18n="folderDeleteServer.smazat_i_na_serveru"></button>
-            <button type="button" class="btn" data-del="cancel" data-i18n="common.zrusit"></button>
+            <p><span data-i18n="folder.deleteHow"></span></p>
+            <button type="button" class="btn" data-del="local" data-i18n="folder.deleteLocal"></button>
+            <button type="button" class="btn danger" data-del="server" id="folderDeleteServer" data-i18n="folder.deleteServer"></button>
+            <button type="button" class="btn" data-del="cancel" data-i18n="common.cancel"></button>
             <p id="folderDeleteNote" class="note"></p>
           </div>
         </form>
@@ -414,32 +414,32 @@
 
     <aside class="settings-rules">
       <div data-panel="unimportant">
-        <h3><span data-i18n="common.pravidla"></span> <span id="unimportantRulesCount" class="muted"></span></h3>
+        <h3><span data-i18n="common.rules"></span> <span id="unimportantRulesCount" class="muted"></span></h3>
         <ul id="unimportantRules" class="rules"></ul>
       </div>
       <div data-panel="spam">
-        <h3><span data-i18n="common.pravidla"></span> <span id="spamRulesCount" class="muted"></span></h3>
+        <h3><span data-i18n="common.rules"></span> <span id="spamRulesCount" class="muted"></span></h3>
         <ul id="spamRules" class="rules"></ul>
       </div>
       <div data-panel="notifications">
-        <h3><span data-i18n="common.pravidla"></span> <span id="notificationsRulesCount" class="muted"></span></h3>
+        <h3><span data-i18n="common.rules"></span> <span id="notificationsRulesCount" class="muted"></span></h3>
         <ul id="notificationsRules" class="rules"></ul>
       </div>
       <div data-panel="folder" id="folderRulesSection">
-        <h3><span data-i18n="common.pravidla"></span> <span id="folderRulesCount" class="muted"></span></h3>
-        <p class="note" data-i18n="folderRulesSection.zpravy_z_dorucene_posty"></p>
+        <h3><span data-i18n="common.rules"></span> <span id="folderRulesCount" class="muted"></span></h3>
+        <p class="note" data-i18n="folder.rulesIntro"></p>
         <div class="rule-add">
           <select id="folderRuleKind">
-            <option value="sender" data-i18n="common.odesilatel"></option>
-            <option value="recipient" data-i18n="common.prijemce_komu_kopie"></option>
-            <option value="subject" data-i18n="common.cast_predmetu"></option>
+            <option value="sender" data-i18n="common.sender"></option>
+            <option value="recipient" data-i18n="common.recipientToCc"></option>
+            <option value="subject" data-i18n="common.subjectPart"></option>
           </select>
-          <select id="folderRuleWhen" data-i18n-title="common.kdy_zpravy_podle_pravidla">
-            <option value="now" data-i18n="folderRuleWhen.ihned"></option>
-            <option value="read" data-i18n="folderRuleWhen.po_precteni"></option>
+          <select id="folderRuleWhen" data-i18n-title="rule.whenToMove">
+            <option value="now" data-i18n="rule.immediately"></option>
+            <option value="read" data-i18n="rule.afterReadingShort"></option>
           </select>
-          <input id="folderRuleInput" data-i18n-placeholder="common.odesilatel_example_cz" autocomplete="off">
-          <button type="button" id="folderRuleAdd" class="btn" data-i18n="folderRuleAdd.pridat"></button>
+          <input id="folderRuleInput" data-i18n-placeholder="common.senderPlaceholder" autocomplete="off">
+          <button type="button" id="folderRuleAdd" class="btn" data-i18n="common.add"></button>
         </div>
         <ul id="folderRules" class="rules"></ul>
       </div>
@@ -451,24 +451,24 @@
 <div id="composeLayer" hidden></div>
 <template id="composeTpl">
   <div class="compose-win" role="dialog" aria-modal="true">
-    <div class="compose-head" data-i18n-title="composeTpl.tazenim_okno_posunete">
-      <h2 class="compose-title" data-i18n="composeTpl.nova_zprava"></h2>
-      <button type="button" class="icon-btn close-x" data-close data-i18n-title="common.zavrit_esc" data-i18n-aria-label="composeTpl.zavrit">✕</button>
+    <div class="compose-head" data-i18n-title="compose.dragTitle">
+      <h2 class="compose-title" data-i18n="compose.newTitle"></h2>
+      <button type="button" class="icon-btn close-x" data-close data-i18n-title="common.closeEsc" data-i18n-aria-label="common.close">✕</button>
     </div>
     <form class="compose-form" autocomplete="off">
-      <label class="row"><span class="row-label" data-i18n="composeTpl.od"></span><select name="account_id"></select></label>
-      <label class="row"><span class="row-label" data-i18n="composeTpl.komu"></span><input name="to" data-addr autocomplete="off" data-i18n-placeholder="composeTpl.adresa_example_cz_dalsi"></label>
-      <label class="row"><span class="row-label" data-i18n="composeTpl.kopie"></span><input name="cc" data-addr autocomplete="off"></label>
-      <label class="row"><span class="row-label" data-i18n="composeTpl.skryta"></span><input name="bcc" data-addr autocomplete="off"></label>
-      <label class="row"><span class="row-label" data-i18n="common.predmet"></span><input name="subject"></label>
+      <label class="row"><span class="row-label" data-i18n="compose.from"></span><select name="account_id"></select></label>
+      <label class="row"><span class="row-label" data-i18n="compose.to"></span><input name="to" data-addr autocomplete="off" data-i18n-placeholder="compose.toPlaceholder"></label>
+      <label class="row"><span class="row-label" data-i18n="compose.cc"></span><input name="cc" data-addr autocomplete="off"></label>
+      <label class="row"><span class="row-label" data-i18n="compose.bcc"></span><input name="bcc" data-addr autocomplete="off"></label>
+      <label class="row"><span class="row-label" data-i18n="common.subject"></span><input name="subject"></label>
       <textarea name="body" rows="14"></textarea>
       <div class="compose-attachments chips"></div>
       <p class="compose-error error"></p>
       <div class="dialog-actions">
-        <label class="btn file-btn"><span data-i18n="composeTpl.prilozit_soubor"></span><input type="file" class="file-input" multiple hidden></label>
+        <label class="btn file-btn"><span data-i18n="compose.attachFile"></span><input type="file" class="file-input" multiple hidden></label>
         <span class="spacer"></span>
-        <button type="button" class="btn" data-close data-i18n="composeTpl.zahodit"></button>
-        <button type="submit" class="btn primary send-btn" data-i18n="composeTpl.odeslat"></button>
+        <button type="button" class="btn" data-close data-i18n="compose.discard"></button>
+        <button type="submit" class="btn primary send-btn" data-i18n="compose.send"></button>
       </div>
     </form>
   </div>

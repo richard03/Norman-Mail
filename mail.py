@@ -41,7 +41,7 @@ IMAP_FORBIDDEN = ("\r", "\n", "\0")
 def check_imap_text(text: str) -> str:
     """Zalomení řádku by v IMAP ukončilo příkaz a zbytek textu by server provedl jako další příkaz."""
     if any(c in text for c in IMAP_FORBIDDEN):
-        raise MailError(tr("err.line_break"))
+        raise MailError(tr("err.lineBreak"))
     return text
 
 
@@ -185,9 +185,9 @@ def friendly_error(e: Exception) -> str:
     if isinstance(e, smtplib.SMTPAuthenticationError) and b"application-specific password" in (e.smtp_error or b"").lower():
         return friendly_error(imaplib.IMAP4.error("Application-specific password required"))
     if isinstance(e, smtplib.SMTPAuthenticationError):
-        return tr("err.smtp_login")
+        return tr("err.smtpLogin")
     if isinstance(e, smtplib.SMTPRecipientsRefused):
-        return tr("err.recipients_refused", recipients=", ".join(e.recipients.keys()))
+        return tr("err.recipientsRefused", recipients=", ".join(e.recipients.keys()))
     if isinstance(e, smtplib.SMTPException):
         return tr("err.smtp", error=e)
     if isinstance(e, imaplib.IMAP4.error):
@@ -196,18 +196,18 @@ def friendly_error(e: Exception) -> str:
         if m:
             msg = m.group(1)
         if "application-specific password" in msg.lower():
-            return tr("err.gmail_password")
+            return tr("err.gmailPassword")
         if "AUTHENTICATIONFAILED" in msg.upper() or "LOGIN" in msg.upper() or "credentials" in msg.lower():
-            return tr("err.imap_login")
+            return tr("err.imapLogin")
         return tr("err.imap", error=msg)
     if isinstance(e, socket.gaierror):
-        return tr("err.server_not_found")
+        return tr("err.serverNotFound")
     if isinstance(e, (socket.timeout, TimeoutError)):
         return tr("err.timeout")
     if isinstance(e, ssl.SSLError):
         return tr("err.ssl", error=e)
     if isinstance(e, ConnectionRefusedError):
-        return tr("err.connection_refused")
+        return tr("err.connectionRefused")
     if isinstance(e, OSError):
         return tr("err.network", error=e)
     return tr("err.unexpected", error=e)
@@ -237,7 +237,7 @@ def imap_connect(acc: dict) -> imaplib.IMAP4:
             try:
                 M.authenticate("XOAUTH2", respond)
             except imaplib.IMAP4.error as e:
-                raise MailError(tr("err.google_imap", error=e))
+                raise MailError(tr("err.googleImap", error=e))
         else:
             M._encoding = "utf-8"  # hesla s diakritikou
             M.login(acc["username"], acc["password"])
@@ -358,7 +358,7 @@ ROLE_ORDER = ["inbox", "drafts", "sent", "flagged", "archive", "all", "junk", "t
 def list_folders(M, with_counts=True) -> list:
     typ, data = M.list()
     if typ != "OK":
-        raise MailError(tr("err.folder_list"))
+        raise MailError(tr("err.folderList"))
     folders, used_roles = [], set()
     for item in data or []:
         if item is None:
@@ -458,7 +458,7 @@ def _flags(meta: bytes) -> list:
 def _select(M, folder, readonly):
     typ, data = M.select(q(folder), readonly=readonly)
     if typ != "OK":
-        raise MailError(tr("err.folder_open", folder=decode_utf7(folder)))
+        raise MailError(tr("err.folderOpen", folder=decode_utf7(folder)))
 
 
 def _search(M, query):
@@ -497,11 +497,11 @@ def _fetch_raw(M, uid):
         if lit and m and int(m.group(1)) == uid:
             size = SIZE_RE.search(meta)
             return lit, _flags(meta), int(size.group(1)) if size else len(lit)
-    raise MessageGone(tr("err.message_gone"))
+    raise MessageGone(tr("err.messageGone"))
 
 
 def too_large_text(size) -> str:
-    return tr("err.too_large", size=f"{size / 1024 / 1024:.0f}", limit=MAX_MESSAGE // 1024 // 1024)
+    return tr("err.tooLarge", size=f"{size / 1024 / 1024:.0f}", limit=MAX_MESSAGE // 1024 // 1024)
 
 
 def _safe_body(msg, prefs):
@@ -632,7 +632,7 @@ def attachments_from_raw(raw: bytes, indexes) -> list:
     out = []
     for i in indexes:
         if not 0 <= i < len(leaves):
-            raise MailError(tr("err.attachment_missing"))
+            raise MailError(tr("err.attachmentMissing"))
         part = leaves[i]
         name = _filename(part)
         out.append((clean_filename(dec(name) if name else "", f"priloha-{i}"), part.get_content_type(), part.get_payload(decode=True) or b""))
@@ -644,11 +644,11 @@ ALLOWED_FLAGS = {"\\Seen", "\\Flagged"}
 
 def set_flag(M, folder, uid, flag, value):
     if flag not in ALLOWED_FLAGS:
-        raise MailError(tr("err.flag_unsupported"))
+        raise MailError(tr("err.flagUnsupported"))
     _select(M, folder, readonly=False)
     typ, _ = M.uid("STORE", str(uid), "+FLAGS" if value else "-FLAGS", f"({flag})")
     if typ != "OK":
-        raise MailError(tr("err.flag_failed"))
+        raise MailError(tr("err.flagFailed"))
 
 
 # --------------------------------------------------------------------------
@@ -769,7 +769,7 @@ def fetch_header_records(M, uids) -> list:
 def folder_status(M, folder) -> dict:
     typ, data = M.status(q(folder), "(UIDVALIDITY MESSAGES)")
     if typ != "OK" or not data or not data[-1]:
-        raise MailError(tr("err.folder_status", folder=decode_utf7(folder)))
+        raise MailError(tr("err.folderStatus", folder=decode_utf7(folder)))
     line = data[-1] if isinstance(data[-1], bytes) else data[-1][0]
 
     def get(key):
@@ -781,7 +781,7 @@ def folder_status(M, folder) -> dict:
 def all_uids(M) -> set:
     typ, data = M.uid("SEARCH", "ALL")
     if typ != "OK":
-        raise MailError(tr("err.message_list"))
+        raise MailError(tr("err.messageList"))
     return {int(u) for u in data[0].split()} if data and data[0] else set()
 
 
@@ -833,7 +833,7 @@ def _move_uids(M, uids, dest):
                 continue
         typ, _ = M.uid("COPY", uidset, q(dest))
         if typ != "OK":
-            raise MailError(tr("err.move_failed", folder=decode_utf7(dest)))
+            raise MailError(tr("err.moveFailed", folder=decode_utf7(dest)))
         _expunge_uids(M, uidset)
 
 
@@ -846,7 +846,7 @@ def _ensure_folder(M, folders, roles, fallback):
     if not any(f["name"] == fallback for f in folders):
         typ, _ = M.create(q(fallback))
         if typ != "OK":
-            raise MailError(tr("err.folder_create", folder=fallback))
+            raise MailError(tr("err.folderCreate", folder=fallback))
         try:
             M.subscribe(q(fallback))
         except imaplib.IMAP4.error:
@@ -898,7 +898,7 @@ def ensure_named_folder(M, imap_name):
         return
     typ, _ = M.create(q(imap_name))
     if typ != "OK":
-        raise MailError(tr("err.folder_create", folder=decode_utf7(imap_name)))
+        raise MailError(tr("err.folderCreate", folder=decode_utf7(imap_name)))
     try:
         M.subscribe(q(imap_name))
     except imaplib.IMAP4.error:
@@ -975,9 +975,9 @@ def append_messages(M, imap_name, items, mark_read=False):
         try:
             typ, data = M.append(q(imap_name), "(" + " ".join(fl) + ")", date, raw)
         except imaplib.IMAP4.error as e:
-            return done, MailError(tr("err.append_failed", error=e))
+            return done, MailError(tr("err.appendFailed", error=e))
         if typ != "OK":
-            return done, MailError(tr("err.append_refused"))
+            return done, MailError(tr("err.appendRefused"))
         done.append(uid)
     return done, None
 
@@ -992,7 +992,7 @@ def delete_folder_with_messages(M, imap_name):
     M.select(q("INBOX"))  # vybranou složku některé servery smazat nedovolí
     typ, data = M.delete(q(imap_name))
     if typ != "OK":
-        raise MailError(tr("err.folder_delete", folder=decode_utf7(imap_name)))
+        raise MailError(tr("err.folderDelete", folder=decode_utf7(imap_name)))
 
 
 def archive_message(M, folder, uid):
@@ -1000,7 +1000,7 @@ def archive_message(M, folder, uid):
     # Gmail nemá složku Archiv – archivace = přesun do „Všechny zprávy“ (odebere štítek Doručené).
     dest = _ensure_folder(M, folders, ("archive", "all"), "Archive")
     if dest == folder:
-        raise MailError(tr("err.already_archived"))
+        raise MailError(tr("err.alreadyArchived"))
     _select(M, folder, readonly=False)
     _move_uids(M, [uid], dest)
 
@@ -1027,11 +1027,11 @@ def spam_message(M, folder, uid):
     folders = list_folders(M, with_counts=False)
     dest = _ensure_folder(M, folders, ("junk",), "Spam")
     if dest == folder:
-        raise MailError(tr("err.already_spam"))
+        raise MailError(tr("err.alreadySpam"))
     _select(M, folder, readonly=False)
     headers = _fetch_headers(M, [uid], "FROM DATE")
     if not headers:
-        raise MessageGone(tr("err.message_gone"))
+        raise MessageGone(tr("err.messageGone"))
     _, _, h = headers[0]
     sender = next(iter(addr_set(h, "From")), None)
     _move_uids(M, [uid], dest)
@@ -1178,7 +1178,7 @@ ADDR_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def parse_recipients(**fields) -> list:
     """Adresy ze zadaných polí (Komu, Kopie, Skrytá). Každé pole se parsuje zvlášť –
     getaddresses() v Pythonu 3.13 vrátí pro celý vstup prázdný výsledek, pokud je některé pole prázdné."""
-    labels = {"to": "composeTpl.komu", "cc": "composeTpl.kopie", "bcc": "composeTpl.skryta"}
+    labels = {"to": "compose.to", "cc": "compose.cc", "bcc": "compose.bcc"}
     out = []
     for key, value in fields.items():
         value = (value or "").strip().strip(",;").replace(";", ",")
@@ -1186,7 +1186,7 @@ def parse_recipients(**fields) -> list:
             continue
         addrs = [a for _, a in getaddresses([value])]
         if not addrs or not all(ADDR_RE.match(a) for a in addrs):
-            raise MailError(tr("err.invalid_address", field=tr(labels[key]) if key in labels else key, value=value))
+            raise MailError(tr("err.invalidAddress", field=tr(labels[key]) if key in labels else key, value=value))
         out += addrs
     return list(dict.fromkeys(out))  # bez duplicit, v původním pořadí
 
@@ -1215,7 +1215,7 @@ def build_message(acc, to, cc, subject, body, in_reply_to=None, references=None,
 
 def send_message(acc, msg, recipients, pool: ImapPool):
     if not recipients:
-        raise MailError(tr("compose.no_recipient"))
+        raise MailError(tr("compose.noRecipient"))
     s = smtp_connect(acc)
     try:
         s.send_message(msg, to_addrs=recipients)
@@ -1234,4 +1234,4 @@ def send_message(acc, msg, recipients, pool: ImapPool):
                 M.append(q(sent), "(\\Seen)", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         return None
     except Exception as e:
-        return tr("err.sent_copy_failed", error=friendly_error(e))
+        return tr("err.sentCopyFailed", error=friendly_error(e))

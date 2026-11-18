@@ -76,11 +76,11 @@ def _unquote(raw, line):
             if c == '"':
                 rest = raw[i + 1:].strip()
                 if rest and not rest.startswith("#"):
-                    raise ParseError(line, "i18n.error.after_quote")
+                    raise ParseError(line, "i18n.error.afterQuote")
                 return "".join(out)
             out.append(c)
             i += 1
-        raise ParseError(line, "i18n.error.missing_quote", quote='"')
+        raise ParseError(line, "i18n.error.missingQuote", quote='"')
     if raw[:1] == "'":
         out, i = [], 1
         while i < len(raw):
@@ -91,11 +91,11 @@ def _unquote(raw, line):
                     continue
                 rest = raw[i + 1:].strip()
                 if rest and not rest.startswith("#"):
-                    raise ParseError(line, "i18n.error.after_quote")
+                    raise ParseError(line, "i18n.error.afterQuote")
                 return "".join(out)
             out.append(raw[i])
             i += 1
-        raise ParseError(line, "i18n.error.missing_quote", quote="'")
+        raise ParseError(line, "i18n.error.missingQuote", quote="'")
     cut = re.search(r"\s#", raw)
     return (raw[:cut.start()] if cut else raw).strip()
 
@@ -113,10 +113,10 @@ def parse(text):
     def split_key(s, n):
         m = re.match(r"\s*([^:#\s][^:]*?)\s*:(\s|$)(.*)$", s)
         if not m:
-            raise ParseError(n, "i18n.error.expected_key")
+            raise ParseError(n, "i18n.error.expectedKey")
         key = m.group(1).strip("\"'")
         if not KEY_RE.match(key):
-            raise ParseError(n, "i18n.error.bad_key", key=key)
+            raise ParseError(n, "i18n.error.badKey", key=key)
         return key, m.group(3).strip()
 
     def block(start, parent_indent, folded=False):
@@ -133,7 +133,7 @@ def parse(text):
         while body and not body[-1].strip():
             body.pop()
         if not body:
-            raise ParseError(start, "i18n.error.empty_block")
+            raise ParseError(start, "i18n.error.emptyBlock")
         ind = min(indent_of(s) for s in body if s.strip())
         rows = [s[ind:] if s.strip() else "" for s in body]
         if folded:  # > : řádky spojit mezerou, prázdný řádek = nový odstavec
@@ -152,7 +152,7 @@ def parse(text):
         if raw in ("|", "|-", "|+", ">", ">-", ">+"):
             return block(start, parent_indent, folded=raw.startswith(">"))
         if raw[:1] in ("[", "{", "&", "*", "!", "%", "@", "`"):
-            raise ParseError(n, "i18n.error.quote_needed")
+            raise ParseError(n, "i18n.error.quoteNeeded")
         return _unquote(raw, n), start
 
     while i < len(lines):
@@ -163,10 +163,10 @@ def parse(text):
         if "\t" in s[:indent_of(s) + 1]:
             raise ParseError(n, "i18n.error.tab")
         if indent_of(s):
-            raise ParseError(n, "i18n.error.unexpected_indent")
+            raise ParseError(n, "i18n.error.unexpectedIndent")
         key, raw = split_key(s, n)
         if key in data:
-            raise ParseError(n, "i18n.error.duplicate_key", key=key)
+            raise ParseError(n, "i18n.error.duplicateKey", key=key)
         if raw and not raw.startswith("#"):
             data[key], i = value(raw, n, i + 1, 0)
             continue
@@ -184,15 +184,15 @@ def parse(text):
             if sub_indent is None:
                 sub_indent = ind
             elif ind != sub_indent:
-                raise ParseError(m, "i18n.error.sub_indent")
+                raise ParseError(m, "i18n.error.subIndent")
             k2, raw2 = split_key(t, m)
             if k2 in sub:
-                raise ParseError(m, "i18n.error.duplicate_key", key=k2)
+                raise ParseError(m, "i18n.error.duplicateKey", key=k2)
             if not raw2 or raw2.startswith("#"):
-                raise ParseError(m, "i18n.error.sub_text")
+                raise ParseError(m, "i18n.error.subText")
             sub[k2], j = value(raw2, m, j + 1, ind)
         if not sub:
-            raise ParseError(n, "i18n.error.no_text", key=key)
+            raise ParseError(n, "i18n.error.noText", key=key)
         data[key] = sub
         i = j
     return data
@@ -202,13 +202,13 @@ def validate(data):
     """Zkontroluje strukturu katalogu. Vrací (meta, texty); chyba → ValueError."""
     meta = data.get("meta")
     if not isinstance(meta, dict):
-        raise CatalogError("i18n.error.no_meta")
+        raise CatalogError("i18n.error.noMeta")
     unknown = set(meta) - set(META_FIELDS)
     if unknown:
-        raise CatalogError("i18n.error.meta_unknown", fields=", ".join(sorted(unknown)))
+        raise CatalogError("i18n.error.metaUnknown", fields=", ".join(sorted(unknown)))
     lang = meta.get("language", "")
     if not LANG_RE.match(lang):
-        raise CatalogError("i18n.error.bad_language", language=lang)
+        raise CatalogError("i18n.error.badLanguage", language=lang)
     texts = {}
     for k, v in data.items():
         if k == "meta":
@@ -216,9 +216,9 @@ def validate(data):
         if isinstance(v, dict):
             bad = set(v) - set(PLURAL_FORMS)
             if bad:
-                raise CatalogError("i18n.error.plural_forms", key=k, forms=", ".join(PLURAL_FORMS))
+                raise CatalogError("i18n.error.pluralForms", key=k, forms=", ".join(PLURAL_FORMS))
             if "other" not in v:
-                raise CatalogError("i18n.error.plural_other", key=k)
+                raise CatalogError("i18n.error.pluralOther", key=k)
         texts[k] = v
     meta = {"language": lang, "name": meta.get("name") or lang, "locale": meta.get("locale") or lang,
             **{k: meta[k] for k in ("app_version", "author") if k in meta}}
@@ -229,11 +229,11 @@ def load_file(path):
     """(meta, texty) ze souboru; chyba → ValueError s popisem pro uživatele."""
     path = Path(path)
     if path.stat().st_size > MAX_FILE:
-        raise CatalogError("i18n.error.too_big")
+        raise CatalogError("i18n.error.tooBig")
     try:
         text = path.read_text("utf-8")
     except UnicodeDecodeError:
-        raise CatalogError("i18n.error.not_utf8")
+        raise CatalogError("i18n.error.notUtf8")
     return validate(parse(text))
 
 

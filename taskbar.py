@@ -118,7 +118,7 @@ def launch_target():
 def shortcut_path(where, name):
     buf = ctypes.create_unicode_buffer(260)
     if ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL[where], None, 0, buf) != 0:
-        raise OSError(_tr("err.shortcut_folder"))
+        raise OSError(_tr("err.shortcutFolder"))
     return os.path.join(buf.value, name + ".lnk")
 
 
@@ -131,7 +131,7 @@ def create_shortcut(where, name):
     """Vytvoří (přepíše) zástupce aplikace v nabídce Start nebo na ploše. Zástupce nese stejné
     AppUserModelID jako okno, takže se na hlavním panelu seskupí s běžící aplikací. Vrací cestu."""
     if sys.platform != "win32":
-        raise OSError(_tr("err.shortcut_windows_only"))
+        raise OSError(_tr("err.shortcutWindowsOnly"))
     path = shortcut_path(where, name)
     target, args, icon = launch_target()
     ole32 = ctypes.windll.ole32
@@ -140,7 +140,7 @@ def create_shortcut(where, name):
     hr = ole32.CoCreateInstance(ctypes.byref(GUID(CLSID_ShellLink)), None, CLSCTX_INPROC_SERVER,
                                 ctypes.byref(GUID(IID_IShellLinkW)), ctypes.byref(link))
     if hr != 0 or not link:
-        raise OSError(_tr("err.shortcut_create", code=f"0x{hr & 0xFFFFFFFF:08X}"))
+        raise OSError(_tr("err.shortcutCreate", code=f"0x{hr & 0xFFFFFFFF:08X}"))
     wstr, hres = ctypes.c_wchar_p, ctypes.c_long
     try:
         icon_file, _, icon_index = icon.rpartition(",")
@@ -157,10 +157,10 @@ def create_shortcut(where, name):
                 store, ctypes.byref(key), ctypes.byref(var))
             _method(store, 7, hres)(store)                                        # Commit
         if query(link, ctypes.byref(GUID(IID_IPersistFile)), ctypes.byref(persist)) != 0 or not persist:
-            raise OSError(_tr("err.shortcut_save", code="-"))
+            raise OSError(_tr("err.shortcutSave", code="-"))
         hr = _method(persist, 6, hres, wstr, wintypes.BOOL)(persist, path, True)  # Save
         if hr != 0:
-            raise OSError(_tr("err.shortcut_save", code=f"0x{hr & 0xFFFFFFFF:08X}"))
+            raise OSError(_tr("err.shortcutSave", code=f"0x{hr & 0xFFFFFFFF:08X}"))
     finally:
         for p in (persist, store, link):
             if p:

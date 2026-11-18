@@ -113,7 +113,7 @@ class SyncManager:
                     self.db.delete_uids(acc["id"], keys[0][1], [k[2] for k in left])
                     self.db.bump()
         except Exception as e:
-            msg = tr("err.op_failed", action=label, error=mail.friendly_error(e))
+            msg = tr("err.opFailed", action=label, error=mail.friendly_error(e))
             log.warning(msg)
             self.notice(msg)
             if on_error:
@@ -448,7 +448,7 @@ class SyncManager:
             return uids
         dst_acc = self.store.get(target["account_id"])
         if dst_acc is None:
-            raise mail.MailError(tr("err.target_account_gone", folder=target["name"]))
+            raise mail.MailError(tr("err.targetAccountGone", folder=target["name"]))
         with self.pool.get(src_acc) as M:
             sizes = mail.message_sizes(M, src_folder, uids)
         too_big = [u for u in uids if sizes.get(u, 0) > mail.MAX_MESSAGE]
@@ -471,7 +471,7 @@ class SyncManager:
         if error:
             raise error
         if too_big:
-            raise mail.MessageTooLarge(tr("err.transfer_too_large", count=len(too_big),
+            raise mail.MessageTooLarge(tr("err.transferTooLarge", count=len(too_big),
                                           limit=mail.MAX_MESSAGE // 1024 // 1024))
         return done
 
@@ -535,7 +535,7 @@ class SyncManager:
             with self.pool.get(acc) as M:
                 mail.delete_folder_with_messages(M, imap_name)
         except Exception as e:
-            self.notice(tr("err.folder_delete_failed", folder=label, error=mail.friendly_error(e)))
+            self.notice(tr("err.folderDeleteFailed", folder=label, error=mail.friendly_error(e)))
             self.trigger()
             return
         self.db.clear_folder(acc["id"], imap_name)

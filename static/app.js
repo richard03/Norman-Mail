@@ -88,7 +88,7 @@ const UNIFIED_VIEWS = [['important', 'view.important'], ['fyi', 'view.fyi'], ['u
                        ['notifications', 'view.notifications']];
 const unifiedTitle = view => t(Object.fromEntries(UNIFIED_VIEWS)[view]);
 // Ikona přílohy (sponka) v seznamu zpráv a v Kontextu
-const clipIcon = () => `<svg class="clip" viewBox="0 0 24 24" role="img" aria-label="${esc(t('message.attachment'))}"><title>${esc(t('message.has_attachment'))}</title>`
+const clipIcon = () => `<svg class="clip" viewBox="0 0 24 24" role="img" aria-label="${esc(t('message.attachment'))}"><title>${esc(t('message.hasAttachment'))}</title>`
   + '<path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>';
 // Kategorie, které určuje uživatel (tlačítka v Třídění, pravidla v Nastavení)
 const CATEGORIES = {
@@ -170,7 +170,7 @@ const shortAddr = list => (list || []).map(a => a.name || a.addr).join(', ') || 
 const badge = n => (n ? `<span class="badge">${n}</span>` : '');
 // Zprávy bez předmětu: backend posílá prázdný předmět, starší data v mezipaměti mají český zástupný text.
 const realSubject = s => (s && s !== '(bez předmětu)' ? s : '');
-const shownSubject = s => realSubject(s) || t('message.no_subject');
+const shownSubject = s => realSubject(s) || t('message.noSubject');
 const zprav = n => tn('messages.count', n);
 const keyOf = m => `${m.account_id}|${m.folder}|${m.uid}`;
 const curKey = cur => (cur ? `${cur.accountId}|${cur.folder}|${cur.uid}` : null);
@@ -213,31 +213,31 @@ function renderSidebar() {
     }
     // Odeslané: odeslaná pošta všech účtů
     h += `<div class="nav-item unified sent-item ${state.view.type === 'sent' ? 'active' : ''}" data-sent
-            title="${esc(t('nav.sent_title'))}">${SENT_ICON}<span class="label">${esc(t('view.sent'))}</span></div>`;
+            title="${esc(t('nav.sentTitle'))}">${SENT_ICON}<span class="label">${esc(t('view.sent'))}</span></div>`;
     // Spam: spam všech účtů (kdyby tam něco spadlo omylem); číslo = nepřečtené
     h += `<div class="nav-item unified spam-item ${state.view.type === 'spam' ? 'active' : ''}" data-spam
-            title="${esc(t('nav.spam_title'))}">${SPAM_ICON}<span class="label">${esc(t('view.spam'))}</span>
+            title="${esc(t('nav.spamTitle'))}">${SPAM_ICON}<span class="label">${esc(t('view.spam'))}</span>
             ${state.spamUnread ? `<span class="badge total">${state.spamUnread}</span>` : ''}</div>`;
     // Smazané: koše všech účtů; číslo = celkový počet zpráv (všechny jsou přečtené)
     h += `<div class="nav-item unified trash-item ${state.view.type === 'trash' ? 'active' : ''}" data-trash
-            title="${esc(t('nav.trash_title'))}">${TRASH_ICON}<span class="label">${esc(t('view.trash'))}</span>
+            title="${esc(t('nav.trashTitle'))}">${TRASH_ICON}<span class="label">${esc(t('view.trash'))}</span>
             ${state.trashTotal ? `<span class="badge total">${state.trashTotal}</span>` : ''}</div>`;
   } else {
-    h += `<p class="muted pad">${esc(t('nav.no_accounts'))}</p>`;
+    h += `<p class="muted pad">${esc(t('nav.noAccounts'))}</p>`;
   }
   if (state.accounts.length) {
     h += `<div class="nav-section">${esc(t('nav.folders'))}</div>`;
     for (const f of state.userFolders) {
       const active = state.view.type === 'ufolder' && state.view.id === f.id;
       const facc = accById(f.account_id);
-      const tip = facc ? `${f.name} – ${facc.name || facc.email}: ${decodeFolderName(f.imap_name)}` : t('nav.folder_no_account', { name: f.name });
+      const tip = facc ? `${f.name} – ${facc.name || facc.email}: ${decodeFolderName(f.imap_name)}` : t('nav.folderNoAccount', { name: f.name });
       h += `<div class="nav-item ufolder-item ${active ? 'active' : ''}" data-ufolder="${f.id}" title="${esc(tip)}">
           <svg class="folder-ico" viewBox="0 0 24 24" style="color:${facc ? accColor(facc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-          <span class="label">${esc(f.name)}</span>${facc ? badge(f.unread) : `<span class="warn-mark" title="${esc(t('folder.set_target_account'))}">!</span>`}
-          <button class="icon-btn small edit" data-edit-folder="${f.id}" title="${esc(t('nav.folder_settings'))}">⚙</button>
+          <span class="label">${esc(f.name)}</span>${facc ? badge(f.unread) : `<span class="warn-mark" title="${esc(t('folder.setTargetAccount'))}">!</span>`}
+          <button class="icon-btn small edit" data-edit-folder="${f.id}" title="${esc(t('nav.folderSettings'))}">⚙</button>
         </div>`;
     }
-    h += `<div class="nav-item add-folder" data-add-folder>${esc(t('nav.add_folder'))}</div>`;
+    h += `<div class="nav-item add-folder" data-add-folder>${esc(t('nav.addFolder'))}</div>`;
   }
   if (state.dragItems) setTimeout(markDropCandidates, 0);  // překreslení během přetahování
   if (state.accounts.length) h += `<div class="nav-section">${esc(t('nav.accounts'))}</div>`;
@@ -245,10 +245,10 @@ function renderSidebar() {
     // Účet není seznam zpráv (ty jsou v pohledech a složkách nahoře) – kliknutí otevře jeho nastavení.
     const error = state.folderErrors[a.id];
     h += `<div class="nav-item account-item" data-acc="${a.id}"
-            title="${esc(error ? error : t('nav.account_settings', { email: a.email }))}">
+            title="${esc(error ? error : t('nav.accountSettings', { email: a.email }))}">
         <span class="dot" style="background:${accColor(a.id)}"></span>
         <span class="label">${esc(a.name || a.email)}</span>
-        ${error ? `<button class="icon-btn small warn" data-retry="${a.id}" title="${esc(t('nav.account_error', { error }))}">!</button>` : ''}
+        ${error ? `<button class="icon-btn small warn" data-retry="${a.id}" title="${esc(t('nav.accountError', { error }))}">!</button>` : ''}
       </div>`;
   }
   $('#accounts').innerHTML = h;
@@ -279,18 +279,18 @@ $('#accounts').addEventListener('click', e => {
 /** Co položka panelu představuje: cíl pro „Označit vše jako přečtené“, počet nepřečtených a akce Nastavení. */
 function navItemInfo(el) {
   if (el.hasAttribute('data-trash'))
-    return { label: t('view.trash'), target: null, unread: 0, readNote: t('nav.trash_always_read'),
+    return { label: t('view.trash'), target: null, unread: 0, readNote: t('nav.trashAlwaysRead'),
              settings: () => openSettings('trash') };
   if (el.hasAttribute('data-sent'))
-    return { label: t('view.sent'), target: null, unread: 0, readNote: t('nav.sent_always_read'),
-             settings: null, settingsNote: t('nav.folder_no_settings') };
+    return { label: t('view.sent'), target: null, unread: 0, readNote: t('nav.sentAlwaysRead'),
+             settings: null, settingsNote: t('nav.folderNoSettings') };
   if (el.hasAttribute('data-spam'))
     return { label: t('view.spam'), target: { type: 'spam' }, unread: state.spamUnread, settings: () => openSettings('spam') };
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     return { label: unifiedTitle(view), target: { type: 'unified', view }, unread: state.viewUnread?.[view] || 0,
              settings: CATEGORIES[view] ? () => openSettings(view) : null,
-             settingsNote: CATEGORIES[view] ? '' : t('nav.view_no_settings') };
+             settingsNote: CATEGORIES[view] ? '' : t('nav.viewNoSettings') };
   }
   if (el.dataset.ufolder) {
     const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
@@ -328,8 +328,8 @@ $('#accounts').addEventListener('contextmenu', e => {
   if (!info) return;
   e.preventDefault();
   openContextMenu(e.clientX, e.clientY, [
-    { text: t('menu.mark_all_read'), disabled: !info.target || !info.unread,
-      title: !info.target ? (info.readNote || t('nav.folder_no_account_short')) : (!info.unread ? t('menu.no_unread') : ''),
+    { text: t('menu.markAllRead'), disabled: !info.target || !info.unread,
+      title: !info.target ? (info.readNote || t('nav.folderNoAccountShort')) : (!info.unread ? t('menu.noUnread') : ''),
       run: () => markAllRead(info) },
     { text: t('menu.settings'), disabled: !info.settings, title: info.settingsNote || '', run: info.settings },
   ]);
@@ -359,7 +359,7 @@ async function markAllRead(info) {
   }
   try {
     const res = await api('/api/mark-all-read', { method: 'POST', body: tg });
-    toast(res.count ? tn('menu.marked_read', res.count, { folder: info.label }) : t('menu.nothing_unread', { folder: info.label }));
+    toast(res.count ? tn('menu.markedRead', res.count, { folder: info.label }) : t('menu.nothingUnread', { folder: info.label }));
   } catch (err) { toast(err.message, true); }
   await pollSync();                                    // počty v levém panelu
   loadList({ quiet: true, keepLoaded: true });         // seznam z databáze (může se překrývat s cílem)
@@ -374,7 +374,7 @@ function markCategoryRead(cat) {
   }
   api(`/api/categories/${cat}/mark-read`, { method: 'POST' })
     .then(() => pollSync())
-    .catch(err => toast(t('category.mark_read_failed', { folder: CATEGORIES[cat].title, error: err.message }), true));
+    .catch(err => toast(t('category.markReadFailed', { folder: CATEGORIES[cat].title, error: err.message }), true));
 }
 
 const viewCategory = v => (v.type === 'unified' && CATEGORIES[v.filter]) ? v.filter : null;
@@ -561,7 +561,7 @@ function renderList() {
   const acc = v.type === 'folder' ? accById(v.accountId) : null;
   const isSearch = v.type === 'search';
   const multi = ['unified', 'ufolder', 'trash', 'spam', 'sent', 'search'].includes(v.type);  // zprávy z více účtů
-  $('#listTitle').textContent = isSearch ? (v.adv ? t('search.title_adv', { criteria: advSummary(v.adv) }) : t('search.title', { query: v.q })) : v.type === 'unified' ? unifiedTitle(v.filter)
+  $('#listTitle').textContent = isSearch ? (v.adv ? t('search.titleAdv', { criteria: advSummary(v.adv) }) : t('search.title', { query: v.q })) : v.type === 'unified' ? unifiedTitle(v.filter)
     : v.type === 'trash' ? t('view.trash') : v.type === 'spam' ? t('view.spam') : v.type === 'sent' ? t('view.sent') : v.type === 'ufolder' ? v.title
     : `${v.title || v.folder} · ${acc?.name || ''}`;
   $('#listTitle').title = $('#listTitle').textContent;
@@ -576,7 +576,7 @@ function renderList() {
   const firstRemote = state.messages.findIndex(m => m.remote);
   $('#messages').innerHTML = state.messages.map((m, i) => {
     const sep = i === firstRemote
-      ? `<li class="list-sep">${esc(t('list.more_on_server'))}</li>` : '';
+      ? `<li class="list-sep">${esc(t('list.moreOnServer'))}</li>` : '';
     const active = cur && cur.accountId === m.account_id && cur.folder === m.folder && cur.uid === m.uid;
     const sel = state.selected.has(keyOf(m));
     return `${sep}<li class="msg ${m.seen ? '' : 'unread'} ${active ? 'active' : ''} ${sel ? 'selected' : ''}" data-i="${i}" draggable="true">
@@ -584,7 +584,7 @@ function renderList() {
       <div class="row1">
         <span class="from">${esc(showTo ? t('list.to', { to: shortAddr(m.to) }) : shortAddr(m.from))}</span>
         ${m.has_attachments ? clipIcon() : ''}
-        <span class="date">${m.snoozed_until ? `<span title="${esc(t('list.snoozed_until', { when: fmtSnooze(m.snoozed_until) }))}">⏰</span> ` : ''}${m.flagged ? '★ ' : ''}${fmtDate(m.date)}</span>
+        <span class="date">${m.snoozed_until ? `<span title="${esc(t('list.snoozedUntil', { when: fmtSnooze(m.snoozed_until) }))}">⏰</span> ` : ''}${m.flagged ? '★ ' : ''}${fmtDate(m.date)}</span>
       </div>
       <div class="subject">${esc(shownSubject(m.subject))}</div>
       ${multi ? `<div class="acc-label">${esc(accById(m.account_id)?.name || '')}${isSearch && m.folder_label
@@ -598,7 +598,7 @@ function renderTrashFooter() {
   const isTrash = state.view.type === 'trash';
   $('#listFooter').hidden = !isTrash;
   if (!isTrash) return;
-  $('#trashInfo').textContent = state.trashTotal ? tn('trash.total', state.trashTotal) : t('trash.empty_folder');
+  $('#trashInfo').textContent = state.trashTotal ? tn('trash.total', state.trashTotal) : t('trash.emptyFolder');
   $('#emptyTrashBtn').disabled = !state.trashTotal;
 }
 
@@ -606,21 +606,21 @@ function renderTrashFooter() {
 function listTail() {
   if (state.listLoading) return `<li class="list-tail"><span class="spinner" aria-label="${esc(t('common.loading'))}"></span></li>`;
   if (state.loadMoreFailed)
-    return `<li class="list-tail">${esc(t('list.load_more_failed'))} <button class="link" id="retryMore">${esc(t('common.try_again'))}</button></li>`;
+    return `<li class="list-tail">${esc(t('list.loadMoreFailed'))} <button class="link" id="retryMore">${esc(t('common.tryAgain'))}</button></li>`;
   if (state.hasMore) return '';  // další stránky se načtou při rolování
   const rs = activeQuery() ? state.remoteStatus : null;
   if (rs === 'searching')
     return `<li class="list-tail"><span class="spinner small" aria-hidden="true"></span> ${state.messages.length
-      ? esc(t('list.searching_more')) : esc(t('list.searching_server'))}</li>`;
+      ? esc(t('list.searchingMore')) : esc(t('list.searchingServer'))}</li>`;
   const errs = rs?.errors?.length ? `<div class="error small">${rs.errors.map(esc).join('<br>')}</div>` : '';
-  if (rs?.error) return `<li class="list-tail error">${esc(t('list.server_search_failed', { error: rs.error }))}</li>`;
+  if (rs?.error) return `<li class="list-tail error">${esc(t('list.serverSearchFailed', { error: rs.error }))}</li>`;
   if (!state.messages.length && state.accounts.length && !state.listErrors.length)
-    return `<li class="list-tail">${esc(activeQuery() || isAdvSearch() ? t('list.nothing_found') : state.unreadOnly ? t('list.no_unread') : t('list.no_messages'))}${errs}</li>`;
+    return `<li class="list-tail">${esc(activeQuery() || isAdvSearch() ? t('list.nothingFound') : state.unreadOnly ? t('list.noUnread') : t('list.noMessages'))}${errs}</li>`;
   const more = state.searchTruncated ? `<div class="small">${esc(t('list.truncated'))}</div>` : '';
-  if (rs && !rs.found) return `<li class="list-tail muted">${esc(t('list.nothing_more_on_server'))}${more}${errs}</li>`;
+  if (rs && !rs.found) return `<li class="list-tail muted">${esc(t('list.nothingMoreOnServer'))}${more}${errs}</li>`;
   if (more) return `<li class="list-tail muted">${more}</li>`;
   if (isAdvSearch() && state.messages.length)
-    return `<li class="list-tail muted small">${esc(t('list.searched_local'))}</li>`;
+    return `<li class="list-tail muted small">${esc(t('list.searchedLocal'))}</li>`;
   return errs ? `<li class="list-tail">${errs}</li>` : '';
 }
 
@@ -656,7 +656,7 @@ function afterSelectionChange() {
   if (!items.length) return clearCurrent();
   state.current = null;
   showReaderPlaceholder(`<div class="empty"><b>${esc(tn('list.selected', items.length))}</b><br>
-    ${esc(t('list.selected_hint'))}</div>`);
+    ${esc(t('list.selectedHint'))}</div>`);
   clearContext('');
   updateActions();
   renderList();
@@ -733,7 +733,7 @@ function advSummary(a) {
   if (a.from) parts.push(t('search.from', { value: a.from }));
   if (a.to) parts.push(t('search.to', { value: a.to }));
   if (a.subject) parts.push(t('search.subject', { value: a.subject }));
-  if (a.att) parts.push(a.att === '1' ? t('search.with_attachment') : t('search.without_attachment'));
+  if (a.att) parts.push(a.att === '1' ? t('search.withAttachment') : t('search.withoutAttachment'));
   return parts.join(', ');
 }
 
@@ -759,7 +759,7 @@ $('#advSearchForm').addEventListener('submit', e => {
   for (const k of ADV_FIELDS) adv[k] = f.elements[k].value.trim().split(/\s+/).join(' ');
   adv.att = f.elements.att.value;
   if (!ADV_FIELDS.some(k => adv[k])) {
-    $('#advSearchError').textContent = t('search.fill_something');
+    $('#advSearchError').textContent = t('search.fillSomething');
     return;
   }
   $('#advSearchDialog').close();
@@ -819,7 +819,7 @@ function showReaderPlaceholder(html) {
   $('#reader').innerHTML = html;
 }
 
-function clearCurrent(text = t('common.vyberte_zpravu')) {
+function clearCurrent(text = t('common.selectMessage')) {
   state.current = null;
   state.selected = new Set();
   showReaderPlaceholder(`<div class="empty">${esc(text)}</div>`);
@@ -895,15 +895,15 @@ function renderReader() {
   const atts = data.attachments.map(a => {
     const risky = RISKY_EXT.test(a.filename);
     return `<a class="chip ${risky ? 'risky' : ''}" data-index="${a.index}" href="/api/accounts/${accountId}/messages/${data.uid}/attachments/${a.index}?folder=${enc(data.folder)}"
-        download="${esc(a.filename)}" ${risky ? `title="${esc(t('message.risky_attachment'))}"` : ''}>${risky ? '⚠' : '📎'} ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span></a>`;
+        download="${esc(a.filename)}" ${risky ? `title="${esc(t('message.riskyAttachment'))}"` : ''}>${risky ? '⚠' : '📎'} ${esc(a.filename)} <span class="muted">${fmtSize(a.size)}</span></a>`;
   }).join('');
   const remote = data.html && hasRemoteContent(data.html);
   const theme = data.html ? frameTheme(data.html) : 'light';
   const role = folderRole(accountId, data.folder);
   const folderNote = role && role !== 'inbox'
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
-  const bayesNote = data.bayes ? `<span class="tag folder spam" title="${esc(t('message.bayes_tokens', { tokens:
-      data.bayes.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') }))}">${esc(t('message.bayes_score', { score: Math.round(data.bayes.score * 100) }))}</span>` : '';
+  const bayesNote = data.bayes ? `<span class="tag folder spam" title="${esc(t('message.bayesTokens', { tokens:
+      data.bayes.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') }))}">${esc(t('message.bayesScore', { score: Math.round(data.bayes.score * 100) }))}</span>` : '';
 
   // záhlaví je společné pro obsah, akce i kontext
   $('#messageHead').hidden = false;
@@ -918,12 +918,12 @@ function renderReader() {
       ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
       ${data.snoozed_until ? `<div class="banner snooze">⏰ ${esc(t('message.snoozed', { when: fmtSnooze(data.snoozed_until) }))}
           <button class="link" data-act="unsnooze">${esc(t('message.unsnooze'))}</button></div>` : ''}
-      ${remote && !state.showImages ? `<div class="banner">${esc(t('message.images_blocked'))}
-          <button class="link" data-act="images">${esc(t('message.show_images'))}</button></div>` : ''}
-      ${theme === 'invert' ? `<div class="colors-note muted">${esc(t('message.colors_adjusted'))}
-          <button class="link" data-act="original-colors">${esc(t('message.show_original_colors'))}</button></div>`
-        : data.html && state.originalColors && darkQuery.matches ? `<div class="colors-note muted">${esc(t('message.colors_original'))}
-          <button class="link" data-act="dark-colors">${esc(t('message.show_dark'))}</button></div>` : ''}`;
+      ${remote && !state.showImages ? `<div class="banner">${esc(t('message.imagesBlocked'))}
+          <button class="link" data-act="images">${esc(t('message.showImages'))}</button></div>` : ''}
+      ${theme === 'invert' ? `<div class="colors-note muted">${esc(t('message.colorsAdjusted'))}
+          <button class="link" data-act="original-colors">${esc(t('message.showOriginalColors'))}</button></div>`
+        : data.html && state.originalColors && darkQuery.matches ? `<div class="colors-note muted">${esc(t('message.colorsOriginal'))}
+          <button class="link" data-act="dark-colors">${esc(t('message.showDark'))}</button></div>` : ''}`;
   $('#reader').innerHTML = `
     ${data.html ? `<iframe class="body-frame ${theme}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
                    <div class="link-status" hidden></div>`
@@ -990,18 +990,18 @@ function updateActions() {
   const sb = $('#actions [data-act="spam"]');
   const inSpam = state.view.type === 'spam';
   sb.classList.toggle('active', inSpam);
-  sb.querySelector('.label').textContent = inSpam ? t('action.not_spam') : t('view.spam');
-  sb.title = inSpam ? t('action.not_spam_title') : t('action.spam_title');
+  sb.querySelector('.label').textContent = inSpam ? t('action.notSpam') : t('view.spam');
+  sb.title = inSpam ? t('action.notSpamTitle') : t('action.spamTitle');
   for (const [cat, c] of Object.entries(CATEGORIES)) {
     const b = $(`#actions [data-act="${c.act}"]`);
     const on = !!state.current && inCategory(state.current, cat);
     b.classList.toggle('active', on);
     b.querySelector('.label').textContent = on ? c.off : c.title;
-    b.title = on ? t(`category.${cat}.off_title`) : t(`category.${cat}.on_title`);
+    b.title = on ? t(`category.${cat}.offTitle`) : t(`category.${cat}.onTitle`);
   }
 }
 
-const MOVE_DONE = { archive: 'action.archived', spam: 'action.moved_to_spam', delete: 'action.moved_to_trash' };
+const MOVE_DONE = { archive: 'action.archived', spam: 'action.movedToSpam', delete: 'action.movedToTrash' };
 
 /** Patří zpráva do kategorie? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
 function inCategory(cur, cat) {
@@ -1074,7 +1074,7 @@ async function snooze(cur, days, btn) {
   if (cur.data) cur.data.snoozed_until = until;
   const item = findListItem(cur);
   if (item) item.snoozed_until = until;
-  toast(t('list.snoozed_until', { when: fmtSnooze(until) }));
+  toast(t('list.snoozedUntil', { when: fmtSnooze(until) }));
   // zpráva zůstává v seznamu (přečtená), pokračujeme na další
   const idx = item ? state.messages.indexOf(item) : -1;
   const next = idx >= 0 ? state.messages[idx + 1] : null;
@@ -1118,7 +1118,7 @@ function removeAndAdvance(cur, alsoRemove = null) {
   if (state.current !== cur) return renderList();  // uživatel mezitím otevřel jinou zprávu
   const next = after || before;
   if (next) openMessage(next);
-  else clearCurrent(t('message.no_next'));
+  else clearCurrent(t('message.noNext'));
 }
 
 // Předmět bez Re:/Fw:/Odp: apod. – stejně jako mail.base_subject (podle něj se pravidlo pozná)
@@ -1136,9 +1136,9 @@ function askCategoryScope(cur, cat) {
   $('#categoryTitle').textContent = CATEGORIES[cat].title;
   $('#categoryMessage').textContent = [sender, subject].filter(Boolean).join(' – ');
   $('#categorySender').disabled = !sender;
-  $('#categorySenderNote').textContent = sender ? t('category.scope_sender', { sender }) : t('category.no_sender');
+  $('#categorySenderNote').textContent = sender ? t('category.scopeSender', { sender }) : t('category.noSender');
   $('#categorySubject').disabled = !subject;
-  $('#categorySubjectNote').textContent = subject ? t('category.scope_subject', { subject }) : t('category.no_subject');
+  $('#categorySubjectNote').textContent = subject ? t('category.scopeSubject', { subject }) : t('category.noSubject');
   const dlg = $('#categoryDialog');
   dlg.returnValue = '';
   dlg.showModal();
@@ -1157,8 +1157,8 @@ function askCustomCategoryRule(cur, cat, submit) {
   f.sender.value = m.from?.[0]?.addr || '';
   f.recipient.value = rcpts.find(a => a.toLowerCase() === me) || rcpts[0] || '';  // přednostně moje adresa
   f.subject.value = realSubject(m.subject) ? baseSubject(m.subject) : '';
-  $('#categoryRuleTitle').textContent = t('category.custom_rule_title', { category: CATEGORIES[cat].title });
-  $('#categoryRuleSave').textContent = t('category.custom_rule_save');
+  $('#categoryRuleTitle').textContent = t('category.customRuleTitle', { category: CATEGORIES[cat].title });
+  $('#categoryRuleSave').textContent = t('category.customRuleSave');
   $('#categoryRuleError').textContent = '';
   $('#categoryRuleSave').disabled = false;
   const dlg = $('#categoryRuleDialog');
@@ -1193,10 +1193,10 @@ async function categorize(cur, cat, btn) {
     toast(!value ? t(`category.${cat}.removed`)
       : other ? t(`category.${now}.stays`)
       : scope === 'message' ? t(`category.${cat}.added`)
-      : scope === 'custom' && res.view && now !== cat ? t('category.custom_no_match')
-      : scope === 'custom' ? t(`category.${cat}.custom_saved`)
-      : scope === 'sender' ? t(`category.${cat}.sender_saved`, { sender: res.sender })
-      : t(`category.${cat}.subject_saved`, { subject: res.subject }));
+      : scope === 'custom' && res.view && now !== cat ? t('category.customNoMatch')
+      : scope === 'custom' ? t(`category.${cat}.customSaved`)
+      : scope === 'sender' ? t(`category.${cat}.senderSaved`, { sender: res.sender })
+      : t(`category.${cat}.subjectSaved`, { subject: res.subject }));
     const v = state.view;
     const leaves = v.type === 'unified' && cur.folder === 'INBOX' && (now ? now !== v.filter : v.filter === cat);
     if (leaves) {
@@ -1221,8 +1221,8 @@ function watchSpamJob(jobId, sender) {
     try { job = await api('/api/jobs/' + jobId); } catch { clearInterval(timer); return; }
     if (job.status !== 'done') return;
     clearInterval(timer);
-    if (job.errors.length) toast(t('spam.bulk_failed', { errors: job.errors.join('; ') }), true);
-    else if (job.moved) toast(tn('spam.bulk_moved', job.moved, { sender }));
+    if (job.errors.length) toast(t('spam.bulkFailed', { errors: job.errors.join('; ') }), true);
+    else if (job.moved) toast(tn('spam.bulkMoved', job.moved, { sender }));
     if (job.moved) {
       loadList({ quiet: true });
       state.accounts.forEach(a => loadFolders(a.id));
@@ -1262,7 +1262,7 @@ document.addEventListener('keydown', e => {
 // ------------------------------------------------------------------ přesun více zpráv (drag & drop, Delete)
 
 /** Dialog s upozorněním; vrací true, pokud uživatel potvrdí. */
-function confirmDialog({ title = t('confirmTitle.upozorneni'), lines = [], question = '', ok = t('confirmOk.pokracovat') }) {
+function confirmDialog({ title = t('confirm.warning'), lines = [], question = '', ok = t('confirm.continue') }) {
   const dlg = $('#confirmDialog');
   $('#confirmTitle').textContent = title;
   $('#confirmLines').innerHTML = lines.map(l => `<li>${esc(l)}</li>`).join('');
@@ -1297,16 +1297,16 @@ function removeItems(items) {
   if (!affectsOpen) return renderList();
   if (!cur && state.selected.size) return afterSelectionChange();
   const next = idx >= 0 ? (state.messages[idx] || state.messages[idx - 1]) : null;
-  if (next) openMessage(next); else clearCurrent(t('message.no_next'));
+  if (next) openMessage(next); else clearCurrent(t('message.noNext'));
 }
 
 function targetLabel(target) {
-  if (target.type === 'trash') return state.view.type === 'trash' ? t('move.deleted_permanently') : t('move.to_trash');
-  if (target.type === 'spam') return t('move.to_spam');
-  if (state.view.type === 'spam' && target.view === 'all' && !target.account_id) return t('move.not_spam');
-  if (target.type === 'ufolder') return t('move.to_folder', { folder: state.userFolders.find(f => f.id === target.id)?.name || '' });
-  if (target.account_id) { const a = accById(target.account_id); return t('move.to_account_inbox', { account: a?.name || a?.email || '' }); }
-  return t(`move.to_${target.view}`);
+  if (target.type === 'trash') return state.view.type === 'trash' ? t('move.deletedPermanently') : t('move.toTrash');
+  if (target.type === 'spam') return t('move.toSpam');
+  if (state.view.type === 'spam' && target.view === 'all' && !target.account_id) return t('move.notSpam');
+  if (target.type === 'ufolder') return t('move.toFolder', { folder: state.userFolders.find(f => f.id === target.id)?.name || '' });
+  if (target.account_id) { const a = accById(target.account_id); return t('move.toAccountInbox', { account: a?.name || a?.email || '' }); }
+  return t(`move.to.${target.view}`);
 }
 
 /** Přesune (nebo smaže) zprávy. Nejdřív se zeptá serveru, co by se s nimi hned stalo (smazání starých
@@ -1321,10 +1321,10 @@ async function moveItems(items, target) {
   if (preview.warnings.length) {
     const permanent = target.type === 'trash';
     const ok = await confirmDialog({
-      title: permanent ? t('move.permanent_title') : t('confirmTitle.upozorneni'),
+      title: permanent ? t('move.permanentTitle') : t('confirm.warning'),
       lines: preview.warnings,
-      question: permanent ? t('move.permanent_question') : tn('move.anyway_question', items.length),
-      ok: permanent ? t('move.permanent_ok') : t('move.anyway_ok'),
+      question: permanent ? t('move.permanentQuestion') : tn('move.anywayQuestion', items.length),
+      ok: permanent ? t('move.permanentOk') : t('move.anywayOk'),
     });
     if (!ok) return;
   }
@@ -1425,13 +1425,13 @@ $('#accounts').addEventListener('drop', e => {
 $('#emptyTrashBtn').addEventListener('click', async () => {
   const n = state.trashTotal;
   const ok = await confirmDialog({
-    title: t('trash.empty_title'),
-    lines: [tn('trash.empty_line', n)],
-    question: t('trash.empty_question'),
-    ok: t('emptyTrashBtn.vyprazdnit'),
+    title: t('trash.emptyTitle'),
+    lines: [tn('trash.emptyLine', n)],
+    question: t('trash.emptyQuestion'),
+    ok: t('trash.empty'),
   });
   if (!ok) return;
-  if (state.view.type === 'trash') { state.messages = []; state.hasMore = false; clearCurrent(t('trash.is_empty')); }
+  if (state.view.type === 'trash') { state.messages = []; state.hasMore = false; clearCurrent(t('trash.isEmpty')); }
   state.trashTotal = 0;
   renderSidebar();
   renderList();
@@ -1445,11 +1445,11 @@ $('#emptyTrashBtn').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ sloupec Kontext
 
-const REASONS = { mine: 'context.reason_mine', cc: 'context.reason_cc' };
+const REASONS = { mine: 'context.reasonMine', cc: 'context.reasonCc' };
 const HIDDEN_REASONS = ['sender', 'subject'];  // důvody, které se jako štítek nezobrazují
 let ctxToken = 0;
 
-function clearContext(text = t('common.vyberte_zpravu')) {
+function clearContext(text = t('common.selectMessage')) {
   ctxToken++;
   state.context = [];
   $('#contextCount').textContent = '';
@@ -1480,7 +1480,7 @@ function renderContext() {
   $('#contextBody').innerHTML = items.map((m, i) => {
     const me = (accById(m.account_id)?.email || '').toLowerCase();
     const fromMe = m.from[0]?.addr.toLowerCase() === me;
-    const who = fromMe ? t('context.me_to', { to: shortAddr(m.to) }) : shortAddr(m.from);
+    const who = fromMe ? t('context.meTo', { to: shortAddr(m.to) }) : shortAddr(m.from);
     const tags = m.reasons.filter(r => !HIDDEN_REASONS.includes(r)).map(r => `<span class="tag">${esc(REASONS[r] ? t(REASONS[r]) : r)}</span>`);
     if (m.folder_role !== 'inbox')
       tags.unshift(`<span class="tag folder ${m.folder_role === 'junk' ? 'spam' : ''}">${esc(m.folder_display)}</span>`);
@@ -1503,7 +1503,7 @@ $('#contextBody').addEventListener('click', e => {
 
 function quote(d) {
   const who = d.from[0] ? (d.from[0].name || d.from[0].addr) : '';
-  return `\n\n${t('compose.quote_header', { date: fmtFull(d.date), who })}\n` + (d.text || '').split('\n').map(l => '> ' + l).join('\n');
+  return `\n\n${t('compose.quoteHeader', { date: fmtFull(d.date), who })}\n` + (d.text || '').split('\n').map(l => '> ' + l).join('\n');
 }
 
 function reply(all) {
@@ -1520,7 +1520,7 @@ function reply(all) {
     }
   }
   openCompose({
-    title: all ? t('actions.odpovedet_vsem') : t('compose.reply'),
+    title: all ? t('actions.replyAll') : t('compose.reply'),
     accountId, to: primary.map(fmtAddr).join(', '), cc: cc.join(', '),
     subject: /^(re|odp):/i.test(realSubject(d.subject)) ? d.subject : 'Re: ' + realSubject(d.subject),
     body: quote(d),
@@ -1533,11 +1533,11 @@ function forward() {
   const { data: d, accountId, folder, uid } = state.current;
   const list = l => l.map(a => (a.name ? `${a.name} <${a.addr}>` : a.addr)).join(', ');
   openCompose({
-    title: t('actions.preposlat'),
+    title: t('actions.forward'),
     accountId,
     subject: /^(fwd?|př):/i.test(realSubject(d.subject)) ? d.subject : 'Fwd: ' + realSubject(d.subject),
-    body: `\n\n---------- ${t('compose.fwd_header')} ----------\n${t('message.from')}: ${list(d.from)}\n${t('compose.fwd_date')}: ${fmtFull(d.date)}\n` +
-          `${t('common.predmet')}: ${realSubject(d.subject)}\n${t('message.to')}: ${list(d.to)}\n${d.cc.length ? `${t('message.cc')}: ${list(d.cc)}\n` : ''}\n${d.text}`,
+    body: `\n\n---------- ${t('compose.fwdHeader')} ----------\n${t('message.from')}: ${list(d.from)}\n${t('compose.fwdDate')}: ${fmtFull(d.date)}\n` +
+          `${t('common.subject')}: ${realSubject(d.subject)}\n${t('message.to')}: ${list(d.to)}\n${d.cc.length ? `${t('message.cc')}: ${list(d.cc)}\n` : ''}\n${d.text}`,
     forward: d.attachments.length ? { account_id: accountId, folder, uid, attachments: d.attachments.slice() } : null,
   });
 }
@@ -1553,7 +1553,7 @@ const composeOpen = () => state.composeWins.length > 0;
 const anyModalOpen = () => !!document.querySelector('dialog[open]') || composeOpen();
 
 function openCompose(opts = {}) {
-  if (!state.accounts.length) { toast(t('compose.add_account_first'), true); return openAccountDialog(); }
+  if (!state.accounts.length) { toast(t('compose.addAccountFirst'), true); return openAccountDialog(); }
   const el = $('#composeTpl').content.firstElementChild.cloneNode(true);
   const f = el.querySelector('form');
   const win = { el, form: f,
@@ -1562,7 +1562,7 @@ function openCompose(opts = {}) {
   f.account_id.innerHTML = state.accounts.map(a =>
     `<option value="${a.id}" ${a.id === defaultAcc ? 'selected' : ''}>${esc(a.display_name ? `${a.display_name} <${a.email}>` : a.email)}</option>`).join('');
   for (const k of ['to', 'cc', 'bcc', 'subject', 'body']) f[k].value = opts[k] || '';
-  el.querySelector('.compose-title').textContent = opts.title || t('composeTpl.nova_zprava');
+  el.querySelector('.compose-title').textContent = opts.title || t('compose.newTitle');
   el.querySelector('.compose-error').textContent = opts.error || '';
   wireComposeWindow(win);
   renderComposeAttachments(win);
@@ -1675,7 +1675,7 @@ function wireComposeWindow(win) {
       renderComposeAttachments(win);
       focusCompose(win);
     }
-    if (folders.length) toast(t('compose.no_folders', { folders: folders.join(', ') }), true);
+    if (folders.length) toast(t('compose.noFolders', { folders: folders.join(', ') }), true);
   });
 
   el.querySelectorAll('input[data-addr]').forEach(bindAddrInput);
@@ -1694,14 +1694,14 @@ document.addEventListener('drop', e => { if (foreignDrop(e)) e.preventDefault();
 const readBase64 = file => new Promise((resolve, reject) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result).split(',', 2)[1] || '');
-  r.onerror = () => reject(new Error(t('compose.file_read_failed', { name: file.name })));
+  r.onerror = () => reject(new Error(t('compose.fileReadFailed', { name: file.name })));
   r.readAsDataURL(file);
 });
 
 async function sendCompose(win) {
   const f = win.form, c = win.data, btn = f.querySelector('.send-btn'), err = win.el.querySelector('.compose-error');
   if (!f.to.value.trim() && !f.cc.value.trim() && !f.bcc.value.trim()) {
-    err.textContent = t('compose.no_recipient');
+    err.textContent = t('compose.noRecipient');
     return;
   }
   btn.disabled = true;
@@ -1726,7 +1726,7 @@ async function sendCompose(win) {
   } catch (e) {
     err.textContent = e.message;
     btn.disabled = false;
-    btn.textContent = t('composeTpl.odeslat');
+    btn.textContent = t('compose.send');
   }
 }
 
@@ -1766,7 +1766,7 @@ function afterSent(res, accountId) {
 /** Adresáti pro lištu: jména / adresy bez lomených závorek, nejvýš dva a počet dalších. */
 function shortRecipients(v) {
   const parts = v.split(/[,;]/).map(p => p.replace(/<.*?>/, '').replace(/"/g, '').trim() || p.trim()).filter(Boolean);
-  return parts.length > 2 ? tn('compose.recipients_more', parts.length - 2, { names: parts.slice(0, 2).join(', ') })
+  return parts.length > 2 ? tn('compose.recipientsMore', parts.length - 2, { names: parts.slice(0, 2).join(', ') })
                           : parts.join(', ');
 }
 
@@ -1774,7 +1774,7 @@ function startPendingSend(id, draft) {
   const bar = document.createElement('div');
   bar.className = 'send-bar';
   bar.innerHTML = `<span class="send-text"></span>
-    <button type="button" class="btn small">${esc(t('compose.cancel_send'))}</button>
+    <button type="button" class="btn small">${esc(t('compose.cancelSend'))}</button>
     <span class="send-progress" style="animation-duration:${SEND_DELAY}s"></span>`;
   const text = bar.querySelector('.send-text');
   const label = esc(shownSubject(draft.fields.subject));
@@ -1782,7 +1782,7 @@ function startPendingSend(id, draft) {
   const end = Date.now() + SEND_DELAY * 1000;
   const tick = () => {
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-    text.innerHTML = `<b>${label}</b> <span class="muted">→ ${to}</span> · ${esc(tn('compose.sends_in', left))}`;
+    text.innerHTML = `<b>${label}</b> <span class="muted">→ ${to}</span> · ${esc(tn('compose.sendsIn', left))}`;
   };
   tick();
   const timer = setInterval(tick, 250);
@@ -1807,12 +1807,12 @@ function startPendingSend(id, draft) {
     done = true;
     clearInterval(timer);
     bar.remove();  // nejdřív zavřít lištu, teprve pak odeslat
-    toast(t('compose.sending_subject', { subject: shownSubject(draft.fields.subject) }));
+    toast(t('compose.sendingSubject', { subject: shownSubject(draft.fields.subject) }));
     let res;
     try {
       res = await api(`/api/send/${id}/commit`, { method: 'POST' });
     } catch (err) {
-      toast(t('compose.send_failed'), true);
+      toast(t('compose.sendFailed'), true);
       return restoreCompose(draft, err.message);
     }
     afterSent(res, draft.fields.account_id);
@@ -1977,8 +1977,8 @@ function applyPreset(key) {
   $('#presetNote').textContent = editingOauth || !p?.note ? '' : t(p.note);
   $('#googleBox').hidden = !(key === 'gmail' || editingOauth);
   if (!editingOauth) {
-    const base = state.editingId ? t('account.keep_password') : '*';
-    $('#pwHint').textContent = key === 'gmail' ? t('account.gmail_app_password', { hint: base }) : base;
+    const base = state.editingId ? t('account.keepPassword') : '*';
+    $('#pwHint').textContent = key === 'gmail' ? t('account.gmailAppPassword', { hint: base }) : base;
   }
   if (!p) return;
   [f.imap_host.value, f.imap_port.value, f.imap_security.value] = p.imap;
@@ -2001,8 +2001,8 @@ function updatePasswordRequirement() {
   if (!state.editingId) return;
   const changed = loginChanged(), pw = $('#accountForm').elements.namedItem('password'), hint = $('#pwHint');
   pw.required = changed;
-  if (changed) { hint.textContent = t('account.password_again'); hint.dataset.changed = '1'; }
-  else if (hint.dataset.changed) { hint.textContent = t('account.keep_password'); delete hint.dataset.changed; }
+  if (changed) { hint.textContent = t('account.passwordAgain'); hint.dataset.changed = '1'; }
+  else if (hint.dataset.changed) { hint.textContent = t('account.keepPassword'); delete hint.dataset.changed; }
 }
 $('#accountForm').addEventListener('input', updatePasswordRequirement);
 $('#accountForm').addEventListener('change', updatePasswordRequirement);
@@ -2012,13 +2012,13 @@ function openAccountDialog(id = null) {
   f.reset();
   state.editingId = id;
   const acc = id ? accById(id) : null;
-  $('#accountTitle').textContent = acc ? t('account.edit_title') : t('accountTitle.pridat_ucet');
+  $('#accountTitle').textContent = acc ? t('account.editTitle') : t('account.addTitle');
   $('#deleteAccountBtn').hidden = !acc;
-  $('#deleteAccountBtn').textContent = t('deleteAccountBtn.smazat_ucet');
+  $('#deleteAccountBtn').textContent = t('account.delete');
   delete $('#deleteAccountBtn').dataset.confirm;
   $('#accountError').textContent = '';
   $('#presetNote').textContent = '';
-  $('#pwHint').textContent = acc ? t('account.keep_password') : '*';
+  $('#pwHint').textContent = acc ? t('account.keepPassword') : '*';
   delete $('#pwHint').dataset.changed;
   f.elements.namedItem('password').required = false;
   if (acc) for (const k of Object.keys(acc)) {
@@ -2033,9 +2033,9 @@ function openAccountDialog(id = null) {
   for (const k of [...LOGIN_FIELDS, 'email', 'preset']) f.elements.namedItem(k).disabled = oauth;
   $('#googleConfig').hidden = true;
   $('#googleOrPassword').hidden = oauth;
-  $('#googleBtnText').textContent = oauth ? t('account.google_relogin') : t('googleBtnText.prihlasit_pres_google');
-  $('#googleHint').textContent = oauth ? '' : t('googleHint.bez_hesla_adresa_a');
-  setGoogleStatus(oauth ? t('account.google_connected_note') : '', oauth ? 'ok' : '');
+  $('#googleBtnText').textContent = oauth ? t('account.googleRelogin') : t('account.googleSignIn');
+  $('#googleHint').textContent = oauth ? '' : t('account.googleHint');
+  setGoogleStatus(oauth ? t('account.googleConnectedNote') : '', oauth ? 'ok' : '');
   const isGmail = acc && (acc.imap_host === 'imap.gmail.com');
   if (isGmail) f.elements.namedItem('preset').value = 'gmail';
   $('#googleBox').hidden = !(oauth || isGmail);
@@ -2069,20 +2069,20 @@ async function googleLogin() {
     let opened;
     if (desktop()) opened = await desktop().open_external(url);  // systémový prohlížeč
     else opened = !!window.open(url, '_blank');
-    $('#googleStatus').innerHTML = esc(t('account.google_finish_in_browser')) +
-      (opened ? '' : ` <a href="${esc(url)}" target="_blank" rel="noopener">${esc(t('account.google_open_login'))}</a>`);
+    $('#googleStatus').innerHTML = esc(t('account.googleFinishInBrowser')) +
+      (opened ? '' : ` <a href="${esc(url)}" target="_blank" rel="noopener">${esc(t('account.googleOpenLogin'))}</a>`);
     $('#googleStatus').className = 'note';
     stopGooglePolling();
     const started = Date.now();
     googlePoll = setInterval(async () => {
-      if (Date.now() - started > 10 * 60 * 1000) { stopGooglePolling(); setGoogleStatus(t('account.google_expired'), 'bad'); return; }
+      if (Date.now() - started > 10 * 60 * 1000) { stopGooglePolling(); setGoogleStatus(t('account.googleExpired'), 'bad'); return; }
       let res;
       try { res = await api('/api/oauth/status?state=' + enc(st)); } catch { return; }
       if (res.status === 'pending') return;
       stopGooglePolling();
       if (res.status === 'error') { setGoogleStatus(res.error, 'bad'); return; }
       $('#accountDialog').close();
-      toast(t('account.google_connected'));
+      toast(t('account.googleConnected'));
       delete state.folders[res.account_id];
       await loadAccounts();
       loadList({ quiet: true });
@@ -2133,7 +2133,7 @@ $('#accountForm').addEventListener('submit', async e => {
     $('#accountError').textContent = err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = t('common.ulozit');
+    btn.textContent = t('common.save');
   }
 });
 
@@ -2141,7 +2141,7 @@ $('#deleteAccountBtn').addEventListener('click', async e => {
   const btn = e.currentTarget;
   if (!btn.dataset.confirm) {  // dvoukrokové potvrzení
     btn.dataset.confirm = '1';
-    btn.textContent = t('account.really_delete');
+    btn.textContent = t('account.reallyDelete');
     return;
   }
   const id = state.editingId;
@@ -2187,13 +2187,13 @@ function openRuleDialog(cur) {
   const folders = state.userFolders.filter(x => accById(x.account_id));
   $('#ruleFolder').innerHTML = folders.length
     ? folders.map(x => `<option value="${x.id}" ${v.type === 'ufolder' && v.id === x.id ? 'selected' : ''}>${esc(x.name)} · ${esc(accById(x.account_id)?.name || '')}</option>`).join('')
-    : `<option value="">${esc(t('rule.no_folders'))}</option>`;
+    : `<option value="">${esc(t('rule.noFolders'))}</option>`;
   $('#ruleSave').disabled = !folders.length;
   f.namedItem('sender').value = m.from?.[0]?.addr || '';
   const recips = [...new Set([...(m.to || []), ...(m.cc || [])].map(a => (a.addr || '').toLowerCase()).filter(Boolean))];
   $('#ruleRecipient').innerHTML = recips.length
     ? recips.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')
-    : `<option value="">${esc(t('rule.no_recipients'))}</option>`;
+    : `<option value="">${esc(t('rule.noRecipients'))}</option>`;
   $('#ruleForm').querySelector('input[name="kind"][value="recipient"]').disabled = !recips.length;
   f.namedItem('subject').value = stripPrefixes(realSubject(m.subject));
   syncRuleForm();
@@ -2212,8 +2212,8 @@ function syncRuleForm() {
   const inTarget = folder && ruleFor && folder.account_id === ruleFor.accountId && folder.imap_name === ruleFor.folder;
   const when = f.namedItem('when').value === 'read' ? 'read' : 'now';
   $('#ruleNote').textContent = folder
-    ? (inTarget ? t('rule.already_in_folder') : t('rule.moves_now', { folder: folder.name }))
-      + ' ' + t(`rule.next.${kind}_${when}`)
+    ? (inTarget ? t('rule.alreadyInFolder') : t('rule.movesNow', { folder: folder.name }))
+      + ' ' + t(`rule.next.${kind}.${when}`)
     : '';
 }
 
@@ -2233,7 +2233,7 @@ $('#ruleForm').addEventListener('submit', async e => {
   const kind = f.namedItem('kind').value;
   const value = f.namedItem(kind).value.trim();
   if (!cur || !target) return;
-  if (!value) { $('#ruleError').textContent = t('rule.fill_value'); return; }
+  if (!value) { $('#ruleError').textContent = t('rule.fillValue'); return; }
   const btn = $('#ruleSave');
   btn.disabled = true;
   $('#ruleError').textContent = '';
@@ -2247,7 +2247,7 @@ $('#ruleForm').addEventListener('submit', async e => {
   } finally { btn.disabled = false; }
   $('#ruleDialog').close();
   if (res.moved) removeAndAdvance(cur);
-  toast((res.moved ? t('move.to_folder', { folder: res.folder }) + '. ' : '') + t(`rule.toast.${kind}`, { value: res.value, folder: res.folder }));
+  toast((res.moved ? t('move.toFolder', { folder: res.folder }) + '. ' : '') + t(`rule.toast.${kind}`, { value: res.value, folder: res.folder }));
   loadUserFolders();
   loadList({ quiet: true, keepLoaded: true });  // pravidlo mohlo hned přesunout i další zprávy
 });
@@ -2274,7 +2274,7 @@ async function fillServerFolders(selected) {
   const list = (state.folders[accId] || []).filter(x => !SYSTEM_ROLES.includes(x.role));
   $('#folderServer').innerHTML = list.map(x =>
     `<option value="${esc(x.name)}" ${x.name === selected ? 'selected' : ''}>${esc(x.path)}</option>`).join('')
-    + `<option value="__new__" ${!list.some(x => x.name === selected) ? 'selected' : ''}>${esc(t('folder.new_on_server'))}</option>`;
+    + `<option value="__new__" ${!list.some(x => x.name === selected) ? 'selected' : ''}>${esc(t('folder.newOnServer'))}</option>`;
   syncFolderTarget();
 }
 
@@ -2286,7 +2286,7 @@ function syncFolderTarget() {
   const acc = accById($('#folderAccount').value);
   const others = state.accounts.length > 1;
   $('#folderTargetNote').textContent = acc
-    ? t('folder.target_note', { account: acc.name || acc.email }) + (others ? ' ' + t('folder.target_note_others') : '')
+    ? t('folder.targetNote', { account: acc.name || acc.email }) + (others ? ' ' + t('folder.targetNoteOthers') : '')
     : '';
 }
 
@@ -2303,15 +2303,15 @@ async function openFolderDialog(id) {
   $('#folderAccount').innerHTML = state.accounts.map(a =>
     `<option value="${a.id}" ${a.id === accId ? 'selected' : ''}>${esc(a.name || a.email)}</option>`).join('');
   f.namedItem('mark_read').checked = !!folder?.mark_read;
-  $('#folderTitle').textContent = folder ? t('folder.title', { name: folder.name }) : t('folderTitle.nova_slozka');
-  $('#folderSaveBtn').textContent = folder ? t('folder.save_changes') : t('folderSaveBtn.vytvorit_slozku');
+  $('#folderTitle').textContent = folder ? t('folder.title', { name: folder.name }) : t('folder.newTitle');
+  $('#folderSaveBtn').textContent = folder ? t('folder.saveChanges') : t('folder.create');
   $('#folderDeleteBtn').hidden = !folder;
   $('#folderDeletePanel').hidden = true;
   $('#folderRuleKind').value = 'sender';
   $('#folderRuleWhen').value = 'now';
   $('#folderRuleInput').placeholder = t(RULE_PLACEHOLDERS.sender);
   $('#folderError').textContent = folder && !folder.account_id
-    ? t('folder.legacy_no_account') : '';
+    ? t('folder.legacyNoAccount') : '';
   $('#folderRuleInput').value = '';
   $('#folderRules').innerHTML = '';
   $('#folderRulesCount').textContent = '';
@@ -2339,12 +2339,12 @@ async function renderFolderRules(rules) {
     <li class="rule">
       <div class="rule-main">
         <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
-        <div class="rule-meta">${esc(FOLDER_RULE_KINDS[r.kind] ? t(FOLDER_RULE_KINDS[r.kind]) : r.kind)} · ${esc(r.after_read ? t('rule.after_read') : t('folderRuleWhen.ihned'))} · ${esc(t('rule.added', { date: fmtDay(r.created) }))} · ${esc(t('rule.moved_times', { count: r.hits }))}</div>
+        <div class="rule-meta">${esc(FOLDER_RULE_KINDS[r.kind] ? t(FOLDER_RULE_KINDS[r.kind]) : r.kind)} · ${esc(r.after_read ? t('rule.afterRead') : t('rule.immediately'))} · ${esc(t('rule.added', { date: fmtDay(r.created) }))} · ${esc(t('rule.movedTimes', { count: r.hits }))}</div>
       </div>
       ${editRuleButton('folder', r.id)}
-      <button type="button" class="btn danger" data-folder-rule="${r.id}">${esc(t('actions.smazat'))}</button>
+      <button type="button" class="btn danger" data-folder-rule="${r.id}">${esc(t('common.delete'))}</button>
     </li>`).join('')
-    : `<li class="empty-rules">${esc(t('folder.no_rules'))}</li>`;
+    : `<li class="empty-rules">${esc(t('folder.noRules'))}</li>`;
 }
 
 $('#folderForm').addEventListener('submit', async e => {
@@ -2377,8 +2377,8 @@ $('#folderForm').addEventListener('submit', async e => {
   }
 });
 
-const FOLDER_RULE_KINDS = { sender: 'common.odesilatel', recipient: 'categoryRuleForm.prijemce', subject: 'common.cast_predmetu' };
-const RULE_PLACEHOLDERS = { sender: 'common.odesilatel_example_cz', recipient: 'rule.placeholder_recipient', subject: 'ruleSubject.napr_projekt_alfa' };
+const FOLDER_RULE_KINDS = { sender: 'common.sender', recipient: 'common.recipient', subject: 'common.subjectPart' };
+const RULE_PLACEHOLDERS = { sender: 'common.senderPlaceholder', recipient: 'rule.placeholderRecipient', subject: 'rule.subjectPlaceholder' };
 $('#folderRuleKind').addEventListener('change', e => {
   $('#folderRuleInput').placeholder = t(RULE_PLACEHOLDERS[e.target.value]);
   $('#folderRuleInput').focus();
@@ -2420,11 +2420,11 @@ $('#folderDeleteBtn').addEventListener('click', () => {
   const acc = accById(folder?.account_id);
   const server = $('#folderDeleteServer');
   server.disabled = !acc;
-  server.textContent = t('folderDeleteServer.smazat_i_na_serveru');
+  server.textContent = t('folder.deleteServer');
   delete server.dataset.confirm;
   $('#folderDeleteNote').textContent = acc
-    ? tn('folder.delete_note', folder.total ?? 0, { folder: decodeFolderName(folder.imap_name), account: acc.name || acc.email })
-    : t('folder.delete_no_account');
+    ? tn('folder.deleteNote', folder.total ?? 0, { folder: decodeFolderName(folder.imap_name), account: acc.name || acc.email })
+    : t('folder.deleteNoAccount');
   $('#folderDeletePanel').hidden = false;
   $('#folderDeleteBtn').hidden = true;
 });
@@ -2441,12 +2441,12 @@ $('#folderDeletePanel').addEventListener('click', async e => {
   if (onServer && !b.dataset.confirm) {  // nevratnější volba – potvrdit druhým kliknutím
     const folder = state.userFolders.find(f => f.id === state.editingFolder);
     b.dataset.confirm = '1';
-    b.textContent = tn('folder.delete_confirm', folder?.total ?? 0);
+    b.textContent = tn('folder.deleteConfirm', folder?.total ?? 0);
     return;
   }
   try {
     await api('/api/user-folders/' + state.editingFolder + (onServer ? '?server=1' : ''), { method: 'DELETE' });
-    toast(onServer ? t('folder.deleting_on_server') : t('folder.removed_from_app'));
+    toast(onServer ? t('folder.deletingOnServer') : t('folder.removedFromApp'));
     state.editingFolder = null;
     await loadUserFolders();
     if (state.userFolders.length) openFolderDialog(state.userFolders[0].id);
@@ -2456,7 +2456,7 @@ $('#folderDeletePanel').addEventListener('click', async e => {
 
 // ------------------------------------------------------------------ nastavení
 
-const RULE_KINDS = { sender: 'common.odesilatel', subject: 'common.predmet' };
+const RULE_KINDS = { sender: 'common.sender', subject: 'common.subject' };
 
 let settingsSection = 'app';
 
@@ -2507,7 +2507,7 @@ async function renderLanguages() {
 
 $('#languageSelect').addEventListener('change', async e => {
   if (state.composeWins?.length) {
-    toast(t('settings.language.close_compose'), true);
+    toast(t('settings.language.closeCompose'), true);
     e.target.value = state.settings?.language ?? '';
     return;
   }
@@ -2532,7 +2532,7 @@ $('#appShortcuts').addEventListener('click', async e => {
   b.disabled = true;
   try {
     await api('/api/app/shortcut', { method: 'POST', body: { where: b.dataset.shortcut } });
-    toast(b.dataset.shortcut === 'desktop' ? t('settings.shortcut.added_desktop') : t('settings.shortcut.added_start'));
+    toast(b.dataset.shortcut === 'desktop' ? t('settings.shortcut.addedDesktop') : t('settings.shortcut.addedStart'));
     renderAppInfo();
   } catch (err) { toast(err.message, true); }
   finally { b.disabled = false; }
@@ -2544,7 +2544,7 @@ function renderSettingsFolders() {
     const acc = accById(f.account_id);
     return `<button type="button" data-section="folder" data-folder-id="${f.id}" title="${esc(f.name)}">
       <svg class="folder-ico" viewBox="0 0 24 24" style="color:${acc ? accColor(acc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      <span class="label">${esc(f.name)}</span>${acc ? '' : `<span class="warn-mark" title="${esc(t('folder.set_target_account'))}">!</span>`}</button>`;
+      <span class="label">${esc(f.name)}</span>${acc ? '' : `<span class="warn-mark" title="${esc(t('folder.setTargetAccount'))}">!</span>`}</button>`;
   }).join('');
   markSettingsNav();
 }
@@ -2613,9 +2613,9 @@ async function renderBayesStatus() {
   const b = st.bootstrap;
   let text;
   if (b.status === 'running') text = t('bayes.learning', { done: b.done, total: b.total || '?' });
-  else if (!st.ready) text = t('bayes.not_ready', { spam: st.spam, ham: st.ham, min_spam: st.min_spam, min_ham: st.min_ham });
+  else if (!st.ready) text = t('bayes.notReady', { spam: st.spam, ham: st.ham, min_spam: st.min_spam, min_ham: st.min_ham });
   else text = t('bayes.ready', { spam: st.spam, ham: st.ham, tokens: st.tokens }) + ' '
-    + tn('bayes.moved_week', st.moved_week);
+    + tn('bayes.movedWeek', st.moved_week);
   el.className = 'note' + (st.ready ? ' ok' : '');
   el.textContent = text;
   if (b.status === 'running' && $('#settingsDialog').open) bayesTimer = setTimeout(renderBayesStatus, 1500);
@@ -2623,9 +2623,9 @@ async function renderBayesStatus() {
 
 $('#bayesReset').addEventListener('click', async () => {
   const ok = await confirmDialog({
-    title: t('bayes.reset_title'),
-    lines: [t('bayes.reset_line')],
-    question: t('bayes.reset_question'), ok: t('bayes.reset_ok'),
+    title: t('bayes.resetTitle'),
+    lines: [t('bayes.resetLine')],
+    question: t('bayes.resetQuestion'), ok: t('bayes.resetOk'),
   });
   if (!ok) return;
   try { await api('/api/bayes/reset', { method: 'POST' }); } catch (err) { return toast(err.message, true); }
@@ -2656,12 +2656,12 @@ async function renderCategoryRules(cat) {
       <div class="rule-main">
         <div class="rule-value" title="${esc(categoryRuleText(r))}">${esc(categoryRuleText(r))}</div>
         <div class="rule-meta">${esc(t('rule.added', { date: fmtDay(r.created) }))}
-          · ${esc(tn('rule.in_inbox', r.messages))}</div>
+          · ${esc(tn('rule.inInbox', r.messages))}</div>
       </div>
-      <button type="button" class="btn" data-edit-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.edit_title'))}">${esc(t('rule.edit'))}</button>
-      <button type="button" class="btn danger" data-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.delete_title'))}">${esc(t('actions.smazat'))}</button>
+      <button type="button" class="btn" data-edit-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.editTitle'))}">${esc(t('rule.edit'))}</button>
+      <button type="button" class="btn danger" data-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.deleteTitle'))}">${esc(t('common.delete'))}</button>
     </li>`).join('')
-    : `<li class="empty-rules">${esc(t(`category.${cat}.no_rules`))}</li>`;
+    : `<li class="empty-rules">${esc(t(`category.${cat}.noRules`))}</li>`;
 }
 
 document.querySelectorAll('#unimportantRules, #notificationsRules').forEach(list => list.addEventListener('click', async e => {
@@ -2689,8 +2689,8 @@ async function afterCategoryRuleChange(cat) {
 const ruleCache = {};  // poslední vykreslená pravidla podle seznamu: spam / unimportant / notifications / folder
 
 /** Popis pravidla Nedůležitých / Notifikací: vyplněné podmínky. */
-const categoryRuleText = r => [r.sender && t('rule.text_sender', { value: r.sender }), r.recipient && t('rule.text_recipient', { value: r.recipient }),
-                               r.subject && t('rule.text_subject', { value: r.subject })].filter(Boolean).join(' · ');
+const categoryRuleText = r => [r.sender && t('rule.textSender', { value: r.sender }), r.recipient && t('rule.textRecipient', { value: r.recipient }),
+                               r.subject && t('rule.textSubject', { value: r.subject })].filter(Boolean).join(' · ');
 
 // --- úprava pravidla Nedůležitých / Notifikací v modálním okně
 let editingCategoryRule = null;  // { cat, id } úprava z Nastavení, nebo { cat, create } vlastní pravidlo u zprávy
@@ -2705,8 +2705,8 @@ $('#settingsDialog').addEventListener('click', e => {
   f.sender.value = r.sender;
   f.recipient.value = r.recipient;
   f.subject.value = r.subject;
-  $('#categoryRuleTitle').textContent = t('rule.edit_category_title', { category: CATEGORIES[cat].title });
-  $('#categoryRuleSave').textContent = t('common.ulozit');
+  $('#categoryRuleTitle').textContent = t('rule.editCategoryTitle', { category: CATEGORIES[cat].title });
+  $('#categoryRuleSave').textContent = t('common.save');
   $('#categoryRuleError').textContent = '';
   $('#categoryRuleSave').disabled = false;
   $('#categoryRuleDialog').showModal();
@@ -2741,12 +2741,12 @@ $('#categoryRuleForm').addEventListener('submit', async e => {
   }
 });
 const RULE_EDITORS = {
-  spam: { kinds: { sender: 'common.odesilatel' }, url: id => `/api/spam-rules/${id}`, render: () => renderSpamRules() },
+  spam: { kinds: { sender: 'common.sender' }, url: id => `/api/spam-rules/${id}`, render: () => renderSpamRules() },
   folder: { kinds: FOLDER_RULE_KINDS, when: true, url: id => `/api/user-folder-rules/${id}`,
             render: () => renderFolderRules(), after: () => { renderFolderRules(); loadUserFolders(); } },
 };
 const editRuleButton = (list, id) =>
-  `<button type="button" class="btn" data-edit-rule="${id}" data-list="${list}" title="${esc(t('rule.edit_title'))}">${esc(t('rule.edit'))}</button>`;
+  `<button type="button" class="btn" data-edit-rule="${id}" data-list="${list}" title="${esc(t('rule.editTitle'))}">${esc(t('rule.edit'))}</button>`;
 
 $('#settingsDialog').addEventListener('click', e => {
   const b = e.target.closest('[data-edit-rule]');
@@ -2760,15 +2760,15 @@ function startRuleEdit(li, list, id) {
   const kinds = Object.entries(ed.kinds);
   li.classList.add('editing');
   li.innerHTML = `<form class="rule-edit" autocomplete="off">
-    ${kinds.length > 1 ? `<select name="kind" title="${esc(t('rule.kind_title'))}">${kinds.map(([k, label]) =>
+    ${kinds.length > 1 ? `<select name="kind" title="${esc(t('rule.kindTitle'))}">${kinds.map(([k, label]) =>
       `<option value="${k}" ${k === r.kind ? 'selected' : ''}>${esc(t(label))}</option>`).join('')}</select>` : ''}
-    ${ed.when ? `<select name="when" title="${esc(t('common.kdy_zpravy_podle_pravidla'))}">
-      <option value="now">${esc(t('folderRuleWhen.ihned'))}</option><option value="read" ${r.after_read ? 'selected' : ''}>${esc(t('folderRuleWhen.po_precteni'))}</option></select>` : ''}
-    <input name="value" value="${esc(r.value)}" aria-label="${esc(t('rule.value_label'))}">
+    ${ed.when ? `<select name="when" title="${esc(t('rule.whenToMove'))}">
+      <option value="now">${esc(t('rule.immediately'))}</option><option value="read" ${r.after_read ? 'selected' : ''}>${esc(t('rule.afterReadingShort'))}</option></select>` : ''}
+    <input name="value" value="${esc(r.value)}" aria-label="${esc(t('rule.valueLabel'))}">
     <p class="error rule-edit-error"></p>
     <div class="rule-edit-actions">
-      <button type="button" class="btn" data-cancel>${esc(t('common.zrusit'))}</button>
-      <button type="submit" class="btn primary">${esc(t('common.ulozit'))}</button>
+      <button type="button" class="btn" data-cancel>${esc(t('common.cancel'))}</button>
+      <button type="submit" class="btn primary">${esc(t('common.save'))}</button>
     </div>
   </form>`;
   const form = li.querySelector('form'), input = form.elements.value;
@@ -2808,12 +2808,12 @@ async function renderSpamRules() {
       <div class="rule-main">
         <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
         <div class="rule-meta">${esc(RULE_KINDS[r.kind] ? t(RULE_KINDS[r.kind]) : r.kind)} · ${esc(t('rule.added', { date: fmtDay(r.created) }))}
-          · ${esc(t('rule.caught_times', { count: r.hits }))}</div>
+          · ${esc(t('rule.caughtTimes', { count: r.hits }))}</div>
       </div>
       ${editRuleButton('spam', r.id)}
-      <button type="button" class="btn danger" data-rule="${r.id}" title="${esc(t('rule.delete_title'))}">${esc(t('actions.smazat'))}</button>
+      <button type="button" class="btn danger" data-rule="${r.id}" title="${esc(t('rule.deleteTitle'))}">${esc(t('common.delete'))}</button>
     </li>`).join('')
-    : `<li class="empty-rules">${esc(t('spam.no_rules'))}</li>`;
+    : `<li class="empty-rules">${esc(t('spam.noRules'))}</li>`;
 }
 
 $('#spamRules').addEventListener('click', async e => {
@@ -2838,8 +2838,8 @@ document.querySelectorAll('dialog').forEach(dlg => {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'icon-btn close-x dialog-x';
-  b.dataset.i18nTitle = 'common.zavrit_esc';      // texty doplní applyI18n po načtení katalogu
-  b.dataset.i18nAriaLabel = 'composeTpl.zavrit';
+  b.dataset.i18nTitle = 'common.closeEsc';      // texty doplní applyI18n po načtení katalogu
+  b.dataset.i18nAriaLabel = 'common.close';
   b.textContent = '✕';
   b.addEventListener('click', () => { dlg.returnValue = ''; dlg.close(); });
   dlg.appendChild(b);
