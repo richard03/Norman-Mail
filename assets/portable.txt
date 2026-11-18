@@ -1,10 +1,10 @@
-﻿Portable verze Maileru
+﻿Portable verze aplikace Norman Mail
 
-Dokud tento soubor leží vedle Mailer.exe, ukládá Mailer všechna data (nastavení účtů, lokální databázi
+Dokud tento soubor leží vedle NormanMail.exe, ukládá Norman Mail všechna data (nastavení účtů, lokální databázi
 zpráv, pravidla) do složky "data" vedle sebe a nic nezapisuje do profilu uživatele. Celou složku tak
 můžete nosit třeba na flash disku.
 
 Hesla a přihlašovací tokeny se z bezpečnostních důvodů ukládají do Správce pověření Windows na
 konkrétním počítači. Na jiném počítači proto bude potřeba hesla k účtům zadat znovu.
 
-Když tento soubor smažete, Mailer se chová jako nainstalovaná verze (data v %APPDATA%\Mailer).
+Když tento soubor smažete, Norman Mail se chová jako nainstalovaná verze (data v %APPDATA%\Mailer).

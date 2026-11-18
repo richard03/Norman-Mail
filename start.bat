@@ -1,5 +1,5 @@
 @echo off
-rem Spusti Mailer ze zdrojovych kodu (bez sestaveni .exe).
+rem Spusti Norman Mail ze zdrojovych kodu (bez sestaveni .exe).
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe (
   echo Vytvarim virtualni prostredi a instaluji zavislosti...

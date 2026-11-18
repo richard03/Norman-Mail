@@ -17,10 +17,10 @@ except Exception:  # keyring není nainstalovaný nebo nemá backend
     keyring = None
     KEYRING_OK = False
 
-SERVICE = "Mailer"
+SERVICE = "Mailer"  # neměnit (původní název aplikace): pod tímto jménem jsou uložená hesla
 
 
-PORTABLE_MARKER = "portable.txt"  # leží-li vedle Mailer.exe, data jsou ve složce data vedle něj
+PORTABLE_MARKER = "portable.txt"  # leží-li vedle NormanMail.exe, data jsou ve složce data vedle něj
 
 
 def portable_dir():
@@ -37,7 +37,7 @@ def _data_dir() -> Path:
         return Path(os.environ["MAILER_DATA"])
     if portable_dir():
         return portable_dir() / "data"
-    target = Path(os.environ.get("APPDATA") or Path.home()) / "Mailer"
+    target = Path(os.environ.get("APPDATA") or Path.home()) / "Mailer"  # původní název aplikace, neměnit
     legacy = Path(__file__).resolve().parent / "data"  # dřívější umístění vedle zdrojáků
     if not target.exists() and legacy.is_dir():
         shutil.copytree(legacy, target)

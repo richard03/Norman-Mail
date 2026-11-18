@@ -1,22 +1,22 @@
-# Mailer
+# Norman Mail
 
 Jednoduchý desktopový emailový klient pro Windows, který obslouží více účtů najednou (IMAP + SMTP).
 
 ## Spuštění
 
 **Pro Windows bez Pythonu** (Windows 10/11, 64bit) jsou dvě varianty. Obě obsahují vše potřebné včetně Pythonu:
-- **Instalátor** `Mailer-Setup-VERZE.exe`: nainstaluje Mailer jen pro aktuálního uživatele (bez práv správce) do `%LOCALAPPDATA%\Programs\Mailer`, přidá ho do nabídky Start (volitelně i zástupce na plochu) a do *Nainstalované aplikace*, odkud jde odinstalovat. Odinstalace nemaže data (`%APPDATA%\Mailer`) ani hesla.
-- **Portable** `Mailer-VERZE-portable.zip`: rozbalte kamkoli (i na flash disk) a spusťte `Mailer.exe`. Dokud vedle něj leží `portable.txt`, ukládá všechna data do složky `data` vedle sebe. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
+- **Instalátor** `NormanMail-Setup-VERZE.exe`: nainstaluje Norman Mail jen pro aktuálního uživatele (bez práv správce) do `%LOCALAPPDATA%\Programs\Norman Mail`, přidá ho do nabídky Start (volitelně i zástupce na plochu) a do *Nainstalované aplikace*, odkud jde odinstalovat. Odinstalace nemaže data (`%APPDATA%\Mailer`) ani hesla.
+- **Portable** `NormanMail-VERZE-portable.zip`: rozbalte kamkoli (i na flash disk) a spusťte `NormanMail.exe`. Dokud vedle něj leží `portable.txt`, ukládá všechna data do složky `data` vedle sebe. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
 
-Jedinou systémovou součástí, kterou Mailer potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, instalátor i aplikace nabídnou stránku Microsoftu ke stažení.
+Jedinou systémovou součástí, kterou Norman Mail potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, instalátor i aplikace nabídnou stránku Microsoftu ke stažení.
 
-**Připnutí na hlavní panel:** na běžícím Maileru klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `Mailer.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
+**Připnutí na hlavní panel:** na běžící aplikaci klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `NormanMail.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
 
-**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `Mailer\` (aplikace), `Mailer-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup](https://jrsoftware.org/isinfo.php) 6 nebo 7 (`winget install JRSoftware.InnoSetup`), i instalátor `Mailer-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
+**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `NormanMail\` (aplikace), `NormanMail-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup](https://jrsoftware.org/isinfo.php) 6 nebo 7 (`winget install JRSoftware.InnoSetup`), i instalátor `NormanMail-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 
-**Vývojový server** (rozhraní v prohlížeči, jen pro ladění): `.venv\Scripts\python tools\dev_server.py` otevře <http://127.0.0.1:8765/>. Není součástí `Mailer.exe`. Dokud běží, může se k němu připojit kterýkoli program na počítači, proto ho nepouštějte mimo vývoj.
+**Vývojový server** (rozhraní v prohlížeči, jen pro ladění): `.venv\Scripts\python tools\dev_server.py` otevře <http://127.0.0.1:8765/>. Není součástí `NormanMail.exe`. Dokud běží, může se k němu připojit kterýkoli program na počítači, proto ho nepouštějte mimo vývoj.
 
 ### Jak to funguje
 
@@ -26,12 +26,12 @@ Jedinou systémovou součástí, kterou Mailer potřebuje, je **Microsoft Edge W
 
 ### Lokální databáze (cache)
 
-Mailer si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\mailer.db` (SQLite):
+Norman Mail si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mailer\mailer.db` (SQLite):
 
 - **Seznamy zpráv se zobrazují okamžitě z databáze.** Synchronizace na pozadí (vlastní IMAP spojení, každou minutu a po každé akci) ze serveru jen doplňuje rozdíly: nové zprávy, smazané zprávy a změny příznaků provedené v jiných klientech. Nejdřív se synchronizuje doručená pošta všech účtů, potom ostatní složky. Historie velkých složek se dohrává po dávkách od nejnovějších zpráv.
 - **Otevřené zprávy** (včetně příloh) se uloží celé, takže se podruhé otevřou bez stahování a jdou přečíst i offline. Výjimkou jsou zprávy větší než 25 MB.
 - **Kontext** (související zprávy) se po dosynchronizování složek počítá přímo z databáze. Do té doby se dohledává na serveru.
-  Kliknutím na zprávu v kontextu se zpráva otevře a zároveň se nalistuje v seznamu vlevo. Mailer ji hledá v tomto pořadí: složka aplikace → Důležité / Vzít na vědomí / Nedůležité / Notifikace → Spam / Smazané. Zprávu z ostatních složek (Odeslané, Archiv…) ukáže v dané složce účtu.
+  Kliknutím na zprávu v kontextu se zpráva otevře a zároveň se nalistuje v seznamu vlevo. Aplikace ji hledá v tomto pořadí: složka aplikace → Důležité / Vzít na vědomí / Nedůležité / Notifikace → Spam / Smazané. Zprávu z ostatních složek (Odeslané, Archiv…) ukáže v dané složce účtu.
 - **Odložené zprávy:** akce *Odložit o den* / *Odložit o týden* označí zprávu jako přečtenou a zítra, resp. za týden v 8:00, ji zase označí jako nepřečtenou. Pokud aplikace v tu chvíli neběží, stane se to hned po dalším spuštění.
 
 - **Pravidla pro spam:** označením zprávy jako *Spam* vznikne pravidlo „odesílatel je spam“. Nové zprávy od tohoto odesílatele synchronizace ve všech účtech přesune do spamu dřív, než se objeví v seznamu. Pravidla jsou přehledně v **Nastavení** (dole v levém sloupci), kde je lze mazat. Pro vlastní adresy pravidla nevznikají.
@@ -89,7 +89,7 @@ Databázi lze kdykoli smazat (při zavřené aplikaci). Při dalším spuštěn�
 
 ### Kde jsou data
 
-Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správci pověření Windows. Nastavení ze starší verze (složka `data\` vedle zdrojových kódů) se při prvním spuštění zkopíruje automaticky.
+Nastavení účtů je uložené v `%APPDATA%\Mailer\` (název složky zůstal z doby, kdy se aplikace jmenovala Mailer), hesla a tokeny ve Správci pověření Windows. Nastavení ze starší verze (složka `data\` vedle zdrojových kódů) se při prvním spuštění zkopíruje automaticky.
 
 ## Co umí
 
@@ -119,7 +119,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\`, hesla a tokeny ve Správc
 
 Gmail se dá připojit bez hesla tlačítkem **Přihlásit přes Google**. Aplikace k tomu potřebuje vlastního *OAuth klienta*. Jednorázově ho vytvoříte takto (asi 10 minut):
 
-1. Otevřete <https://console.cloud.google.com/> a vytvořte nový projekt (např. „Mailer“).
+1. Otevřete <https://console.cloud.google.com/> a vytvořte nový projekt (např. „Norman Mail“).
 2. **APIs & Services → Library**: vyhledejte **Gmail API** a klikněte na **Enable**.
 3. **APIs & Services → OAuth consent screen** (v novějším rozhraní *Google Auth Platform*):
    - User type: **External**, vyplňte název aplikace a svůj email.
@@ -127,7 +127,7 @@ Gmail se dá připojit bez hesla tlačítkem **Přihlásit přes Google**. Aplik
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
    - Application type: **Desktop app**. Redirect URI se nezadává, protože aplikace používá `http://127.0.0.1:<port>/oauth/callback`, který Google u desktopových klientů povoluje automaticky.
    - Zkopírujte **Client ID** a **Client Secret**.
-5. V Maileru klikněte na **+ Přidat účet**, zvolte Gmail a **Přihlásit přes Google**. Při prvním použití vložte Client ID a Client Secret. Uloží se do `%APPDATA%\Mailer\google_client.json`.
+5. V aplikaci Norman Mail klikněte na **+ Přidat účet**, zvolte Gmail a **Přihlásit přes Google**. Při prvním použití vložte Client ID a Client Secret. Uloží se do `%APPDATA%\Mailer\google_client.json`.
 6. V okně Googlu se přihlaste a povolte přístup. Google zobrazí varování „Google tuto aplikaci neověřil“. Je to v pořádku, protože jde o vaši vlastní aplikaci: klikněte na **Pokračovat**.
 
 Obnovovací token se uloží do Správce pověření Windows. Krátkodobé přístupové tokeny si aplikace obnovuje sama.
@@ -148,7 +148,7 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 |---|---|
 | `main.py` | Desktopová aplikace (okno, ukládání příloh) |
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
-| `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `Mailer.exe`) |
+| `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |
@@ -156,6 +156,6 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | `store.py` | Ukládání účtů a hesel |
 | `static/` | Uživatelské rozhraní (HTML, CSS, JS) |
 | `build.bat`, `installer.iss`, `version.py` | Sestavení aplikace, portable balíčku a instalátoru |
-| `assets/portable.txt` | Značka portable verze (kopíruje se vedle `Mailer.exe`) |
+| `assets/portable.txt` | Značka portable verze (kopíruje se vedle `NormanMail.exe`) |
 
 Port lze změnit proměnnou prostředí `MAILER_PORT`, složku s daty proměnnou `MAILER_DATA`.

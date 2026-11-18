@@ -502,7 +502,7 @@ def _fetch_raw(M, uid):
 
 
 def too_large_text(size) -> str:
-    return (f"Zpráva má {size / 1024 / 1024:.0f} MB, víc než Mailer stahuje ({MAX_MESSAGE // 1024 // 1024} MB). "
+    return (f"Zpráva má {size / 1024 / 1024:.0f} MB, víc než Norman Mail stahuje ({MAX_MESSAGE // 1024 // 1024} MB). "
             "Zobrazen je jen začátek; přílohy si stáhněte ve webmailu poskytovatele.")
 
 

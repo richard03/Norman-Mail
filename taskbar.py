@@ -1,7 +1,7 @@
 """Identita aplikace pro hlavní panel Windows.
 
 Bez ní okno patří procesu pythonw.exe (při spuštění ze zdrojových kódů) a „Připnout na hlavní panel“
-připne Python (IDLE), ne Mailer. Okno proto dostane vlastní AppUserModelID a příkaz, kterým se má
+připne Python (IDLE), ne Norman Mail. Okno proto dostane vlastní AppUserModelID a příkaz, kterým se má
 připnutá ikona spouštět (RelaunchCommand), spolu s názvem a ikonou.
 """
 
@@ -10,7 +10,7 @@ import os
 import sys
 from ctypes import wintypes
 
-APP_ID = "Mailer.Desktop"
+APP_ID = "Mailer.Desktop"  # neměnit: připnuté ikony a zástupci se drží tohoto ID
 
 
 class GUID(ctypes.Structure):
@@ -39,7 +39,7 @@ IID_IPropertyStore = "886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"
 
 
 def set_process_app_id():
-    """Volat co nejdřív – okna procesu se pak na hlavním panelu seskupí jako Mailer, ne jako Python."""
+    """Volat co nejdřív – okna procesu se pak na hlavním panelu seskupí jako Norman Mail, ne jako Python."""
     if sys.platform != "win32":
         return
     try:
@@ -49,7 +49,7 @@ def set_process_app_id():
 
 
 def relaunch_command():
-    """Příkaz pro připnutou ikonu: sestavená aplikace = Mailer.exe, jinak pythonw.exe main.py."""
+    """Příkaz pro připnutou ikonu: sestavená aplikace = NormanMail.exe, jinak pythonw.exe main.py."""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
     exe = sys.executable
@@ -76,7 +76,7 @@ def apply_to_window(hwnd, icon_path=None):
     set_value = proto(vtbl[6])
     commit = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtbl[7])
     release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtbl[2])
-    values = [(PKEY_RELAUNCH_COMMAND, relaunch_command()), (PKEY_RELAUNCH_NAME, "Mailer")]
+    values = [(PKEY_RELAUNCH_COMMAND, relaunch_command()), (PKEY_RELAUNCH_NAME, "Norman Mail")]
     if icon_path and os.path.exists(icon_path):
         values.append((PKEY_RELAUNCH_ICON, os.path.abspath(icon_path) + ",0"))
     values.append((PKEY_ID, APP_ID))  # bez ID by Windows údaje pro připnutí ignorovaly

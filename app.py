@@ -1,4 +1,4 @@
-"""Mailer – jádro aplikace (Flask). V desktopové verzi (main.py) neběží žádný server: rozhraní volá
+"""Norman Mail – jádro aplikace (Flask). V desktopové verzi (main.py) neběží žádný server: rozhraní volá
 endpointy přes most pywebview uvnitř procesu. Jako skutečný server na 127.0.0.1 běží jen při vývoji
 (tools/dev_server.py) a krátce při přihlášení přes Google (návrat z prohlížeče na /oauth/callback)."""
 
@@ -282,7 +282,7 @@ def oauth_status():
     return jsonify(status=entry["status"], error=entry["error"], account_id=entry["account_id"])
 
 
-CALLBACK_PAGE = """<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>Mailer – přihlášení</title>
+CALLBACK_PAGE = """<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>Norman Mail – přihlášení</title>
 <style>body{{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;
 background:#f6f7f9;color:#1c2430}}div{{background:#fff;padding:28px 36px;border-radius:12px;max-width:480px;
 box-shadow:0 4px 20px rgba(0,0,0,.08)}}h1{{font-size:20px;color:{color}}}</style></head>
@@ -330,7 +330,7 @@ def oauth_callback():
         refresh_my_addresses()
         syncer.trigger()
         google_oauth.finish(state, account_id=new_id)
-        return callback_page(True, f"Účet {email_addr} je připojen. Toto okno můžete zavřít a vrátit se do Maileru.")
+        return callback_page(True, f"Účet {email_addr} je připojen. Toto okno můžete zavřít a vrátit se do aplikace Norman Mail.")
     except Exception as e:
         msg = mail.friendly_error(e)
         google_oauth.finish(state, error=msg)

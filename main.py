@@ -1,4 +1,4 @@
-"""Mailer – desktopová aplikace v nativním okně (Edge WebView2).
+"""Norman Mail – desktopová aplikace v nativním okně (Edge WebView2).
 
 Neběží žádný síťový server: stránka se načítá ze složky static přes virtuální doménu WebView2
 (https://mailer-app.example/) a rozhraní volá Python přes most pywebview (Api.request). Jiný program
@@ -17,7 +17,7 @@ def unblock_bundled_dlls():
     rozbalení zdědí i přibalené knihovny. .NET Framework pak odmítne načíst Python.Runtime.dll (pythonnet)
     a aplikace spadne s „Failed to resolve Python.Runtime.Loader.Initialize“. Značku (alternativní datový
     proud Zone.Identifier) proto u knihoven odstraníme dřív, než se .NET načte. Kde do složky zapisovat
-    nejde, pomůže Mailer.exe.config (loadFromRemoteSources)."""
+    nejde, pomůže NormanMail.exe.config (loadFromRemoteSources)."""
     if not getattr(sys, "frozen", False):
         return
     for dll in Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)).rglob("*.dll"):
@@ -37,6 +37,7 @@ import taskbar
 from store import DATA_DIR
 
 SAFE_SCHEMES = {"http", "https", "mailto"}
+APP_NAME = "Norman Mail"
 APP_HOST = "mailer-app.example"  # virtuální doména (.example nikdy neexistuje na internetu)
 APP_URL = f"https://{APP_HOST}/index.html"
 
@@ -198,13 +199,13 @@ def resource(name):
 
 
 def pin_identity(window, icon):
-    """Po zobrazení okna: identita pro hlavní panel (připnutá ikona pak spouští Mailer, ne Python)."""
+    """Po zobrazení okna: identita pro hlavní panel (připnutá ikona pak spouští Norman Mail, ne Python)."""
     try:
         hwnd = 0
         try:
             hwnd = int(window.native.Handle.ToInt64())
         except Exception:
-            hwnd = taskbar.find_window("Mailer")
+            hwnd = taskbar.find_window(APP_NAME)
         if not taskbar.apply_to_window(hwnd, icon):
             print("Identitu okna pro hlavní panel nelze nastavit.")
     except Exception as e:
@@ -237,9 +238,9 @@ def require_webview2() -> bool:
         return True
     import ctypes
     answer = ctypes.windll.user32.MessageBoxW(
-        None, "Mailer potřebuje Microsoft Edge WebView2 Runtime, který na tomto počítači chybí.\n\n"
+        None, "Norman Mail potřebuje Microsoft Edge WebView2 Runtime, který na tomto počítači chybí.\n\n"
               "Chcete otevřít stránku Microsoftu, odkud ho stáhnete (zvolte „Evergreen Bootstrapper“)? "
-              "Po instalaci Mailer spusťte znovu.", "Mailer", 0x04 | 0x30)  # Ano/Ne, ikona upozornění
+              "Po instalaci Norman Mail spusťte znovu.", APP_NAME, 0x04 | 0x30)  # Ano/Ne, ikona upozornění
     if answer == 6:  # Ano
         webbrowser.open(WEBVIEW2_DOWNLOAD)
     return False
@@ -257,7 +258,7 @@ def main():
     map_static_folder(resource("static"))
     webview.settings["ALLOW_DOWNLOADS"] = True
     api = Api()
-    window = webview.create_window("Mailer", APP_URL, js_api=api, width=1600, height=950,
+    window = webview.create_window(APP_NAME, APP_URL, js_api=api, width=1600, height=950,
                                    min_size=(960, 600), text_select=True)
     api._window = window
     icon = resource("assets/mailer.ico")
