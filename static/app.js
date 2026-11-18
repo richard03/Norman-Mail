@@ -3,6 +3,42 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ------------------------------------------------------------------ lokalizace (katalogy v static/i18n/*.yaml, viz i18n.py)
+
+const I18N = { lang: 'en', locale: 'en-GB', texts: {}, plural: null };
+
+/** Text v aktuálním jazyce s doplněnými {proměnnými}. Chybí-li, vrátí klíč (je hned vidět, co chybí). */
+function t(key, params = {}) {
+  let s = I18N.texts[key];
+  if (s && typeof s === 'object') s = s[I18N.plural.select(params.count ?? 0)] ?? s.other;
+  if (typeof s !== 'string') s = key;
+  return s.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, k) => (k in params ? String(params[k]) : m));
+}
+/** Množné číslo: tn('messages.count', 5) → „5 zpráv“. */
+const tn = (key, count, params = {}) => t(key, { ...params, count });
+/** Bezpečné HTML z překladu: vše escapované, jediné formátování je **tučně**. */
+const tHtml = (key, params) => esc(t(key, params)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+
+/** Doplní texty do statického HTML: data-i18n (obsah), data-i18n-title, -placeholder, -aria-label. */
+function applyI18n(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach(el => { el.innerHTML = tHtml(el.dataset.i18n); });
+  for (const attr of ['title', 'placeholder', 'aria-label']) {
+    root.querySelectorAll(`[data-i18n-${attr}]`).forEach(el => el.setAttribute(attr, t(el.dataset[
+      'i18n' + attr.replace(/(^|-)([a-z])/g, (m, d, c) => c.toUpperCase())])));
+  }
+}
+
+let i18nInfo = null;  // poslední odpověď /api/i18n (jazyky pro Nastavení)
+async function loadI18n(reload = false) {
+  i18nInfo = await api('/api/i18n' + (reload ? '?reload=1' : ''));
+  const c = i18nInfo.catalog;
+  Object.assign(I18N, { lang: c.language, locale: c.locale, texts: c.texts });
+  try { I18N.plural = new Intl.PluralRules(c.locale); } catch { I18N.plural = new Intl.PluralRules('en'); }
+  document.documentElement.lang = c.language;
+  applyI18n();
+}
+
 const COLORS = ['#2563eb', '#db2777', '#059669', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#65a30d'];
 
 const PRESETS = {
@@ -2457,7 +2493,48 @@ async function renderAppInfo() {
   $('#appShortcuts').hidden = !Object.keys(sc).length;  // jen v desktopové aplikaci
   const have = [sc.programs && 'v nabídce Start', sc.desktop && 'na ploše'].filter(Boolean);
   $('#appShortcutStatus').textContent = have.length ? `Zástupce už je ${have.join(' a ')}.` : '';
+  renderLanguages();
 }
+
+/** Výběr jazyka: vestavěné jazyky a soubory nalezené ve složkách s jazyky (projdou se znovu). */
+async function renderLanguages() {
+  let info;
+  try { [info] = await Promise.all([api('/api/i18n?reload=1'), loadSettings()]); } catch { return; }
+  i18nInfo = info;
+  const sel = $('#languageSelect'), chosen = state.settings?.language ?? '';
+  const autoName = info.languages.find(l => l.code === info.auto)?.name || info.auto;
+  sel.innerHTML = `<option value="">${esc(t('settings.language.auto', { name: autoName }))}</option>`
+    + info.languages.map(l => `<option value="${esc(l.code)}">${esc(l.name)}${l.builtin ? '' : ' *'}</option>`).join('');
+  sel.value = info.languages.some(l => l.code === chosen) ? chosen : '';
+  const cur = info.languages.find(l => l.code === (sel.value || info.auto));
+  $('#languageMissing').hidden = !cur?.missing;
+  if (cur?.missing) $('#languageMissing').textContent = tn('settings.language.missing', cur.missing, { name: cur.name });
+  const box = $('#languageProblems');
+  box.hidden = !info.problems.length;
+  box.innerHTML = info.problems.length ? `<p>${esc(t('settings.language.problems'))}</p><ul>`
+    + info.problems.map(p => `<li><code>${esc(p.file)}</code>: ${esc(p.error)}</li>`).join('') + '</ul>' : '';
+}
+
+$('#languageSelect').addEventListener('change', async e => {
+  if (state.composeWins?.length) {
+    toast(t('settings.language.close_compose'), true);
+    e.target.value = state.settings?.language ?? '';
+    return;
+  }
+  try {
+    state.settings = await api('/api/settings', { method: 'PUT', body: { language: e.target.value } });
+    location.reload();  // celé rozhraní znovu v novém jazyce
+  } catch (err) { toast(err.message, true); }
+});
+$('#languageFolder').addEventListener('click', async () => {
+  try { await api('/api/i18n/folder', { method: 'POST' }); } catch (err) { toast(err.message, true); }
+});
+$('#languageTemplate').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/i18n/template', { method: 'POST' });
+    toast(t('settings.language.exported', { path: r.path }));
+  } catch (err) { toast(err.message, true); }
+});
 
 $('#appShortcuts').addEventListener('click', async e => {
   const b = e.target.closest('[data-shortcut]');
@@ -2962,6 +3039,7 @@ window.addEventListener('resize', fitColumns);
 loadColumnWidths();
 
 (async () => {
+  try { await loadI18n(); } catch (e) { console.error('Katalog textů se nenačetl', e); }
   try {
     await loadAccounts();  // jen seznam účtů z lokálního úložiště – okamžité
     if (!state.accounts.length) openAccountDialog();

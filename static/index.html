@@ -373,6 +373,18 @@
           nikam jinam se neposílají, hesla jsou ve Správci pověření Windows. Zprávy se ukládají do místní databáze,
           takže se otevírají okamžitě a jdou číst i offline. Obrázky a další vzdálený obsah se načtou, až když je
           povolíte, aby odesílatel nepoznal, že jste zprávu otevřeli.</p>
+        <h3 class="sub-head" data-i18n="settings.language.label"></h3>
+        <div class="options">
+          <label class="option select-option"><span data-i18n="settings.language.label"></span>
+            <select id="languageSelect"></select></label>
+        </div>
+        <p id="languageMissing" class="note" hidden></p>
+        <div id="languageProblems" class="note bad" hidden></div>
+        <p class="note" data-i18n="settings.language.help"></p>
+        <div class="bayes-actions">
+          <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.open_folder"></button>
+          <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
+        </div>
         <p id="appPortable" class="note" hidden>Portable verze: všechna data jsou ve složce <b>data</b> vedle
           programu (dokud vedle něj leží soubor <b>portable.txt</b>).</p>
         <div id="appShortcuts" hidden>

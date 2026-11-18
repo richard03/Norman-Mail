@@ -18,6 +18,7 @@ from werkzeug.serving import make_server
 import bayes
 import db
 import google_oauth
+import i18n
 import mail
 import sync
 import taskbar
@@ -50,6 +51,7 @@ def refresh_my_addresses():
 
 
 refresh_my_addresses()
+i18n.set_language(database.settings()["language"])
 
 
 def start_background():
@@ -1110,9 +1112,53 @@ def settings_get():
 
 @app.put("/api/settings")
 def settings_put():
-    result = database.update_settings(request.get_json(force=True) or {})
+    changes = request.get_json(force=True) or {}
+    if "language" in changes and changes["language"] not in {"", *(l["code"] for l in i18n.languages())}:
+        changes.pop("language")
+    result = database.update_settings(changes)
+    i18n.set_language(result["language"])
     syncer.trigger()  # případný úklid podle nového nastavení hned
     return jsonify(result)
+
+
+@app.get("/api/i18n")
+def i18n_get():
+    """Katalog textů pro rozhraní a seznam jazyků. ?reload=1 znovu projde složky s jazyky (Nastavení)."""
+    if request.args.get("reload"):
+        i18n.reload()
+        i18n.set_language(database.settings()["language"])
+    auto = i18n.resolve("")
+    return jsonify(catalog=i18n.catalog(), languages=i18n.languages(), problems=i18n.problems(),
+                   auto=auto, folders=[str(d) for d in i18n.user_dirs()])
+
+
+@app.post("/api/i18n/folder")
+def i18n_open_folder():
+    """Otevře složku s jazyky v Průzkumníku (vytvoří ji). Jen desktopová aplikace."""
+    if not EMBEDDED:
+        return jsonify(error=i18n.t("error.desktop_only")), 400
+    folder = i18n.user_dirs()[0]
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        folder = i18n.user_dirs()[-1]  # vedle exe nejde zapisovat – složka dat
+        folder.mkdir(parents=True, exist_ok=True)
+    os.startfile(folder)
+    return jsonify(folder=str(folder))
+
+
+@app.post("/api/i18n/template")
+def i18n_template():
+    """Uloží anglickou šablonu překladu do složky s jazyky a vrátí její cestu."""
+    for folder in i18n.user_dirs():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / "_template.yaml"  # „_“ = loader ho přeskočí
+            path.write_text(i18n.template_text(), "utf-8")
+            return jsonify(path=str(path))
+        except OSError:
+            continue
+    return jsonify(error=i18n.t("error.template_failed")), 500
 
 
 @app.get("/api/bayes")

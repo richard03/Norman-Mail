@@ -1,0 +1,26 @@
+# Norman Mail – čeština (vestavěný překlad)
+meta:
+  language: cs
+  name: Čeština
+  locale: cs-CZ
+
+settings.app.title: O aplikaci
+settings.language.label: Jazyk
+settings.language.auto: Automaticky ({name})
+settings.language.missing:
+  one: "{name}: {count} text zatím není přeložený, zobrazuje se anglicky."
+  few: "{name}: {count} texty zatím nejsou přeložené, zobrazují se anglicky."
+  other: "{name}: {count} textů zatím není přeložených, zobrazují se anglicky."
+settings.language.problems: "Tyto soubory s překladem nešlo použít:"
+settings.language.open_folder: Otevřít složku s jazyky
+settings.language.export: Uložit šablonu překladu
+settings.language.exported: "Šablona uložena: {path}"
+settings.language.help: >
+  Další jazyk si můžete přidat sami, bez nové instalace: uložte šablonu překladu (uloží se do složky
+  s jazyky jako _template.yaml), přejmenujte ji podle kódu jazyka, např. de.yaml, změňte meta.language
+  a meta.name a přeložte texty. Nepřeložené texty se zobrazí anglicky. Aplikace soubor najde při
+  příštím otevření Nastavení.
+settings.language.close_compose: Nejdřív zavřete rozepsané zprávy, potom jazyk změňte.
+
+error.desktop_only: Tohle jde jen v desktopové aplikaci.
+error.template_failed: Šablonu překladu nešlo uložit.
