@@ -125,9 +125,8 @@ function fmtSize(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' kB';
   return (n / 1024 / 1024).toFixed(1) + ' MB';
 }
-function fmtAddr(a) {
-  if (!a.name) return a.addr;
-  return `"${a.name.replace(/["\\]/g, '')}" <${a.addr}>`;
+function fmtAddr(a) {  // stejný tvar jako adresy vybrané z našeptávání
+  return fmtContact({ name: a.name, email: a.addr });
 }
 const shortAddr = list => (list || []).map(a => a.name || a.addr).join(', ') || '(neznámý)';
 const badge = n => (n ? `<span class="badge">${n}</span>` : '');
@@ -1798,12 +1797,27 @@ async function loadContacts() {
   } catch { /* bez našeptávání */ }
 }
 
-/** Rozsah právě psané adresy v poli (text mezi čárkami / středníky kolem kurzoru). */
+/** Rozsah právě psané adresy v poli kolem kurzoru. Adresy oddělují čárky / středníky mimo
+ *  uvozovky; za hotovou adresou („Jméno <a@b>“ nebo „a@b “) začíná nová i bez čárky. */
 function addrToken(input) {
   const v = input.value, pos = input.selectionStart ?? v.length;
-  const start = Math.max(v.lastIndexOf(',', pos - 1), v.lastIndexOf(';', pos - 1)) + 1;
-  let end = v.slice(pos).search(/[,;]/);
-  end = end < 0 ? v.length : pos + end;
+  let start = 0, inQuote = false;
+  for (let i = 0; i < pos; i++) {
+    const ch = v[i];
+    if (ch === '\\' && inQuote) { i++; continue; }
+    if (ch === '"') inQuote = !inQuote;
+    else if (inQuote) continue;
+    else if (ch === ',' || ch === ';' || ch === '>') start = i + 1;
+    else if (/\s/.test(ch) && /^[^\s<>"]+@[^\s<>"]+$/.test(v.slice(start, i).trim())) start = i + 1;
+  }
+  let end = v.length;
+  inQuote = false;
+  for (let i = start; i < v.length; i++) {
+    const ch = v[i];
+    if (ch === '\\' && inQuote) { i++; continue; }
+    if (ch === '"') inQuote = !inQuote;
+    else if (!inQuote && i >= pos && (ch === ',' || ch === ';')) { end = i; break; }
+  }
   return { start, end, text: v.slice(start, end).trim() };
 }
 
@@ -1889,7 +1903,8 @@ function acPick(i) {
   const after = v.slice(tok.end).replace(/^[,;]?\s*/, '');
   if (input.dataset.addr === 'single') input.value = c.email;  // pokročilé hledání: jedna adresa
   else {
-    const head = (before ? before + ' ' : '') + fmtContact(c) + ', ';
+    const sep = !before ? '' : /[,;]$/.test(before) ? ' ' : ', ';  // za hotovou adresou bez čárky ji doplní
+    const head = before + sep + fmtContact(c) + ', ';
     input.value = head + after;
     input.setSelectionRange(head.length, head.length);
   }
