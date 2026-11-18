@@ -126,7 +126,8 @@ def main():
     if args.no_publish or args.allow_dirty:
         print("Soubory k nahrání do release", tag, ":\n  " + "\n  ".join(files))
         return
-    gh = shutil.which("gh")
+    gh = shutil.which("gh") or next((str(p) for p in (Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                                                      / "GitHub CLI" / "gh.exe",) if p.is_file()), None)
     if not gh:
         print("GitHub CLI (gh) není nainstalované (winget install GitHub.cli). Založte release", tag,
               f"na https://github.com/{updater.REPO}/releases/new ručně a nahrajte:\n  " + "\n  ".join(files))
