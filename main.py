@@ -40,7 +40,7 @@ def ensure_single_instance():
     """Pro jedna data smí běžet jen jedna instance. Musí proběhnout před importem app, který otevírá
     databázi. Druhé spuštění jen ukáže okno běžící instance a skončí."""
     # restart po aktualizaci: předchozí instance ještě chvíli končí, počkáme na ni
-    locked = (instance.wait_and_acquire(DATA_DIR) if "--after-update" in sys.argv[1:]
+    locked = (instance.wait_and_acquire(DATA_DIR, timeout=60) if "--after-update" in sys.argv[1:]
               else instance.acquire(DATA_DIR))
     if not locked:
         instance.activate_existing(APP_NAME)
@@ -55,6 +55,7 @@ import webview  # noqa: E402  (až po odblokování knihoven)
 import app as server_app  # noqa: E402
 import mail  # noqa: E402
 import taskbar  # noqa: E402
+import updater  # noqa: E402
 
 SAFE_SCHEMES = {"http", "https", "mailto"}
 APP_HOST = "mailer-app.example"  # virtuální doména (.example nikdy neexistuje na internetu)
@@ -270,6 +271,7 @@ def main():
     taskbar.set_process_app_id()
     server_app.EMBEDDED = True
     server_app.start_background()
+    updater.start(lambda: server_app.database.settings()["auto_update"])
     harden_link_handling()
     lock_navigation()
     disable_tracking_prevention()
@@ -279,11 +281,15 @@ def main():
     window = webview.create_window(APP_NAME, APP_URL, js_api=api, width=1600, height=950,
                                    min_size=(960, 600), text_select=True)
     api._window = window
+    server_app.QUIT = window.destroy
     icon = resource("assets/mailer.ico")
     window.events.shown += lambda: pin_identity(window, icon)
+    window.events.shown += updater.cleanup  # nová verze naběhla: stará (.old) už není potřeba
     webview.start(icon=icon if os.path.exists(icon) else None, private_mode=False,
                   storage_path=str(DATA_DIR / "webview"))
     server_app.flush_pending_sends()  # okno zavřené během odpočtu odloženého odeslání: zprávu přesto odeslat
+    updater.install_on_exit()  # stažená aktualizace se použije při příštím spuštění
+    updater.relaunch()         # „Restartovat a aktualizovat“: spustit novou verzi
 
 
 if __name__ == "__main__":

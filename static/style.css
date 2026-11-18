@@ -303,6 +303,7 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 .google-config { display: flex; flex-direction: column; gap: 8px; }
 .note.ok { color: #059669; }
 .note.bad { color: var(--danger); }
+.update-notes { white-space: pre-line; }
 [hidden] { display: none !important; }
 
 /* ---------- misc ---------- */

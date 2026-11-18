@@ -2484,6 +2484,66 @@ async function renderAppInfo() {
   $('#appShortcutStatus').textContent = sc.programs && sc.desktop ? t('settings.shortcut.both')
     : sc.programs ? t('settings.shortcut.start') : sc.desktop ? t('settings.shortcut.desktop') : '';
   renderLanguages();
+  renderUpdate();
+}
+
+/** Nastavení → O aplikaci: stav automatické aktualizace (updater.py). */
+let updateTimer = null, updatePage = null;
+async function renderUpdate() {
+  clearTimeout(updateTimer);
+  let st;
+  try { st = await api('/api/update'); } catch { return; }
+  const v = { version: st.version, current: st.current }, busy = ['checking', 'downloading'].includes(st.status);
+  const text = {
+    checking: t('update.status.checking'),
+    downloading: t('update.status.downloading', v),
+    current: t('update.status.current', v),
+    available: t(st.can_install ? 'update.status.manual' : 'update.status.devBuild', v),
+    ready: t('update.status.ready', v),
+    installed: t('update.status.installed', v),
+    error: t('update.status.error', { error: st.error }),
+  }[st.status] ?? (st.can_install ? t('update.status.idle') : t('update.status.devOnly'));
+  const el = $('#updateStatus');
+  el.textContent = text;
+  el.className = 'note' + (st.status === 'error' ? ' bad' : ['current', 'ready'].includes(st.status) ? ' ok' : '');
+  const notes = $('#updateNotes');
+  notes.hidden = !(st.notes && ['available', 'downloading', 'ready'].includes(st.status));
+  notes.textContent = notes.hidden ? '' : t('update.notes') + '\n' + st.notes;
+  updatePage = st.download_page;
+  $('#updateInstall').hidden = st.status !== 'ready';
+  $('#updatePage').hidden = st.status !== 'available';
+  $('#updateCheck').disabled = busy || st.status === 'installed';
+  if (busy && $('#settingsDialog').open) updateTimer = setTimeout(renderUpdate, 1000);
+}
+
+async function installUpdate() {
+  if (state.composeWins?.length) return toast(t('update.closeCompose'), true);
+  try {
+    await api('/api/update/install', { method: 'POST' });
+    toast(t('update.restarting'));
+  } catch (err) { toast(err.message, true); }
+  if ($('#settingsDialog').open) renderUpdate();
+}
+
+$('#updateCheck').addEventListener('click', async () => {
+  try { await api('/api/update/check', { method: 'POST' }); } catch (err) { return toast(err.message, true); }
+  setTimeout(renderUpdate, 150);
+});
+$('#updateInstall').addEventListener('click', installUpdate);
+$('#updateBtn').addEventListener('click', installUpdate);
+$('#updatePage').addEventListener('click', () => {
+  if (!updatePage) return;
+  if (desktop()) desktop().open_external(updatePage); else window.open(updatePage, '_blank', 'noopener');
+});
+
+/** Tlačítko v levém panelu, jakmile je nová verze stažená (stav chodí s /api/sync/status). */
+function renderUpdateButton(up) {
+  const btn = $('#updateBtn'), ready = up?.status === 'ready';
+  btn.hidden = !ready;
+  if (ready) {
+    btn.textContent = t('update.sidebar', { version: up.version });
+    btn.title = t('update.sidebarTitle', { version: up.version });
+  }
 }
 
 /** Výběr jazyka: vestavěné jazyky a soubory nalezené ve složkách s jazyky (projdou se znovu). */
@@ -2927,6 +2987,7 @@ async function pollSync() {
     renderTrashFooter();
   }
   if (countsChanged) renderSidebar();
+  renderUpdateButton(st.update);
   const notices = st.notices || [];
   const newest = notices.length ? notices[notices.length - 1][0] : 0;
   if (lastNoticeId !== null) notices.filter(([id]) => id > lastNoticeId).forEach(([, text]) => toast(text, true));

@@ -8,12 +8,15 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 - **Portable režim:** když vedle `NormanMail.exe` položíte soubor `portable.txt` (je v `assets\`), ukládá aplikace všechna data do složky `data` vedle sebe, např. na flash disku. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
 - Při každém spuštění se aplikace nejdřív rozbalí do dočasné složky (`%TEMP%\_MEI…`), což zabere asi 2 s. Úplně první spuštění trvá déle (kontrola antivirem, příprava WebView2). Dočasné složky, které zůstanou po pádu, aplikace při dalším spuštění sama uklidí.
 - Běží vždy jen jedna instance. Druhé spuštění jen přenese okno běžící aplikace do popředí.
+- **Automatické aktualizace:** jednou denně se aplikace podívá do [GitHub Releases](https://github.com/richard03/Norman-Mail/releases), stáhne novou verzi na pozadí vedle sebe (`NormanMail.exe.new`) a nainstaluje ji po kliknutí na *Aktualizovat na X.Y.Z* v levém panelu, nebo sama při zavření aplikace. Vypnout jde v **Nastavení → O aplikaci**, tam je i tlačítko *Zkontrolovat teď*. Když do složky s exe nejde zapisovat (třeba `C:\Program Files`), aplikace jen nabídne stránku ke stažení. Na GitHub se neposílá nic o uživateli, jen běžný požadavek s verzí aplikace.
 
 Jedinou systémovou součástí, kterou Norman Mail potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, aplikace nabídne stránku Microsoftu ke stažení.
 
 **Připnutí na hlavní panel:** na běžící aplikaci klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `NormanMail.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
 
 **Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a podle `NormanMail.spec` sestaví `dist\NormanMail.exe`. Verze je v `version.py` (propisuje se i do vlastností exe). Spec vynechává nepotřebné moduly standardní knihovny a kompiluje s `optimize=2`, proto se v kódu nesmí používat `assert` jako kontrola za běhu. Pro ladění sestavte verzi s konzolí: `set NORMANMAIL_CONSOLE=1` a pak `build.bat`.
+
+**Vydání nové verze:** zvyšte `VERSION` ve `version.py`, commitněte a pushněte a spusťte `.venv\Scripts\python tools\release.py --notes "Co je nového"`. Skript zkontroluje čistý strom a novou verzi, sestaví exe, vytvoří a podepíše `latest.json` a přes [GitHub CLI](https://cli.github.com/) (`gh`, `winget install GitHub.cli`, `gh auth login`) založí release `vX.Y.Z`. Bez `gh` vypíše tři soubory k ručnímu nahrání. Podepisuje se soukromým klíčem z `%USERPROFILE%\.normanmail\release_key`, který vznikl jednou přes `tools\release.py --genkey` a nesmí se dostat do repozitáře. **Klíč zálohujte:** bez něj už nainstalované verze žádnou další aktualizaci nepřijmou a uživatelé by si novou verzi museli stáhnout ručně. Aktualizace jde vyzkoušet z místní složky: `set NORMANMAIL_UPDATE_URL=http://127.0.0.1:8000` (složka s `latest.json`, `latest.json.sig` a `NormanMail.exe`, třeba `python -m http.server` v `dist`), podpis se ověřuje i tak.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 
@@ -115,6 +118,7 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\` (název složky zůstal z 
 - Lokální server naslouchá pouze na `127.0.0.1` a odmítá cizí hlavičky Host a Origin (ochrana proti CSRF a DNS rebindingu).
 - HTML zprávy se zobrazují v izolovaném rámci (iframe) s atributem sandbox, takže se v nich nespustí žádné skripty. Vzdálené obrázky jsou ve výchozím stavu zablokované, protože slouží ke sledování otevření zprávy. Lze je povolit tlačítkem.
 - Přílohy se vždy stahují jako soubor, nikdy se neotevírají v rámci aplikace.
+- Aktualizace jsou podepsané (Ed25519, `ed25519.py` podle RFC 8032). Veřejný klíč je zabudovaný v aplikaci, soukromý má jen vývojář, takže ani převzatý účet na GitHubu nemůže uživatelům podstrčit cizí program. Stažený exe musí sedět na velikost a SHA-256 z podepsaného `latest.json`, a aplikace nikdy nepřejde na starší verzi.
 
 ## Gmail – přihlášení přes Google (OAuth)
 
@@ -180,11 +184,13 @@ about.text: |
 | `main.py` | Desktopová aplikace (okno, ukládání příloh) |
 | `instance.py` | Jediná instance aplikace, úklid dočasných složek sestavené verze |
 | `taskbar.py` | Identita aplikace na hlavním panelu, zástupci |
+| `updater.py`, `ed25519.py` | Automatické aktualizace z GitHub Releases, ověření podpisu |
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
 | `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
 | `i18n.py`, `static/i18n/` | Lokalizace: načítání katalogů textů (vestavěných i uživatelských), anglický a český katalog |
 | `tests/` | Testy (`.venv\Scripts\python -m unittest discover tests`) |
+| `tools/release.py` | Vydání nové verze (sestavení, podepsaný `latest.json`, GitHub release) |
 | `tools/i18n_add.py` | Pomocník pro přidání textů do obou vestavěných katalogů |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |

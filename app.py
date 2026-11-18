@@ -23,12 +23,14 @@ from i18n import t as tr
 import mail
 import sync
 import taskbar
+import updater
 from store import KEYRING_OK, AccountStore, ValidationError, normalize, portable_dir
 from version import VERSION
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MAILER_PORT", "8765"))
 EMBEDDED = False  # desktopová verze: žádný trvalý server (nastavuje main.py)
+QUIT = None  # zavře okno desktopové aplikace (nastavuje main.py; restart po aktualizaci)
 PAGE_SIZE = 50
 UNIFIED_PAGE_SIZE = 30
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
@@ -156,6 +158,35 @@ def app_info():
             except OSError:
                 pass
     return jsonify(version=VERSION, portable=bool(portable_dir()), shortcuts=shortcuts)
+
+
+@app.get("/api/update")
+def update_status():
+    """Stav automatické aktualizace (Nastavení → O aplikaci)."""
+    st = updater.status()
+    err = st.pop("error")
+    st["error"] = tr(err[0], **err[1]) if err else None
+    st["auto"] = database.settings()["auto_update"]
+    return jsonify(st)
+
+
+@app.post("/api/update/check")
+def update_check():
+    updater.check_async()
+    return jsonify(ok=True)
+
+
+@app.post("/api/update/install")
+def update_install():
+    """Nainstaluje staženou verzi a restartuje aplikaci (zavře okno, main.py spustí novou verzi)."""
+    if not EMBEDDED or QUIT is None:
+        return jsonify(error=tr("error.desktopOnly")), 400
+    try:
+        updater.install(restart=True)
+    except updater.UpdateError as e:
+        return jsonify(error=tr(e.key, **e.params)), 409
+    threading.Timer(0.3, QUIT).start()  # odpověď ještě stihne dojít do okna
+    return jsonify(ok=True)
 
 
 @app.post("/api/app/shortcut")
@@ -1233,7 +1264,12 @@ def sync_status():
     return jsonify(version=database.version, unread=database.unread_counts(), views=database.view_unread(),
                    folders=database.folder_unread(), trash=database.trash_total(a["id"] for a in store.all()),
                    spam=database.role_count("junk", [a["id"] for a in store.all()], unread=True),
-                   errors=syncer.errors, notices=syncer.notices)
+                   errors=syncer.errors, notices=syncer.notices, update=_update_brief())
+
+
+def _update_brief():
+    st = updater.status()
+    return {"status": st["status"], "version": st["version"]}
 
 
 @app.post("/api/sync")

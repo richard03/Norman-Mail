@@ -15,6 +15,7 @@
     <button id="composeBtn" class="btn primary wide" data-i18n="sidebar.newMessage"></button>
     <nav id="accounts"></nav>
     <div class="sidebar-bottom">
+      <button id="updateBtn" class="btn primary wide" hidden></button>
       <button id="addAccountBtn" class="btn wide" data-i18n="sidebar.addAccount"></button>
       <button id="settingsBtn" class="btn wide" data-i18n="sidebar.settings"></button>
     </div>
@@ -367,6 +368,19 @@
         <div class="bayes-actions">
           <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
           <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
+        </div>
+        <h3 class="sub-head" data-i18n="settings.update.title"></h3>
+        <div class="options">
+          <label class="option"><input type="checkbox" data-setting="auto_update">
+            <span data-i18n="settings.update.auto"></span></label>
+        </div>
+        <p class="note" data-i18n="settings.update.note"></p>
+        <p id="updateStatus" class="note"></p>
+        <p id="updateNotes" class="note update-notes" hidden></p>
+        <div class="bayes-actions">
+          <button type="button" class="btn" id="updateCheck" data-i18n="settings.update.check"></button>
+          <button type="button" class="btn primary" id="updateInstall" hidden data-i18n="settings.update.restart"></button>
+          <button type="button" class="btn" id="updatePage" hidden data-i18n="settings.update.downloadPage"></button>
         </div>
         <p id="appPortable" class="note" hidden data-i18n="settings.app.portable"></p>
         <div id="appShortcuts" hidden>
