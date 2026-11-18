@@ -524,6 +524,7 @@ def message(acc_id, uid):
     database.set_flag(acc_id, folder, uid, "seen", True)
     data = mail.parse_message(raw, uid, folder, flags, size)
     data["snoozed_until"] = row["snoozed_until"] if row else None
+    data["todo"] = bool(row and row["todo"])
     if row:
         data["notification"], data["unimportant"] = row["notification"], row["unimportant"]
     else:
@@ -584,6 +585,21 @@ def message_archive(acc_id, uid):
     database.remove_message(acc_id, folder, uid)
     database.bump()
     return jsonify(ok=True)
+
+
+@app.post("/api/accounts/<acc_id>/messages/<int:uid>/todo")
+def message_todo(acc_id, uid):
+    """ToDo: {value: true} přesune zprávu doručené pošty do pohledu ToDo, {value: false} (Vyřešeno) ji vrátí
+    do pohledu, kam patří. Jen místní značka, na serveru se nic nemění. Vrací pohled, kam zpráva teď patří."""
+    account_or_404(acc_id)
+    data = request.get_json(force=True) or {}
+    folder = folder_arg(data)
+    rec = database.message(acc_id, folder, uid)
+    if folder != "INBOX" or rec is None:
+        raise ValidationError(tr("err.todoInboxOnly"))
+    database.set_todo(rec, bool(data.get("value", True)))
+    database.bump()
+    return jsonify(ok=True, view=database.view_of(acc_id, folder, uid))
 
 
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/snooze")

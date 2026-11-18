@@ -735,3 +735,14 @@ err.update.badHash: "stažený soubor je poškozený (nesouhlasí kontrolní sou
 err.update.failed: "neočekávaná chyba ({error})"
 err.update.notReady: "Žádná aktualizace není připravená."
 err.update.install: "Aktualizaci nejde nainstalovat: {error}"
+
+# --- ToDo
+view.todo: "ToDo"
+nav.todoTitle: "Zprávy k vyřízení. Číslo je počet všech zpráv v ToDo."
+actions.todo: "ToDo"
+action.todoTitle: "Přesune zprávu do ToDo, dokud ji neoznačíte jako vyřešenou"
+action.todoResolved: "Vyřešeno"
+action.todoResolvedTitle: "Vrátí zprávu tam, odkud přišla"
+todo.added: "Zpráva je v ToDo"
+todo.resolved: "Vyřešeno, zpráva je zpátky v: {view}"
+err.todoInboxOnly: "Do ToDo jde přesunout jen zpráva z doručené pošty."

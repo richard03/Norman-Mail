@@ -446,7 +446,7 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
 .action.active { background: var(--active); border-color: var(--accent); }
-.sub-head { margin-top: 22px; }
+.settings-main h3.sub-head, .settings-rules h3.sub-head { margin-top: 28px; }  /* mezera nad podnadpisem, přebije margin: 0 výše */
 dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
 .bayes-actions { margin-top: 10px; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }

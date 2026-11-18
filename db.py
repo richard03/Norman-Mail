@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS notify_rules(
 CREATE TABLE IF NOT EXISTS unimportant_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
     created REAL, UNIQUE(kind, value));
+CREATE TABLE IF NOT EXISTS todos(
+    key TEXT PRIMARY KEY, created REAL);
 CREATE TABLE IF NOT EXISTS message_marks(
     key TEXT PRIMARY KEY, category TEXT NOT NULL, created REAL);
 CREATE TABLE IF NOT EXISTS category_rules(
@@ -108,11 +110,15 @@ CATEGORY_FILTERS = {"notifications": IS_NOTIFICATION, "unimportant": IS_UNIMPORT
 # Zpráva je přímo pro mě, pokud je některá z mých adres (daného účtu) v poli Komu.
 IS_DIRECT = ("EXISTS (SELECT 1 FROM my_addresses a WHERE a.account_id=m.account_id "
              "AND instr(m.to_addrs, ',' || a.email || ',') > 0)")
+# ToDo: zpráva označená k vyřízení je jen v pohledu ToDo. Značka je místní (podle Message-ID, přežije
+# přesun na serveru); po „Vyřešeno“ zpráva zase patří tam, kam ji řadí kategorie a adresa.
+IS_TODO = f"EXISTS (SELECT 1 FROM todos td WHERE td.key={MSG_KEY})"
 VIEW_FILTERS = {
-    "important": f"({CATEGORY}) IS NULL AND {IS_DIRECT}",
-    "fyi": f"({CATEGORY}) IS NULL AND NOT {IS_DIRECT}",  # Vzít na vědomí: jsem v kopii / skryté kopii
-    "unimportant": IS_UNIMPORTANT,
-    "notifications": IS_NOTIFICATION,
+    "todo": IS_TODO,
+    "important": f"NOT {IS_TODO} AND ({CATEGORY}) IS NULL AND {IS_DIRECT}",
+    "fyi": f"NOT {IS_TODO} AND ({CATEGORY}) IS NULL AND NOT {IS_DIRECT}",  # Vzít na vědomí: kopie / skrytá kopie
+    "unimportant": f"NOT {IS_TODO} AND {IS_UNIMPORTANT}",
+    "notifications": f"NOT {IS_TODO} AND {IS_NOTIFICATION}",
     "all": "1",
 }
 
@@ -360,9 +366,10 @@ class Database:
             "snoozed_until": r["snoozed_until"] if "snoozed_until" in r.keys() else None,
             "notification": "category" in r.keys() and r["category"] == "notifications",
             "unimportant": "category" in r.keys() and r["category"] == "unimportant",
+            "todo": "todo" in r.keys() and bool(r["todo"]),
         }
 
-    _CATS = f"{CATEGORY} AS category"
+    _CATS = f"{CATEGORY} AS category, {IS_TODO} AS todo"
     _SELECT = f"""SELECT m.*, s.until AS snoozed_until, {_CATS} FROM messages m
                  LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid"""
 
@@ -376,6 +383,7 @@ class Database:
     # Priorita pro odstranění duplicit (Gmail: zpráva je v doručené poště i ve „Všech zprávách“).
     _LABELED = f"""SELECT m.*, s.until AS snoozed_until, {_CATS},
             CASE WHEN u.name IS NOT NULL THEN u.name
+                 WHEN m.folder='INBOX' AND {IS_TODO} THEN '@view.todo'
                  WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN '@view.notifications'
                                                  WHEN 'unimportant' THEN '@view.unimportant'
                                                  ELSE CASE WHEN {IS_DIRECT} THEN '@view.important' ELSE '@view.fyi' END END
@@ -510,22 +518,30 @@ class Database:
         return rows[0][0] if rows else None
 
     # pohled doručené pošty, do kterého zpráva patří
-    _VIEW = f"COALESCE({CATEGORY}, CASE WHEN {IS_DIRECT} THEN 'important' ELSE 'fyi' END)"
+    _VIEW = f"CASE WHEN {IS_TODO} THEN 'todo' ELSE COALESCE({CATEGORY}, CASE WHEN {IS_DIRECT} THEN 'important' ELSE 'fyi' END) END"
 
     def view_of(self, acc_id, folder, uid):
-        """Pohled sloučené doručené pošty (important / fyi / unimportant / notifications), kam zpráva patří."""
+        """Pohled sloučené doručené pošty (todo / important / fyi / unimportant / notifications), kam zpráva patří."""
         rows = self._q(f"SELECT {self._VIEW} FROM messages m WHERE m.account_id=? AND m.folder=? AND m.uid=?",
                        (acc_id, folder, uid))
         return rows[0][0] if rows else "all"
 
     def view_unread(self, folder="INBOX") -> dict:
-        """Počty nepřečtených pro pohledy doručené pošty (jedním průchodem)."""
+        """Počty nepřečtených pro pohledy doručené pošty (jedním průchodem). U ToDo celkový počet zpráv."""
         out = {view: 0 for view in VIEW_FILTERS}
         for view, n in self._q(f"SELECT {self._VIEW} AS v, COUNT(*) FROM messages m WHERE m.folder=? AND m.seen=0 "
                                "GROUP BY v", (folder,)):
             out[view] = n
         out["all"] = sum(n for v, n in out.items() if v != "all")
+        out["todo"] = self._q(f"SELECT COUNT(*) FROM messages m WHERE m.folder=? AND {IS_TODO}", (folder,))[0][0]
         return out
+
+    def set_todo(self, rec, value: bool):
+        """Označí zprávu k vyřízení (pohled ToDo), nebo značku zruší (Vyřešeno)."""
+        if value:
+            self._q("INSERT OR REPLACE INTO todos VALUES(?, ?)", (message_key(rec), time.time()))
+        else:
+            self._q("DELETE FROM todos WHERE key=?", (message_key(rec),))
 
     # ------------------------------------------------------------------ koš („Smazané“)
 
@@ -697,10 +713,11 @@ class Database:
     # ------------------------------------------------------------------ hromadné operace s Notifikacemi / Nedůležitými
 
     def category_uids(self, category, seen=None, older_than=None) -> dict:
-        """{account_id: [uid, ...]} zpráv kategorie v doručené poště. Odložené zprávy se vynechávají."""
+        """{account_id: [uid, ...]} zpráv kategorie v doručené poště. Odložené zprávy a zprávy v ToDo
+        se vynechávají (automatické mazání a označování se jich netýká)."""
         sql = f"""SELECT m.account_id, m.uid FROM messages m
                   LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
-                  WHERE m.folder='INBOX' AND {CATEGORY_FILTERS[category]} AND s.uid IS NULL"""
+                  WHERE m.folder='INBOX' AND {CATEGORY_FILTERS[category]} AND s.uid IS NULL AND NOT {IS_TODO}"""
         params = []
         if seen is not None:
             sql += " AND m.seen=?"

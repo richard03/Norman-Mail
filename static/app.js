@@ -84,7 +84,8 @@ const state = {
 let listToken = 0;
 
 // Každá zpráva doručené pošty patří právě do jednoho z těchto pohledů (žádný souhrnný seznam navíc).
-const UNIFIED_VIEWS = [['important', 'view.important'], ['fyi', 'view.fyi'], ['unimportant', 'view.unimportant'],
+// ToDo: zprávy označené k vyřízení; číslo u něj je celkový počet zpráv, ne nepřečtené.
+const UNIFIED_VIEWS = [['todo', 'view.todo'], ['important', 'view.important'], ['fyi', 'view.fyi'], ['unimportant', 'view.unimportant'],
                        ['notifications', 'view.notifications']];
 const unifiedTitle = view => t(Object.fromEntries(UNIFIED_VIEWS)[view]);
 // Ikona přílohy (sponka) v seznamu zpráv a v Kontextu
@@ -208,7 +209,8 @@ function renderSidebar() {
     const vu = state.viewUnread || {};
     for (const [filter, label] of UNIFIED_VIEWS) {
       const active = state.view.type === 'unified' && state.view.filter === filter;
-      h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}">
+      h += `<div class="nav-item unified ${active ? 'active' : ''}" data-unified="${filter}"
+              ${filter === 'todo' ? `title="${esc(t('nav.todoTitle'))}"` : ''}>
               <span class="label">${esc(t(label))}</span>${badge(vu[filter])}</div>`;
     }
     // Odeslané: odeslaná pošta všech účtů
@@ -987,6 +989,12 @@ function updateActions() {
   document.querySelectorAll('#actions [data-act]').forEach(b => {
     b.disabled = !(ready || (multi && ['delete', 'spam'].includes(b.dataset.act)));
   });
+  // ToDo jen pro zprávy doručené pošty; ve zprávě v ToDo místo něj „Vyřešeno“
+  const tb = $('#actions [data-act="todo"]'), todo = !!state.current && inTodo(state.current);
+  if (ready && state.current.folder !== 'INBOX') tb.disabled = true;
+  tb.classList.toggle('active', todo);
+  tb.querySelector('.label').textContent = todo ? t('action.todoResolved') : t('actions.todo');
+  tb.title = todo ? t('action.todoResolvedTitle') : t('action.todoTitle');
   const sb = $('#actions [data-act="spam"]');
   const inSpam = state.view.type === 'spam';
   sb.classList.toggle('active', inSpam);
@@ -1002,6 +1010,35 @@ function updateActions() {
 }
 
 const MOVE_DONE = { archive: 'action.archived', spam: 'action.movedToSpam', delete: 'action.movedToTrash' };
+
+/** Je zpráva v ToDo? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
+function inTodo(cur) {
+  if (cur.todo !== undefined) return cur.todo;
+  return !!(cur.data ? cur.data.todo : cur.item?.todo);
+}
+
+/** ToDo ↔ Vyřešeno: zpráva se přesune do pohledu ToDo, nebo se vrátí do pohledu, odkud přišla. */
+async function toggleTodo(cur, btn) {
+  const value = !inTodo(cur);
+  btn.classList.add('busy');
+  try {
+    const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/todo`,
+      { method: 'POST', body: { folder: cur.folder, value } });
+    cur.todo = value;
+    if (cur.data) cur.data.todo = value;
+    const item = findListItem(cur);
+    if (item) item.todo = value;
+    toast(value ? t('todo.added') : t('todo.resolved', { view: unifiedTitle(res.view) || '' }));
+    const v = state.view;
+    if (v.type === 'unified' && v.filter !== 'all' && res.view !== v.filter) removeAndAdvance(cur);
+    else updateActions();
+    pollSync();  // počty v levém sloupci
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
 
 /** Patří zpráva do kategorie? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
 function inCategory(cur, cat) {
@@ -1035,6 +1072,7 @@ async function doAction(act, btn) {
   if (act === 'notification') return categorize(cur, 'notifications', btn);
   if (act === 'unimportant') return categorize(cur, 'unimportant', btn);
   if (act === 'rule') return openRuleDialog(cur);
+  if (act === 'todo') return toggleTodo(cur, btn);
   if (act === 'snoozeDay' || act === 'snoozeWeek') return snooze(cur, act === 'snoozeDay' ? 1 : 7, btn);
   if (!MOVE_DONE[act]) return;
 
