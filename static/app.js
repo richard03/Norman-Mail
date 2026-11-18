@@ -387,6 +387,7 @@ function setView(view, reveal = null) {
   if (left && left !== viewCategory(view) && state.settings?.[`${CATEGORIES[left].setting}_mark_read_on_leave`])
     markCategoryRead(left);
   state.view = view;
+  if (!reveal) closeMessage();  // zpráva z předchozí sekce nezůstane otevřená
   setUnreadOnly(false);
   state.selected = reveal ? new Set([reveal.key]) : new Set();
   state.anchor = reveal ? reveal.key : null;
@@ -822,12 +823,19 @@ function showReaderPlaceholder(html) {
 }
 
 function clearCurrent(text = t('common.selectMessage')) {
+  closeMessage(text);
+  renderList();
+}
+
+/** Bez otevřené zprávy: čtení, Akce a Kontext se schovají (#app.no-message), dokud uživatel nevybere
+ *  zprávu. Hlášku (např. že zpráva zmizela) necháme vidět. */
+function closeMessage(text = t('common.selectMessage')) {
   state.current = null;
   state.selected = new Set();
   showReaderPlaceholder(`<div class="empty">${esc(text)}</div>`);
   clearContext();
   updateActions();
-  renderList();
+  $('#app').classList.toggle('no-message', text === t('common.selectMessage'));
 }
 
 function hasRemoteContent(html) {
@@ -986,6 +994,7 @@ $('#messageHead').addEventListener('click', async e => {
 function updateActions() {
   const ready = !!state.current;
   const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat a (ne)spam
+  if (ready || multi) $('#app').classList.remove('no-message');
   document.querySelectorAll('#actions [data-act]').forEach(b => {
     b.disabled = !(ready || (multi && ['delete', 'spam'].includes(b.dataset.act)));
   });
