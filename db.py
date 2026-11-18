@@ -338,7 +338,8 @@ class Database:
             [(int(s), int(f), acc_id, folder, u) for u, s, f in changes]))
 
     def set_flag(self, acc_id, folder, uid, column, value):
-        assert column in ("seen", "flagged")
+        if not (column in ("seen", "flagged")):
+            raise ValueError("Neplatný parametr.")
         self._q(f"UPDATE messages SET {column}=? WHERE account_id=? AND folder=? AND uid=?",
                 (int(value), acc_id, folder, uid))
 
@@ -617,7 +618,8 @@ class Database:
 
     def update_rule(self, table, rule_id, kind, value, after_read=None) -> bool:
         """Úprava pravidla (typ, hodnota, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
-        assert table in self.RULE_TABLES
+        if not (table in self.RULE_TABLES):
+            raise ValueError("Neplatný parametr.")
         sets, params = ["kind=?", "value=?"], [kind, value]
         if after_read is not None:
             sets.append("after_read=?")
@@ -766,7 +768,8 @@ class Database:
     def add_folder_rule(self, folder_id, kind, value, after_read=False):
         """Pravidlo složky (odesílatel / příjemce / slovo v předmětu), přesun ihned nebo až po přečtení.
         Stejné pravidlo může patřit jen do jedné složky (při přidání do jiné se přesune)."""
-        assert kind in RULE_KINDS
+        if not (kind in RULE_KINDS):
+            raise ValueError("Neplatný parametr.")
         value = " ".join(value.lower().split())
         self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read) VALUES(?, ?, ?, ?, ?)
                    ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created,
@@ -920,7 +923,8 @@ class Database:
     def add_category_rule(self, category, sender="", recipient="", subject=""):
         """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Stejné pravidlo může být v obou
         kategoriích – pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
-        assert category in CATEGORIES and (sender or recipient or subject)
+        if not (category in CATEGORIES and (sender or recipient or subject)):
+            raise ValueError("Neplatný parametr.")
         self._q("""INSERT OR IGNORE INTO category_rules(category, sender, recipient, subject, created)
                    VALUES(?, ?, ?, ?, ?)""", (category, sender.lower(), recipient.lower(), subject.lower(), time.time()))
 
@@ -973,7 +977,8 @@ class Database:
 
     def mark_message(self, rec, category):
         """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
-        assert category in CATEGORIES
+        if not (category in CATEGORIES):
+            raise ValueError("Neplatný parametr.")
         self._q("INSERT OR REPLACE INTO message_marks VALUES(?, ?, ?)", (message_key(rec), category, time.time()))
 
     def unmark_message(self, rec, category=None):

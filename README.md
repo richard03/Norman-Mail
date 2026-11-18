@@ -4,15 +4,16 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 
 ## Spuštění
 
-**Pro Windows bez Pythonu** (Windows 10/11, 64bit) jsou dvě varianty. Obě obsahují vše potřebné včetně Pythonu:
-- **Instalátor** `NormanMail-Setup-VERZE.exe`: nainstaluje Norman Mail jen pro aktuálního uživatele (bez práv správce) do `%LOCALAPPDATA%\Programs\Norman Mail`, přidá ho do nabídky Start (volitelně i zástupce na plochu) a do *Nainstalované aplikace*, odkud jde odinstalovat. Odinstalace nemaže data (`%APPDATA%\Mailer`) ani hesla.
-- **Portable** `NormanMail-VERZE-portable.zip`: rozbalte kamkoli (i na flash disk) a spusťte `NormanMail.exe`. Dokud vedle něj leží `portable.txt`, ukládá všechna data do složky `data` vedle sebe. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
+**Pro Windows bez Pythonu** (Windows 10/11, 64bit): celá aplikace je jediný soubor `NormanMail.exe` (asi 12 MB, obsahuje vše potřebné včetně Pythonu). Nic se neinstaluje: uložte ho kamkoli a spusťte. Zástupce v nabídce Start nebo na ploše vytvoříte v **Nastavení → O aplikaci**. Data jsou v `%APPDATA%\Mailer`, hesla ve Správci pověření Windows. Aplikaci odstraníte smazáním souboru (a zástupců).
+- **Portable režim:** když vedle `NormanMail.exe` položíte soubor `portable.txt` (je v `assets\`), ukládá aplikace všechna data do složky `data` vedle sebe, např. na flash disku. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
+- Při každém spuštění se aplikace nejdřív rozbalí do dočasné složky (`%TEMP%\_MEI…`), což zabere asi 2 s. Úplně první spuštění trvá déle (kontrola antivirem, příprava WebView2). Dočasné složky, které zůstanou po pádu, aplikace při dalším spuštění sama uklidí.
+- Běží vždy jen jedna instance. Druhé spuštění jen přenese okno běžící aplikace do popředí.
 
-Jedinou systémovou součástí, kterou Norman Mail potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, instalátor i aplikace nabídnou stránku Microsoftu ke stažení.
+Jedinou systémovou součástí, kterou Norman Mail potřebuje, je **Microsoft Edge WebView2 Runtime**. Windows 11 ho mají vždy, Windows 10 téměř vždy (instaluje se s Edgem). Pokud chybí, aplikace nabídne stránku Microsoftu ke stažení.
 
 **Připnutí na hlavní panel:** na běžící aplikaci klikněte pravým tlačítkem na ikonu na hlavním panelu → *Připnout na hlavní panel*. Připnutá ikona spustí tu verzi, ze které jste připínali: `NormanMail.exe`, nebo verzi ze zdrojových kódů (`start.bat`). Okno má vlastní identitu aplikace, takže se už nepřipne Python.
 
-**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a do `dist\` uloží složku `NormanMail\` (aplikace), `NormanMail-VERZE-portable.zip` a, je-li nainstalovaný [Inno Setup](https://jrsoftware.org/isinfo.php) 6 nebo 7 (`winget install JRSoftware.InnoSetup`), i instalátor `NormanMail-Setup-VERZE.exe` (skript `installer.iss`). Verze je v `version.py`.
+**Sestavení:** spusťte `build.bat`. Nainstaluje závislosti a PyInstaller a podle `NormanMail.spec` sestaví `dist\NormanMail.exe`. Verze je v `version.py` (propisuje se i do vlastností exe). Spec vynechává nepotřebné moduly standardní knihovny a kompiluje s `optimize=2`, proto se v kódu nesmí používat `assert` jako kontrola za běhu. Pro ladění sestavte verzi s konzolí: `set NORMANMAIL_CONSOLE=1` a pak `build.bat`.
 
 **Spuštění ze zdrojových kódů** (pro vývoj): `start.bat`, nebo `.venv\Scripts\python main.py`.
 
@@ -147,6 +148,8 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | Soubor | Účel |
 |---|---|
 | `main.py` | Desktopová aplikace (okno, ukládání příloh) |
+| `instance.py` | Jediná instance aplikace, úklid dočasných složek sestavené verze |
+| `taskbar.py` | Identita aplikace na hlavním panelu, zástupci |
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
 | `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
@@ -155,7 +158,7 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | `mail.py` | Práce s IMAP a SMTP, parsování zpráv, sdílení spojení |
 | `store.py` | Ukládání účtů a hesel |
 | `static/` | Uživatelské rozhraní (HTML, CSS, JS) |
-| `build.bat`, `installer.iss`, `version.py` | Sestavení aplikace, portable balíčku a instalátoru |
-| `assets/portable.txt` | Značka portable verze (kopíruje se vedle `NormanMail.exe`) |
+| `build.bat`, `NormanMail.spec`, `version.py` | Sestavení `NormanMail.exe` |
+| `assets/portable.txt` | Značka portable režimu (položte vedle `NormanMail.exe`) |
 
 Port lze změnit proměnnou prostředí `MAILER_PORT`, složku s daty proměnnou `MAILER_DATA`.

@@ -66,8 +66,9 @@ def normalize(data: dict) -> dict:
     for k in ("imap_port", "smtp_port"):
         try:
             port = int(acc[k])
-            assert 0 < port < 65536
-        except (ValueError, AssertionError):
+            if not 0 < port < 65536:
+                raise ValueError
+        except ValueError:
             raise ValidationError(f"Neplatný port: {acc[k]}")
         acc[k] = port
     for k in ("imap_security", "smtp_security"):

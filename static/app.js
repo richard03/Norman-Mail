@@ -2444,7 +2444,32 @@ function showSettingsSection(section) {
     : !!dlg.querySelector(`.settings-rules [data-panel="${section}"]`);
   dlg.querySelector('.settings-body').classList.toggle('no-rules', !hasRules);
   markSettingsNav();
+  if (section === 'app') renderAppInfo();
 }
+
+/** Nastavení → O aplikaci: verze, portable režim, zástupci. */
+async function renderAppInfo() {
+  let info;
+  try { info = await api('/api/app'); } catch { return; }
+  $('#appVersion').textContent = 'verze ' + info.version;
+  $('#appPortable').hidden = !info.portable;
+  const sc = info.shortcuts || {};
+  $('#appShortcuts').hidden = !Object.keys(sc).length;  // jen v desktopové aplikaci
+  const have = [sc.programs && 'v nabídce Start', sc.desktop && 'na ploše'].filter(Boolean);
+  $('#appShortcutStatus').textContent = have.length ? `Zástupce už je ${have.join(' a ')}.` : '';
+}
+
+$('#appShortcuts').addEventListener('click', async e => {
+  const b = e.target.closest('[data-shortcut]');
+  if (!b) return;
+  b.disabled = true;
+  try {
+    await api('/api/app/shortcut', { method: 'POST', body: { where: b.dataset.shortcut } });
+    toast(b.dataset.shortcut === 'desktop' ? 'Zástupce přidán na plochu' : 'Zástupce přidán do nabídky Start');
+    renderAppInfo();
+  } catch (err) { toast(err.message, true); }
+  finally { b.disabled = false; }
+});
 
 /** Složky v levém sloupci Nastavení – každá má svou obrazovku. */
 function renderSettingsFolders() {

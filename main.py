@@ -29,15 +29,33 @@ def unblock_bundled_dlls():
 
 unblock_bundled_dlls()
 
+import instance  # noqa: E402
+from store import DATA_DIR  # noqa: E402
+
+APP_NAME = "Norman Mail"
+
+
+def ensure_single_instance():
+    """Pro jedna data smí běžet jen jedna instance. Musí proběhnout před importem app, který otevírá
+    databázi. Druhé spuštění jen ukáže okno běžící instance a skončí."""
+    # restart po aktualizaci: předchozí instance ještě chvíli končí, počkáme na ni
+    locked = (instance.wait_and_acquire(DATA_DIR) if "--after-update" in sys.argv[1:]
+              else instance.acquire(DATA_DIR))
+    if not locked:
+        instance.activate_existing(APP_NAME)
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    ensure_single_instance()
+
 import webview  # noqa: E402  (až po odblokování knihoven)
 
-import app as server_app
-import mail
-import taskbar
-from store import DATA_DIR
+import app as server_app  # noqa: E402
+import mail  # noqa: E402
+import taskbar  # noqa: E402
 
 SAFE_SCHEMES = {"http", "https", "mailto"}
-APP_NAME = "Norman Mail"
 APP_HOST = "mailer-app.example"  # virtuální doména (.example nikdy neexistuje na internetu)
 APP_URL = f"https://{APP_HOST}/index.html"
 
@@ -249,6 +267,7 @@ def require_webview2() -> bool:
 def main():
     if not require_webview2():
         return
+    instance.cleanup_in_background()
     taskbar.set_process_app_id()
     server_app.EMBEDDED = True
     server_app.start_background()

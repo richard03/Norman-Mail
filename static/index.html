@@ -282,6 +282,8 @@
       <div class="settings-nav-section">Složky</div>
       <div id="settingsFolders"></div>
       <button type="button" class="nav-new" data-new-folder>+ Nová složka</button>
+      <div class="settings-nav-section">Aplikace</div>
+      <button type="button" data-section="app">O aplikaci</button>
     </nav>
 
     <section class="settings-main">
@@ -360,6 +362,21 @@
           automaticky označí jako přečtené. Číslo u složky ukazuje celkový počet zpráv.</p>
         <p class="note">Tlačítko <b>Vyprázdnit</b> pod seznamem zpráv je po potvrzení natrvalo smaže ze všech serverů.
           Smazání zprávy přímo ve Smazaných je definitivní.</p>
+      </div>
+      <div data-panel="app">
+        <h3>Norman Mail <span id="appVersion" class="muted"></span></h3>
+        <p id="appPortable" class="note" hidden>Portable verze: všechna data jsou ve složce <b>data</b> vedle
+          programu (dokud vedle něj leží soubor <b>portable.txt</b>).</p>
+        <div id="appShortcuts" hidden>
+          <h3 class="sub-head">Zástupci</h3>
+          <p class="note">Aplikace je jediný soubor bez instalace. Zástupce ji spustí odtud, kde soubor právě leží;
+            když program přesunete, vytvořte zástupce znovu.</p>
+          <div class="bayes-actions">
+            <button type="button" class="btn" data-shortcut="programs">Přidat do nabídky Start</button>
+            <button type="button" class="btn" data-shortcut="desktop">Přidat na plochu</button>
+          </div>
+          <p id="appShortcutStatus" class="note"></p>
+        </div>
       </div>
       <div data-panel="folder">
         <form id="folderForm" class="folder-form" autocomplete="off">

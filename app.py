@@ -20,7 +20,9 @@ import db
 import google_oauth
 import mail
 import sync
-from store import KEYRING_OK, AccountStore, ValidationError, normalize
+import taskbar
+from store import KEYRING_OK, AccountStore, ValidationError, normalize, portable_dir
+from version import VERSION
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("MAILER_PORT", "8765"))
@@ -135,6 +137,35 @@ def accounts_list():
 @app.get("/api/info")
 def info():
     return jsonify(keyring=KEYRING_OK)
+
+
+SHORTCUT_NAME = "Norman Mail"
+
+
+@app.get("/api/app")
+def app_info():
+    """Verze a stav zástupců (Nastavení → Aplikace)."""
+    shortcuts = {}
+    if EMBEDDED:
+        for where in taskbar.CSIDL:
+            try:
+                shortcuts[where] = os.path.exists(taskbar.shortcut_path(where, SHORTCUT_NAME))
+            except OSError:
+                pass
+    return jsonify(version=VERSION, portable=bool(portable_dir()), shortcuts=shortcuts)
+
+
+@app.post("/api/app/shortcut")
+def app_shortcut():
+    """Zástupce v nabídce Start / na ploše (aplikace je jediný exe bez instalátoru)."""
+    where = (request.get_json(force=True) or {}).get("where")
+    if not EMBEDDED or where not in taskbar.CSIDL:
+        return jsonify(error="Zástupce jde vytvořit jen v desktopové aplikaci."), 400
+    try:
+        taskbar.create_shortcut(where, SHORTCUT_NAME)
+    except OSError as e:
+        return jsonify(error=str(e)), 500
+    return jsonify(ok=True)
 
 
 LOGIN_FIELDS = ("username", "imap_host", "imap_port", "imap_security", "smtp_host", "smtp_port", "smtp_security")
