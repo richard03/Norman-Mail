@@ -99,6 +99,11 @@ CLSCTX_INPROC_SERVER = 1
 CSIDL = {"programs": 0x02, "desktop": 0x10}  # nabídka Start (Programy) a plocha aktuálního uživatele
 
 
+def _tr(key, **params):
+    from i18n import t  # taskbar se načítá i bez aplikace (main.py před importem app)
+    return t(key, **params)
+
+
 def launch_target():
     """(program, argumenty, ikona) pro spuštění aplikace – sestavená verze, nebo zdrojové kódy."""
     if getattr(sys, "frozen", False):
@@ -113,7 +118,7 @@ def launch_target():
 def shortcut_path(where, name):
     buf = ctypes.create_unicode_buffer(260)
     if ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL[where], None, 0, buf) != 0:
-        raise OSError("Složku pro zástupce nelze zjistit.")
+        raise OSError(_tr("err.shortcut_folder"))
     return os.path.join(buf.value, name + ".lnk")
 
 
@@ -126,7 +131,7 @@ def create_shortcut(where, name):
     """Vytvoří (přepíše) zástupce aplikace v nabídce Start nebo na ploše. Zástupce nese stejné
     AppUserModelID jako okno, takže se na hlavním panelu seskupí s běžící aplikací. Vrací cestu."""
     if sys.platform != "win32":
-        raise OSError("Zástupce jde vytvořit jen ve Windows.")
+        raise OSError(_tr("err.shortcut_windows_only"))
     path = shortcut_path(where, name)
     target, args, icon = launch_target()
     ole32 = ctypes.windll.ole32
@@ -135,7 +140,7 @@ def create_shortcut(where, name):
     hr = ole32.CoCreateInstance(ctypes.byref(GUID(CLSID_ShellLink)), None, CLSCTX_INPROC_SERVER,
                                 ctypes.byref(GUID(IID_IShellLinkW)), ctypes.byref(link))
     if hr != 0 or not link:
-        raise OSError(f"Zástupce nelze vytvořit (0x{hr & 0xFFFFFFFF:08X}).")
+        raise OSError(_tr("err.shortcut_create", code=f"0x{hr & 0xFFFFFFFF:08X}"))
     wstr, hres = ctypes.c_wchar_p, ctypes.c_long
     try:
         icon_file, _, icon_index = icon.rpartition(",")
@@ -152,10 +157,10 @@ def create_shortcut(where, name):
                 store, ctypes.byref(key), ctypes.byref(var))
             _method(store, 7, hres)(store)                                        # Commit
         if query(link, ctypes.byref(GUID(IID_IPersistFile)), ctypes.byref(persist)) != 0 or not persist:
-            raise OSError("Zástupce nelze uložit.")
+            raise OSError(_tr("err.shortcut_save", code="-"))
         hr = _method(persist, 6, hres, wstr, wintypes.BOOL)(persist, path, True)  # Save
         if hr != 0:
-            raise OSError(f"Zástupce nelze uložit (0x{hr & 0xFFFFFFFF:08X}).")
+            raise OSError(_tr("err.shortcut_save", code=f"0x{hr & 0xFFFFFFFF:08X}"))
     finally:
         for p in (persist, store, link):
             if p:

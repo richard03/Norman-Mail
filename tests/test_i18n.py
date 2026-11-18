@@ -84,7 +84,7 @@ class CatalogTest(unittest.TestCase):
         self.assertGreater(langs["xx"]["missing"], 0)
         self.assertNotIn("de", langs)
         self.assertEqual(len(i18n.problems()), 1)
-        self.assertIn("řádek 3", i18n.problems()[0]["error"])
+        self.assertIn(" 3: ", i18n.problems()[0]["error"])  # „řádek 3: …“ / „line 3: …“
 
     def test_t_params_plural_and_fallback(self):
         (self.dir / "cs.yaml").write_text(
@@ -95,6 +95,23 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual([i18n.t("t.n", count=c) for c in (1, 3, 5)], ["1 zpráva", "3 zprávy", "5 zpráv"])
         self.assertEqual(i18n.t("t.p", name="Eva"), "Ahoj Eva {x.__class__}")
         self.assertEqual(i18n.t("does.not.exist"), "does.not.exist")
+
+    def test_keys_used_in_code_exist(self):
+        """Každý klíč z kódu (t('…'), tr("…"), data-i18n) je v angličtině i češtině."""
+        import re
+        root = Path(__file__).resolve().parent.parent
+        js = (root / "static" / "app.js").read_text("utf-8")
+        html = (root / "static" / "index.html").read_text("utf-8")
+        py = "".join((root / f).read_text("utf-8") for f in
+                     ("app.py", "mail.py", "sync.py", "store.py", "google_oauth.py", "db.py", "main.py", "taskbar.py"))
+        keys = set(re.findall(r"\bt[n]?\(\s*'([A-Za-z0-9_.\-]+)'", js))
+        keys |= set(re.findall(r'data-i18n(?:-[a-z-]+)?="([^"]+)"', html))
+        keys |= set(re.findall(r"dataset\.i18n\w*\s*=\s*'([^']+)'", js))
+        keys |= set(re.findall(r"""\b(?:tr|_tr|i18n\.t)\(\s*["']([A-Za-z0-9_.\-]+)["']""", py))
+        i18n.reload()
+        for lang in ("en", "cs"):
+            texts = i18n._catalogs[lang]["texts"]
+            self.assertEqual(sorted(k for k in keys if k not in texts), [], f"{lang}: chybějící klíče")
 
     def test_resolve(self):
         i18n.reload()

@@ -37,10 +37,25 @@ LANG_RE = re.compile(r"[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
 PARAM_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-class ParseError(Exception):
-    def __init__(self, line, message):
-        super().__init__(f"řádek {line}: {message}")
-        self.line, self.message = line, message
+class CatalogError(ValueError):
+    """Chyba souboru s překladem. Text se skládá až při zobrazení (t), protože při načítání
+    katalogů ještě žádný katalog není k dispozici."""
+
+    def __init__(self, msg_key, line=None, /, **params):
+        super().__init__(msg_key)
+        self.key, self.line, self.params = msg_key, line, params
+
+    def text(self):
+        msg = t(self.key, **self.params)
+        return t("i18n.error.line", line=self.line, message=msg) if self.line else msg
+
+    def __str__(self):
+        return self.text() if _catalogs is not None else f"{self.key} (line {self.line})"
+
+
+class ParseError(CatalogError):
+    def __init__(self, line, msg_key, /, **params):
+        super().__init__(msg_key, line, **params)
 
 
 # --------------------------------------------------------------------------
@@ -61,11 +76,11 @@ def _unquote(raw, line):
             if c == '"':
                 rest = raw[i + 1:].strip()
                 if rest and not rest.startswith("#"):
-                    raise ParseError(line, "za uzavírací uvozovkou je další text")
+                    raise ParseError(line, "i18n.error.after_quote")
                 return "".join(out)
             out.append(c)
             i += 1
-        raise ParseError(line, "chybí uzavírací uvozovka \"")
+        raise ParseError(line, "i18n.error.missing_quote", quote='"')
     if raw[:1] == "'":
         out, i = [], 1
         while i < len(raw):
@@ -76,11 +91,11 @@ def _unquote(raw, line):
                     continue
                 rest = raw[i + 1:].strip()
                 if rest and not rest.startswith("#"):
-                    raise ParseError(line, "za uzavírací uvozovkou je další text")
+                    raise ParseError(line, "i18n.error.after_quote")
                 return "".join(out)
             out.append(raw[i])
             i += 1
-        raise ParseError(line, "chybí uzavírací uvozovka '")
+        raise ParseError(line, "i18n.error.missing_quote", quote="'")
     cut = re.search(r"\s#", raw)
     return (raw[:cut.start()] if cut else raw).strip()
 
@@ -98,10 +113,10 @@ def parse(text):
     def split_key(s, n):
         m = re.match(r"\s*([^:#\s][^:]*?)\s*:(\s|$)(.*)$", s)
         if not m:
-            raise ParseError(n, "očekáván řádek ve tvaru „klíč: text“")
+            raise ParseError(n, "i18n.error.expected_key")
         key = m.group(1).strip("\"'")
         if not KEY_RE.match(key):
-            raise ParseError(n, f"neplatný klíč „{key}“ (povolená písmena bez diakritiky, číslice, . _ -)")
+            raise ParseError(n, "i18n.error.bad_key", key=key)
         return key, m.group(3).strip()
 
     def block(start, parent_indent, folded=False):
@@ -112,13 +127,13 @@ def parse(text):
             if s.strip() and indent_of(s) <= parent_indent:
                 break
             if "\t" in s[:indent_of(s) + 1] and s.strip():
-                raise ParseError(j + 1, "k odsazení použijte mezery, ne tabulátor")
+                raise ParseError(j + 1, "i18n.error.tab")
             body.append(s)
             j += 1
         while body and not body[-1].strip():
             body.pop()
         if not body:
-            raise ParseError(start, "prázdný víceřádkový text")
+            raise ParseError(start, "i18n.error.empty_block")
         ind = min(indent_of(s) for s in body if s.strip())
         rows = [s[ind:] if s.strip() else "" for s in body]
         if folded:  # > : řádky spojit mezerou, prázdný řádek = nový odstavec
@@ -137,7 +152,7 @@ def parse(text):
         if raw in ("|", "|-", "|+", ">", ">-", ">+"):
             return block(start, parent_indent, folded=raw.startswith(">"))
         if raw[:1] in ("[", "{", "&", "*", "!", "%", "@", "`"):
-            raise ParseError(n, "text začínající tímto znakem dejte do uvozovek")
+            raise ParseError(n, "i18n.error.quote_needed")
         return _unquote(raw, n), start
 
     while i < len(lines):
@@ -146,12 +161,12 @@ def parse(text):
             i += 1
             continue
         if "\t" in s[:indent_of(s) + 1]:
-            raise ParseError(n, "k odsazení použijte mezery, ne tabulátor")
+            raise ParseError(n, "i18n.error.tab")
         if indent_of(s):
-            raise ParseError(n, "nečekané odsazení (klíč nejvyšší úrovně musí začínat na začátku řádku)")
+            raise ParseError(n, "i18n.error.unexpected_indent")
         key, raw = split_key(s, n)
         if key in data:
-            raise ParseError(n, f"klíč „{key}“ je v souboru dvakrát")
+            raise ParseError(n, "i18n.error.duplicate_key", key=key)
         if raw and not raw.startswith("#"):
             data[key], i = value(raw, n, i + 1, 0)
             continue
@@ -169,15 +184,15 @@ def parse(text):
             if sub_indent is None:
                 sub_indent = ind
             elif ind != sub_indent:
-                raise ParseError(m, "nesouhlasí odsazení podklíčů")
+                raise ParseError(m, "i18n.error.sub_indent")
             k2, raw2 = split_key(t, m)
             if k2 in sub:
-                raise ParseError(m, f"podklíč „{k2}“ je dvakrát")
+                raise ParseError(m, "i18n.error.duplicate_key", key=k2)
             if not raw2 or raw2.startswith("#"):
-                raise ParseError(m, "podklíč musí mít text (hlouběji se vnořovat nedá)")
+                raise ParseError(m, "i18n.error.sub_text")
             sub[k2], j = value(raw2, m, j + 1, ind)
         if not sub:
-            raise ParseError(n, f"klíč „{key}“ nemá žádný text")
+            raise ParseError(n, "i18n.error.no_text", key=key)
         data[key] = sub
         i = j
     return data
@@ -187,13 +202,13 @@ def validate(data):
     """Zkontroluje strukturu katalogu. Vrací (meta, texty); chyba → ValueError."""
     meta = data.get("meta")
     if not isinstance(meta, dict):
-        raise ValueError("chybí oddíl meta s položkou language")
+        raise CatalogError("i18n.error.no_meta")
     unknown = set(meta) - set(META_FIELDS)
     if unknown:
-        raise ValueError("neznámá položka v meta: " + ", ".join(sorted(unknown)))
+        raise CatalogError("i18n.error.meta_unknown", fields=", ".join(sorted(unknown)))
     lang = meta.get("language", "")
     if not LANG_RE.match(lang):
-        raise ValueError(f"meta.language „{lang}“ není kód jazyka (např. cs, de, pt-BR)")
+        raise CatalogError("i18n.error.bad_language", language=lang)
     texts = {}
     for k, v in data.items():
         if k == "meta":
@@ -201,9 +216,9 @@ def validate(data):
         if isinstance(v, dict):
             bad = set(v) - set(PLURAL_FORMS)
             if bad:
-                raise ValueError(f"klíč „{k}“: podklíče smí být jen {', '.join(PLURAL_FORMS)} (množné číslo)")
+                raise CatalogError("i18n.error.plural_forms", key=k, forms=", ".join(PLURAL_FORMS))
             if "other" not in v:
-                raise ValueError(f"klíč „{k}“: množné číslo musí mít tvar other")
+                raise CatalogError("i18n.error.plural_other", key=k)
         texts[k] = v
     meta = {"language": lang, "name": meta.get("name") or lang, "locale": meta.get("locale") or lang,
             **{k: meta[k] for k in ("app_version", "author") if k in meta}}
@@ -214,15 +229,12 @@ def load_file(path):
     """(meta, texty) ze souboru; chyba → ValueError s popisem pro uživatele."""
     path = Path(path)
     if path.stat().st_size > MAX_FILE:
-        raise ValueError("soubor je větší než 1 MB")
+        raise CatalogError("i18n.error.too_big")
     try:
         text = path.read_text("utf-8")
     except UnicodeDecodeError:
-        raise ValueError("soubor není v kódování UTF-8")
-    try:
-        return validate(parse(text))
-    except ParseError as e:
-        raise ValueError(str(e))
+        raise CatalogError("i18n.error.not_utf8")
+    return validate(parse(text))
 
 
 # --------------------------------------------------------------------------
@@ -264,7 +276,7 @@ def _scan():
             try:
                 meta, texts = load_file(f)
             except (OSError, ValueError) as e:
-                problems.append({"file": str(f), "error": str(e)})
+                problems.append({"file": str(f), "error": e})
                 continue
             cat = catalogs.setdefault(meta["language"], {"meta": meta, "texts": {}, "sources": []})
             if cat["sources"] == ["builtin"] and meta["language"] != BASE:
@@ -300,8 +312,10 @@ def languages():
 
 
 def problems():
+    """Soubory, které nešly použít: [{file, error}] s textem chyby v aktuálním jazyce."""
     _ensure()
-    return list(_problems)
+    return [{"file": p["file"], "error": p["error"].text() if isinstance(p["error"], CatalogError) else str(p["error"])}
+            for p in _problems]
 
 
 def windows_language():

@@ -18,6 +18,7 @@ from email.utils import formataddr, formatdate, getaddresses, make_msgid, parsed
 from html.parser import HTMLParser
 
 import google_oauth
+from i18n import t as tr
 
 TIMEOUT = 30
 
@@ -40,7 +41,7 @@ IMAP_FORBIDDEN = ("\r", "\n", "\0")
 def check_imap_text(text: str) -> str:
     """Zalomení řádku by v IMAP ukončilo příkaz a zbytek textu by server provedl jako další příkaz."""
     if any(c in text for c in IMAP_FORBIDDEN):
-        raise MailError("Text obsahuje nepovolené znaky (zalomení řádku).")
+        raise MailError(tr("err.line_break"))
     return text
 
 
@@ -184,33 +185,32 @@ def friendly_error(e: Exception) -> str:
     if isinstance(e, smtplib.SMTPAuthenticationError) and b"application-specific password" in (e.smtp_error or b"").lower():
         return friendly_error(imaplib.IMAP4.error("Application-specific password required"))
     if isinstance(e, smtplib.SMTPAuthenticationError):
-        return "Přihlášení k SMTP serveru selhalo – zkontrolujte jméno a heslo (u Gmailu/iCloudu použijte heslo aplikace)."
+        return tr("err.smtp_login")
     if isinstance(e, smtplib.SMTPRecipientsRefused):
-        return "Server odmítl adresáty: " + ", ".join(e.recipients.keys())
+        return tr("err.recipients_refused", recipients=", ".join(e.recipients.keys()))
     if isinstance(e, smtplib.SMTPException):
-        return f"Chyba SMTP: {e}"
+        return tr("err.smtp", error=e)
     if isinstance(e, imaplib.IMAP4.error):
         msg = str(e)
         m = re.fullmatch(r"b'(.*)'", msg)  # imaplib vrací text odpovědi jako repr bajtů
         if m:
             msg = m.group(1)
         if "application-specific password" in msg.lower():
-            return ("Gmail nepřijímá běžné heslo. Použijte tlačítko „Přihlásit přes Google“ v dialogu účtu, "
-                    "nebo místo hesla zadejte „heslo aplikace“ (myaccount.google.com → Zabezpečení → Hesla aplikací).")
+            return tr("err.gmail_password")
         if "AUTHENTICATIONFAILED" in msg.upper() or "LOGIN" in msg.upper() or "credentials" in msg.lower():
-            return "Přihlášení k IMAP serveru selhalo – zkontrolujte jméno a heslo (u Gmailu/iCloudu použijte heslo aplikace)."
-        return f"Chyba IMAP: {msg}"
+            return tr("err.imap_login")
+        return tr("err.imap", error=msg)
     if isinstance(e, socket.gaierror):
-        return "Server nebyl nalezen – zkontrolujte adresu serveru."
+        return tr("err.server_not_found")
     if isinstance(e, (socket.timeout, TimeoutError)):
-        return "Vypršel časový limit spojení se serverem."
+        return tr("err.timeout")
     if isinstance(e, ssl.SSLError):
-        return f"Chyba zabezpečeného spojení (zkontrolujte port a typ zabezpečení): {e}"
+        return tr("err.ssl", error=e)
     if isinstance(e, ConnectionRefusedError):
-        return "Server odmítl spojení – zkontrolujte port."
+        return tr("err.connection_refused")
     if isinstance(e, OSError):
-        return f"Chyba sítě: {e}"
-    return f"Neočekávaná chyba: {e}"
+        return tr("err.network", error=e)
+    return tr("err.unexpected", error=e)
 
 
 # --------------------------------------------------------------------------
@@ -237,7 +237,7 @@ def imap_connect(acc: dict) -> imaplib.IMAP4:
             try:
                 M.authenticate("XOAUTH2", respond)
             except imaplib.IMAP4.error as e:
-                raise MailError(f"Google odmítl přihlášení k IMAP ({e}). Zkuste se v nastavení účtu přihlásit znovu.")
+                raise MailError(tr("err.google_imap", error=e))
         else:
             M._encoding = "utf-8"  # hesla s diakritikou
             M.login(acc["username"], acc["password"])
@@ -351,15 +351,14 @@ ROLE_NAMES = {
     "junk": {"spam", "junk", "junk e-mail", "junk email", "nevyžádaná pošta", "hromadné"},
     "archive": {"archive", "archiv"},
 }
-ROLE_LABELS = {"inbox": "Doručená pošta", "sent": "Odeslaná pošta", "drafts": "Koncepty", "junk": "Spam",
-               "trash": "Koš", "archive": "Archiv", "all": "Všechny zprávy", "flagged": "S hvězdičkou"}
+ROLE_LABELS = {r: f"folder.role.{r}" for r in ("inbox", "sent", "drafts", "junk", "trash", "archive", "all", "flagged")}
 ROLE_ORDER = ["inbox", "drafts", "sent", "flagged", "archive", "all", "junk", "trash"]
 
 
 def list_folders(M, with_counts=True) -> list:
     typ, data = M.list()
     if typ != "OK":
-        raise MailError("Nepodařilo se načíst seznam složek.")
+        raise MailError(tr("err.folder_list"))
     folders, used_roles = [], set()
     for item in data or []:
         if item is None:
@@ -393,7 +392,7 @@ def list_folders(M, with_counts=True) -> list:
         folders.append({
             "name": name,
             "path": decode_utf7(name),
-            "display": ROLE_LABELS.get(role, last),
+            "display": tr(ROLE_LABELS[role]) if role in ROLE_LABELS else last,
             "depth": 0 if role else len(segments) - 1,
             "role": role,
             "unseen": 0,
@@ -459,7 +458,7 @@ def _flags(meta: bytes) -> list:
 def _select(M, folder, readonly):
     typ, data = M.select(q(folder), readonly=readonly)
     if typ != "OK":
-        raise MailError(f"Složku „{decode_utf7(folder)}“ nelze otevřít.")
+        raise MailError(tr("err.folder_open", folder=decode_utf7(folder)))
 
 
 def _search(M, query):
@@ -471,7 +470,7 @@ def _search(M, query):
         M.literal = check_imap_text(query).encode("utf-8")
         typ, data = M.uid("SEARCH", "CHARSET", "UTF-8", "TEXT")
     if typ != "OK":
-        raise MailError("Vyhledávání selhalo.")
+        raise MailError(tr("err.search"))
     return data[0].split() if data and data[0] else []
 
 
@@ -498,12 +497,11 @@ def _fetch_raw(M, uid):
         if lit and m and int(m.group(1)) == uid:
             size = SIZE_RE.search(meta)
             return lit, _flags(meta), int(size.group(1)) if size else len(lit)
-    raise MessageGone("Zpráva už na serveru není (byla smazána nebo přesunuta).")
+    raise MessageGone(tr("err.message_gone"))
 
 
 def too_large_text(size) -> str:
-    return (f"Zpráva má {size / 1024 / 1024:.0f} MB, víc než Norman Mail stahuje ({MAX_MESSAGE // 1024 // 1024} MB). "
-            "Zobrazen je jen začátek; přílohy si stáhněte ve webmailu poskytovatele.")
+    return tr("err.too_large", size=f"{size / 1024 / 1024:.0f}", limit=MAX_MESSAGE // 1024 // 1024)
 
 
 def _safe_body(msg, prefs):
@@ -603,7 +601,7 @@ def parse_message(raw: bytes, uid, folder, flags, size=None) -> dict:
     return {
         "uid": uid,
         "folder": folder,
-        "subject": get_header(msg, "Subject") or "(bez předmětu)",
+        "subject": get_header(msg, "Subject") or "",  # bez předmětu: zástupný text doplní rozhraní
         "from": parse_addrs(get_header(msg, "From")),
         "to": parse_addrs(get_header(msg, "To")),
         "cc": parse_addrs(get_header(msg, "Cc")),
@@ -634,7 +632,7 @@ def attachments_from_raw(raw: bytes, indexes) -> list:
     out = []
     for i in indexes:
         if not 0 <= i < len(leaves):
-            raise MailError("Příloha nebyla nalezena.")
+            raise MailError(tr("err.attachment_missing"))
         part = leaves[i]
         name = _filename(part)
         out.append((clean_filename(dec(name) if name else "", f"priloha-{i}"), part.get_content_type(), part.get_payload(decode=True) or b""))
@@ -646,11 +644,11 @@ ALLOWED_FLAGS = {"\\Seen", "\\Flagged"}
 
 def set_flag(M, folder, uid, flag, value):
     if flag not in ALLOWED_FLAGS:
-        raise MailError("Nepodporovaný příznak.")
+        raise MailError(tr("err.flag_unsupported"))
     _select(M, folder, readonly=False)
     typ, _ = M.uid("STORE", str(uid), "+FLAGS" if value else "-FLAGS", f"({flag})")
     if typ != "OK":
-        raise MailError("Změna příznaku selhala.")
+        raise MailError(tr("err.flag_failed"))
 
 
 # --------------------------------------------------------------------------
@@ -735,7 +733,7 @@ def header_record(uid, flags, size, h) -> dict:
     return {
         "uid": uid,
         "message_id": get_header(h, "Message-ID").strip(),
-        "subject": subject or "(bez předmětu)",
+        "subject": subject or "",
         "base_subject": base_subject(subject).lower(),
         "from": parse_addrs(str(h.get("From") or "")),
         "to": parse_addrs(str(h.get("To") or "")),
@@ -771,7 +769,7 @@ def fetch_header_records(M, uids) -> list:
 def folder_status(M, folder) -> dict:
     typ, data = M.status(q(folder), "(UIDVALIDITY MESSAGES)")
     if typ != "OK" or not data or not data[-1]:
-        raise MailError(f"Stav složky „{decode_utf7(folder)}“ nelze zjistit.")
+        raise MailError(tr("err.folder_status", folder=decode_utf7(folder)))
     line = data[-1] if isinstance(data[-1], bytes) else data[-1][0]
 
     def get(key):
@@ -783,7 +781,7 @@ def folder_status(M, folder) -> dict:
 def all_uids(M) -> set:
     typ, data = M.uid("SEARCH", "ALL")
     if typ != "OK":
-        raise MailError("Seznam zpráv nelze načíst.")
+        raise MailError(tr("err.message_list"))
     return {int(u) for u in data[0].split()} if data and data[0] else set()
 
 
@@ -835,7 +833,7 @@ def _move_uids(M, uids, dest):
                 continue
         typ, _ = M.uid("COPY", uidset, q(dest))
         if typ != "OK":
-            raise MailError(f"Přesun do složky „{decode_utf7(dest)}“ selhal.")
+            raise MailError(tr("err.move_failed", folder=decode_utf7(dest)))
         _expunge_uids(M, uidset)
 
 
@@ -848,7 +846,7 @@ def _ensure_folder(M, folders, roles, fallback):
     if not any(f["name"] == fallback for f in folders):
         typ, _ = M.create(q(fallback))
         if typ != "OK":
-            raise MailError(f"Složku „{fallback}“ se nepodařilo vytvořit.")
+            raise MailError(tr("err.folder_create", folder=fallback))
         try:
             M.subscribe(q(fallback))
         except imaplib.IMAP4.error:
@@ -900,7 +898,7 @@ def ensure_named_folder(M, imap_name):
         return
     typ, _ = M.create(q(imap_name))
     if typ != "OK":
-        raise MailError(f"Složku „{decode_utf7(imap_name)}“ se nepodařilo vytvořit.")
+        raise MailError(tr("err.folder_create", folder=decode_utf7(imap_name)))
     try:
         M.subscribe(q(imap_name))
     except imaplib.IMAP4.error:
@@ -977,9 +975,9 @@ def append_messages(M, imap_name, items, mark_read=False):
         try:
             typ, data = M.append(q(imap_name), "(" + " ".join(fl) + ")", date, raw)
         except imaplib.IMAP4.error as e:
-            return done, MailError(f"Uložení zprávy do cílové složky selhalo: {e}")
+            return done, MailError(tr("err.append_failed", error=e))
         if typ != "OK":
-            return done, MailError("Cílový server zprávu odmítl uložit.")
+            return done, MailError(tr("err.append_refused"))
         done.append(uid)
     return done, None
 
@@ -994,7 +992,7 @@ def delete_folder_with_messages(M, imap_name):
     M.select(q("INBOX"))  # vybranou složku některé servery smazat nedovolí
     typ, data = M.delete(q(imap_name))
     if typ != "OK":
-        raise MailError(f"Složku „{decode_utf7(imap_name)}“ se na serveru nepodařilo smazat.")
+        raise MailError(tr("err.folder_delete", folder=decode_utf7(imap_name)))
 
 
 def archive_message(M, folder, uid):
@@ -1002,7 +1000,7 @@ def archive_message(M, folder, uid):
     # Gmail nemá složku Archiv – archivace = přesun do „Všechny zprávy“ (odebere štítek Doručené).
     dest = _ensure_folder(M, folders, ("archive", "all"), "Archive")
     if dest == folder:
-        raise MailError("Zpráva už je v archivu.")
+        raise MailError(tr("err.already_archived"))
     _select(M, folder, readonly=False)
     _move_uids(M, [uid], dest)
 
@@ -1029,11 +1027,11 @@ def spam_message(M, folder, uid):
     folders = list_folders(M, with_counts=False)
     dest = _ensure_folder(M, folders, ("junk",), "Spam")
     if dest == folder:
-        raise MailError("Zpráva už je ve spamu.")
+        raise MailError(tr("err.already_spam"))
     _select(M, folder, readonly=False)
     headers = _fetch_headers(M, [uid], "FROM DATE")
     if not headers:
-        raise MessageGone("Zpráva už na serveru není (byla smazána nebo přesunuta).")
+        raise MessageGone(tr("err.message_gone"))
     _, _, h = headers[0]
     sender = next(iter(addr_set(h, "From")), None)
     _move_uids(M, [uid], dest)
@@ -1158,7 +1156,7 @@ def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: Fals
             seen_mids.add(mid)
             found.append({
                 "uid": uid, "folder": f["name"], "folder_display": f["display"], "folder_role": f["role"],
-                "subject": subj or "(bez předmětu)",
+                "subject": subj or "",
                 "from": parse_addrs(str(h.get("From") or "")), "to": parse_addrs(str(h.get("To") or "")),
                 "date": parse_date(get_header(h, "Date")), "seen": "\\Seen" in flags, "reasons": reasons,
             })
@@ -1180,7 +1178,7 @@ ADDR_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def parse_recipients(**fields) -> list:
     """Adresy ze zadaných polí (Komu, Kopie, Skrytá). Každé pole se parsuje zvlášť –
     getaddresses() v Pythonu 3.13 vrátí pro celý vstup prázdný výsledek, pokud je některé pole prázdné."""
-    labels = {"to": "Komu", "cc": "Kopie", "bcc": "Skrytá"}
+    labels = {"to": "composeTpl.komu", "cc": "composeTpl.kopie", "bcc": "composeTpl.skryta"}
     out = []
     for key, value in fields.items():
         value = (value or "").strip().strip(",;").replace(";", ",")
@@ -1188,8 +1186,7 @@ def parse_recipients(**fields) -> list:
             continue
         addrs = [a for _, a in getaddresses([value])]
         if not addrs or not all(ADDR_RE.match(a) for a in addrs):
-            raise MailError(f"Neplatná adresa v poli {labels.get(key, key)}: „{value}“. "
-                            "Více adres oddělte čárkou, např. jan@example.cz, petr@example.cz")
+            raise MailError(tr("err.invalid_address", field=tr(labels[key]) if key in labels else key, value=value))
         out += addrs
     return list(dict.fromkeys(out))  # bez duplicit, v původním pořadí
 
@@ -1218,7 +1215,7 @@ def build_message(acc, to, cc, subject, body, in_reply_to=None, references=None,
 
 def send_message(acc, msg, recipients, pool: ImapPool):
     if not recipients:
-        raise MailError("Zadejte alespoň jednoho adresáta.")
+        raise MailError(tr("compose.no_recipient"))
     s = smtp_connect(acc)
     try:
         s.send_message(msg, to_addrs=recipients)
@@ -1237,4 +1234,4 @@ def send_message(acc, msg, recipients, pool: ImapPool):
                 M.append(q(sent), "(\\Seen)", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         return None
     except Exception as e:
-        return "Zpráva byla odeslána, ale nepodařilo se uložit kopii do Odeslaných: " + friendly_error(e)
+        return tr("err.sent_copy_failed", error=friendly_error(e))

@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 
+from i18n import t as tr
 from store import DATA_DIR
 
 DB_FILE = DATA_DIR / "mailer.db"
@@ -340,7 +341,7 @@ class Database:
 
     def set_flag(self, acc_id, folder, uid, column, value):
         if not (column in ("seen", "flagged")):
-            raise ValueError("Neplatný parametr.")
+            raise ValueError("Invalid parameter.")
         self._q(f"UPDATE messages SET {column}=? WHERE account_id=? AND folder=? AND uid=?",
                 (int(value), acc_id, folder, uid))
 
@@ -374,10 +375,10 @@ class Database:
     # Priorita pro odstranění duplicit (Gmail: zpráva je v doručené poště i ve „Všech zprávách“).
     _LABELED = f"""SELECT m.*, s.until AS snoozed_until, {_CATS},
             CASE WHEN u.name IS NOT NULL THEN u.name
-                 WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN 'Notifikace'
-                                                 WHEN 'unimportant' THEN 'Nedůležité'
-                                                 ELSE CASE WHEN {IS_DIRECT} THEN 'Důležité' ELSE 'Vzít na vědomí' END END
-                 WHEN f.role='trash' THEN 'Smazané' WHEN f.role='junk' THEN 'Spam'
+                 WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN '@view.notifications'
+                                                 WHEN 'unimportant' THEN '@view.unimportant'
+                                                 ELSE CASE WHEN {IS_DIRECT} THEN '@view.important' ELSE '@view.fyi' END END
+                 WHEN f.role='trash' THEN '@view.trash' WHEN f.role='junk' THEN '@view.spam'
                  ELSE COALESCE(f.display, m.folder) END AS folder_label,
             CASE WHEN m.folder='INBOX' OR u.name IS NOT NULL THEN 0 WHEN f.role='all' THEN 2 ELSE 1 END AS prio
         FROM messages m
@@ -389,7 +390,9 @@ class Database:
         out = []
         for r in rows:
             d = self._to_dict(r)
-            d["folder_label"], d["prio"] = r["folder_label"], r["prio"]
+            label = r["folder_label"]  # „@klíč“ = vestavěný pohled, přeloží se až tady
+            d["folder_label"] = tr(label[1:]) if label and label.startswith("@") else label
+            d["prio"] = r["prio"]
             out.append(d)
         return out
 
@@ -451,9 +454,10 @@ class Database:
         if u:
             return u[0][0]
         if folder == "INBOX":
-            return "Doručená pošta"
+            return tr("folder.inbox")
         f = self.folder(acc_id, folder) or {}
-        return {"trash": "Smazané", "junk": "Spam"}.get(f.get("role"), f.get("display") or folder)
+        role = {"trash": "view.trash", "junk": "view.spam"}.get(f.get("role"))
+        return tr(role) if role else (f.get("display") or folder)
 
     def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None,
                       unread=None) -> dict:
@@ -620,7 +624,7 @@ class Database:
     def update_rule(self, table, rule_id, kind, value, after_read=None) -> bool:
         """Úprava pravidla (typ, hodnota, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
         if not (table in self.RULE_TABLES):
-            raise ValueError("Neplatný parametr.")
+            raise ValueError("Invalid parameter.")
         sets, params = ["kind=?", "value=?"], [kind, value]
         if after_read is not None:
             sets.append("after_read=?")
@@ -770,7 +774,7 @@ class Database:
         """Pravidlo složky (odesílatel / příjemce / slovo v předmětu), přesun ihned nebo až po přečtení.
         Stejné pravidlo může patřit jen do jedné složky (při přidání do jiné se přesune)."""
         if not (kind in RULE_KINDS):
-            raise ValueError("Neplatný parametr.")
+            raise ValueError("Invalid parameter.")
         value = " ".join(value.lower().split())
         self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read) VALUES(?, ?, ?, ?, ?)
                    ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created,
@@ -925,7 +929,7 @@ class Database:
         """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Stejné pravidlo může být v obou
         kategoriích – pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
         if not (category in CATEGORIES and (sender or recipient or subject)):
-            raise ValueError("Neplatný parametr.")
+            raise ValueError("Invalid parameter.")
         self._q("""INSERT OR IGNORE INTO category_rules(category, sender, recipient, subject, created)
                    VALUES(?, ?, ?, ?, ?)""", (category, sender.lower(), recipient.lower(), subject.lower(), time.time()))
 
@@ -979,7 +983,7 @@ class Database:
     def mark_message(self, rec, category):
         """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
         if not (category in CATEGORIES):
-            raise ValueError("Neplatný parametr.")
+            raise ValueError("Invalid parameter.")
         self._q("INSERT OR REPLACE INTO message_marks VALUES(?, ?, ?)", (message_key(rec), category, time.time()))
 
     def unmark_message(self, rec, category=None):

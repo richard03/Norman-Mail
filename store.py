@@ -60,16 +60,19 @@ def normalize(data: dict) -> dict:
     acc = {k: str(data.get(k) or "").strip() for k in FIELDS}
     missing = [k for k in REQUIRED if not acc[k]]
     if missing:
-        raise ValidationError("Vyplňte povinná pole: " + ", ".join(missing))
+        from i18n import t as tr  # store se načítá dřív než i18n (i18n z něj bere DATA_DIR)
+        raise ValidationError(tr("err.required_fields", fields=", ".join(missing)))
     if "@" not in acc["email"]:
-        raise ValidationError("Neplatná emailová adresa.")
+        from i18n import t as tr
+        raise ValidationError(tr("err.invalid_email"))
     for k in ("imap_port", "smtp_port"):
         try:
             port = int(acc[k])
             if not 0 < port < 65536:
                 raise ValueError
         except ValueError:
-            raise ValidationError(f"Neplatný port: {acc[k]}")
+            from i18n import t as tr
+            raise ValidationError(tr("err.invalid_port", port=acc[k]))
         acc[k] = port
     for k in ("imap_security", "smtp_security"):
         if acc[k] not in ("ssl", "starttls"):

@@ -143,6 +143,36 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 - **Seznam:** v nastavení schránky musí být povolený přístup přes IMAP.
 - **Outlook.com / Microsoft 365:** Microsoft u většiny účtů zakázal přihlašování heslem a vyžaduje OAuth, které tento jednoduchý klient nepodporuje.
 
+## Jazyky a překlady
+
+Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudované v `NormanMail.exe` a aktualizuje se s aplikací. Jazyk se vybírá v **Nastavení → O aplikaci**. Výchozí volba *Automaticky* použije jazyk Windows, pokud pro něj aplikace má překlad, jinak angličtinu.
+
+**Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor se stejným kódem jako vestavěný jazyk (třeba `cs.yaml`) přepíše jen texty, které obsahuje.
+
+Soubory s jazyky se hledají ve složce `languages` vedle `NormanMail.exe` a ve složce `languages` ve složce s daty (`%APPDATA%\Mailer\languages`, v portable režimu `data\languages`). Soubory začínající podtržítkem se přeskakují.
+
+Formát je zjednodušený YAML, který zná jen texty, takže `no`, `yes` ani čísla se nepřevádějí:
+
+```yaml
+meta:
+  language: de           # kód jazyka
+  name: Deutsch          # název ve výběru jazyků
+  locale: de-DE          # formát data a času
+nav.folders: Ordner
+messages.count:          # množné číslo: zero, one, two, few, many, other (podle jazyka)
+  one: "{count} Nachricht"
+  other: "{count} Nachrichten"
+about.text: |
+  Víceřádkový text.
+```
+
+- `{name}` jsou proměnné, které doplní aplikace; musí v překladu zůstat.
+- Text s dvojtečkou a mezerou nebo začínající znakem jako `[`, `{`, `*` dejte do uvozovek.
+- Jediné formátování je `**tučně**`. Texty se vždy vkládají jako prostý text: HTML, odkazy ani skripty z překladu se neprovedou, takže ani soubor stažený z internetu nemůže podvrhnout ovládací prvky.
+- Soubor s chybou se nepoužije vůbec. Nastavení ukáže soubor a číslo řádku s chybou.
+
+**Pro vývojáře:** texty jsou v `static/i18n/en.yaml` a `cs.yaml`. Ve frontendu `t('klíč', {proměnné})` a `tn('klíč', počet)`, ve statickém HTML atributy `data-i18n`, `data-i18n-title`, `data-i18n-placeholder` a `data-i18n-aria-label`, v Pythonu `tr("klíč", proměnná=…)` (`from i18n import t as tr`). Test `tests/test_i18n.py` hlídá, že každý klíč použitý v kódu je v obou katalozích.
+
 ## Struktura
 
 | Soubor | Účel |
@@ -153,6 +183,9 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
 | `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
+| `i18n.py`, `static/i18n/` | Lokalizace: načítání katalogů textů (vestavěných i uživatelských), anglický a český katalog |
+| `tests/` | Testy (`.venv\Scripts\python -m unittest discover tests`) |
+| `tools/i18n_add.py` | Pomocník pro přidání textů do obou vestavěných katalogů |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |
 | `mail.py` | Práce s IMAP a SMTP, parsování zpráv, sdílení spojení |

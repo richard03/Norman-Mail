@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from i18n import t as tr
 from store import DATA_DIR
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -49,9 +50,9 @@ def load_config():
 def save_config(client_id: str, client_secret: str):
     client_id, client_secret = (client_id or "").strip(), (client_secret or "").strip()
     if not client_id.endswith(".apps.googleusercontent.com"):
-        raise OAuthError("Client ID by měl končit na „.apps.googleusercontent.com“.")
+        raise OAuthError(tr("err.oauth_client_id"))
     if not client_secret:
-        raise OAuthError("Zadejte Client Secret.")
+        raise OAuthError(tr("err.oauth_client_secret"))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}, indent=2), "utf-8")
 
@@ -59,7 +60,7 @@ def save_config(client_id: str, client_secret: str):
 def _require_config():
     cfg = load_config()
     if not cfg:
-        raise OAuthError("Není nastaven OAuth klient Googlu (Client ID a Client Secret).")
+        raise OAuthError(tr("err.oauth_not_configured"))
     return cfg
 
 
@@ -76,12 +77,12 @@ def _post(data: dict) -> dict:
             body = {}
         code = body.get("error", f"HTTP {e.code}")
         if code == "invalid_grant":
-            raise OAuthError("Přihlášení ke Googlu vypršelo nebo bylo zrušeno – v nastavení účtu se přihlaste znovu.")
+            raise OAuthError(tr("err.oauth_revoked"))
         if code == "invalid_client":
-            raise OAuthError("Google odmítl Client ID / Client Secret – zkontrolujte nastavení OAuth klienta.")
-        raise OAuthError(f"Google vrátil chybu: {body.get('error_description') or code}")
+            raise OAuthError(tr("err.oauth_invalid_client"))
+        raise OAuthError(tr("err.oauth_error", error=body.get("error_description") or code))
     except OSError as e:
-        raise OAuthError(f"Nelze se spojit se serverem Googlu: {e}")
+        raise OAuthError(tr("err.oauth_network", error=e))
 
 
 # --------------------------------------------------------------------------
@@ -150,16 +151,16 @@ def exchange(code: str, entry: dict) -> dict:
         "code_verifier": entry["verifier"],
     })
     if not res.get("refresh_token"):
-        raise OAuthError("Google nevrátil obnovovací token. Odeberte aplikaci na myaccount.google.com/permissions a zkuste to znovu.")
+        raise OAuthError(tr("err.oauth_no_refresh"))
     if "https://mail.google.com/" not in res.get("scope", ""):
-        raise OAuthError("Nebyl udělen přístup ke Gmailu – při přihlášení povolte všechna požadovaná oprávnění.")
+        raise OAuthError(tr("err.oauth_no_scope"))
     # id_token přišel přímo od Googlu přes TLS, podpis proto není nutné ověřovat (OIDC Core 3.1.3.7)
     try:
         payload = res["id_token"].split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
         email = claims["email"]
     except (KeyError, IndexError, ValueError):
-        raise OAuthError("Nepodařilo se zjistit emailovou adresu účtu Google.")
+        raise OAuthError(tr("err.oauth_no_email"))
     return {"email": email, "refresh_token": res["refresh_token"],
             "access_token": res["access_token"], "expires_in": int(res.get("expires_in", 3600))}
 
@@ -181,7 +182,7 @@ def access_token(acc: dict) -> str:
     if cached and cached[2] == acc["password"] and cached[1] > time.time() + 60:
         return cached[0]
     if not acc.get("password"):
-        raise OAuthError("Chybí přihlášení ke Googlu – v nastavení účtu se přihlaste znovu.")
+        raise OAuthError(tr("err.oauth_missing"))
     cfg = _require_config()
     res = _post({"grant_type": "refresh_token", "refresh_token": acc["password"],
                  "client_id": cfg["client_id"], "client_secret": cfg["client_secret"]})

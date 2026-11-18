@@ -29,6 +29,7 @@ def unblock_bundled_dlls():
 
 unblock_bundled_dlls()
 
+import i18n  # noqa: E402
 import instance  # noqa: E402
 from store import DATA_DIR  # noqa: E402
 
@@ -184,7 +185,7 @@ class Api:
     def request(self, method, path, body=None):
         """Volání endpointu /api/* uvnitř procesu (Flask test_client – bez sítě). Vrací {status, data}."""
         if not isinstance(path, str) or not path.startswith("/api/") or method not in ("GET", "POST", "PUT", "DELETE"):
-            return {"status": 400, "data": {"error": "Neplatný požadavek."}}
+            return {"status": 400, "data": {"error": i18n.t("err.invalid_request")}}
         with server_app.app.test_client() as client:
             r = client.open(path, method=method, json=body, headers={"X-Mailer": "1"})
         data = r.get_json(silent=True)
@@ -194,7 +195,7 @@ class Api:
         try:
             acc = server_app.store.get(acc_id)
             if acc is None:
-                return {"error": "Účet neexistuje."}
+                return {"error": i18n.t("err.account_missing")}
             with server_app.pool.get(acc) as M:
                 (filename, _ctype, data), = mail.get_attachments(M, folder, int(uid), [int(index)])
             path = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=filename)
@@ -256,9 +257,7 @@ def require_webview2() -> bool:
         return True
     import ctypes
     answer = ctypes.windll.user32.MessageBoxW(
-        None, "Norman Mail potřebuje Microsoft Edge WebView2 Runtime, který na tomto počítači chybí.\n\n"
-              "Chcete otevřít stránku Microsoftu, odkud ho stáhnete (zvolte „Evergreen Bootstrapper“)? "
-              "Po instalaci Norman Mail spusťte znovu.", APP_NAME, 0x04 | 0x30)  # Ano/Ne, ikona upozornění
+        None, i18n.t("app.webview2_missing"), APP_NAME, 0x04 | 0x30)  # Ano/Ne, ikona upozornění
     if answer == 6:  # Ano
         webbrowser.open(WEBVIEW2_DOWNLOAD)
     return False
