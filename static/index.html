@@ -275,6 +275,7 @@
   </div>
   <div class="settings-body">
     <nav class="settings-nav">
+      <button type="button" data-section="app">O aplikaci</button>
       <button type="button" data-section="unimportant">Nedůležité</button>
       <button type="button" data-section="notifications">Notifikace</button>
       <button type="button" data-section="spam">Spam</button>
@@ -282,8 +283,6 @@
       <div class="settings-nav-section">Složky</div>
       <div id="settingsFolders"></div>
       <button type="button" class="nav-new" data-new-folder>+ Nová složka</button>
-      <div class="settings-nav-section">Aplikace</div>
-      <button type="button" data-section="app">O aplikaci</button>
     </nav>
 
     <section class="settings-main">
@@ -365,6 +364,15 @@
       </div>
       <div data-panel="app">
         <h3>Norman Mail <span id="appVersion" class="muted"></span></h3>
+        <p class="note">Norman Mail je jednoduchý e-mailový klient pro Windows, který spojí všechny vaše účty
+          (Gmail i jakoukoli jinou schránku s IMAP a SMTP) do jedné společné pošty. Zprávy sám třídí: do
+          <b>Důležité</b> jde to, co je psané přímo vám, kopie do <b>Vzít na vědomí</b> a newslettery a
+          automatická upozornění do <b>Nedůležité</b> a <b>Notifikace</b>. Spam zachytí pravidla i filtr, který se
+          učí z vašich rozhodnutí.</p>
+        <p class="note">Aplikace běží jen ve vašem počítači. Pošta, nastavení i naučený filtr zůstávají u vás a
+          nikam jinam se neposílají, hesla jsou ve Správci pověření Windows. Zprávy se ukládají do místní databáze,
+          takže se otevírají okamžitě a jdou číst i offline. Obrázky a další vzdálený obsah se načtou, až když je
+          povolíte, aby odesílatel nepoznal, že jste zprávu otevřeli.</p>
         <p id="appPortable" class="note" hidden>Portable verze: všechna data jsou ve složce <b>data</b> vedle
           programu (dokud vedle něj leží soubor <b>portable.txt</b>).</p>
         <div id="appShortcuts" hidden>

@@ -2424,7 +2424,7 @@ $('#folderDeletePanel').addEventListener('click', async e => {
     state.editingFolder = null;
     await loadUserFolders();
     if (state.userFolders.length) openFolderDialog(state.userFolders[0].id);
-    else showSettingsSection('unimportant');
+    else showSettingsSection('app');
   } catch (err) { $('#folderError').textContent = err.message; }
 });
 
@@ -2432,7 +2432,7 @@ $('#folderDeletePanel').addEventListener('click', async e => {
 
 const RULE_KINDS = { sender: 'Odesílatel', subject: 'Předmět' };
 
-let settingsSection = 'unimportant';
+let settingsSection = 'app';
 
 /** Přepne téma v levém sloupci nastavení (prostřední a pravý sloupec ukážou jeho obsah). */
 function showSettingsSection(section) {
@@ -2491,7 +2491,7 @@ function markSettingsNav() {
 
 /** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil. */
 async function openSettings(section = settingsSection, folderId = state.editingFolder) {
-  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'unimportant';
+  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'app';
   $('#spamRules').innerHTML = $('#notificationsRules').innerHTML = $('#unimportantRules').innerHTML =
     '<li class="empty-rules">Načítám…</li>';
   renderSettingsFolders();
@@ -2762,7 +2762,7 @@ $('#spamRules').addEventListener('click', async e => {
   } catch (err) { toast(err.message, true); btn.disabled = false; }
 });
 
-$('#settingsBtn').addEventListener('click', () => openSettings());
+$('#settingsBtn').addEventListener('click', () => openSettings('app'));
 document.querySelectorAll('dialog [data-close]').forEach(b =>
   b.addEventListener('click', () => b.closest('dialog').close()));
 
