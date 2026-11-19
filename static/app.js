@@ -93,10 +93,8 @@ const clipIcon = () => `<svg class="clip" viewBox="0 0 24 24" role="img" aria-la
   + '<path d="M21.4 11.1l-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>';
 // Kategorie, které určuje uživatel (tlačítka v Třídění, pravidla v Nastavení)
 const CATEGORIES = {
-  unimportant: { act: 'unimportant', flag: 'unimportant', setting: 'unimp',
-                 get title() { return t('view.unimportant'); }, get off() { return t('category.unimportant.off'); } },
-  notifications: { act: 'notification', flag: 'notification', setting: 'notify',
-                   get title() { return t('view.notifications'); }, get off() { return t('category.notifications.off'); } },
+  unimportant: { act: 'unimportant', setting: 'unimp', get title() { return t('view.unimportant'); } },
+  notifications: { act: 'notification', setting: 'notify', get title() { return t('view.notifications'); } },
 };
 
 // ------------------------------------------------------------------ utility
@@ -480,6 +478,8 @@ async function loadList({ append = false, quiet = false, keepLoaded = false, rev
       state.messages = state.messages.filter(m => !m.remote)
         .concat(res.messages.filter(m => !have.has(keyOf(m))), remote);
     } else state.messages = res.messages;
+    const cur = state.current, fresh = cur && findListItem(cur);
+    if (fresh) { cur.item = fresh; delete cur.view; }  // zařazení otevřené zprávy podle serveru
     if (v.type === 'trash' && !state.query && !state.unreadOnly && res.total != null && res.total !== state.trashTotal) {
       state.trashTotal = res.total;
       renderSidebar();
@@ -990,30 +990,72 @@ $('#messageHead').addEventListener('click', async e => {
 
 // ------------------------------------------------------------------ sloupec Akce
 
+// Tlačítka Akcí podle toho, kde zpráva je. ToDo: bez Třídění a odložení; Důležité tam, kde zpráva důležitá
+// není; tlačítko kategorie, ve které zpráva už je, se nezobrazí; Spam: jen Není spam a Smazat; Smazané: jen Obnovit.
+const ALL_ACTIONS = ['restore', 'replyAll', 'forward', 'todo', 'snoozeDay', 'snoozeWeek', 'archive',
+                     'important', 'unimportant', 'notification', 'spam', 'rule', 'delete'];
+const SORTING_ACTIONS = ['important', 'unimportant', 'notification', 'spam', 'rule'];
+
+function visibleActions(view) {
+  const type = state.view.type;
+  if (type === 'trash') return ['restore'];
+  if (type === 'spam') return ['spam', 'delete'];
+  if (view === 'todo') return ['replyAll', 'forward', 'todo', 'archive', 'delete'];
+  return ALL_ACTIONS.filter(a => a !== 'restore'
+    && (a !== 'important' || ['fyi', 'unimportant', 'notifications'].includes(view))
+    && (a !== 'unimportant' || view !== 'unimportant')
+    && (a !== 'notification' || view !== 'notifications'));
+}
+
+/** Pohled doručené pošty, kam otevřená zpráva patří (todo / important / fyi / unimportant / notifications);
+ *  po akci v této relaci podle odpovědi serveru, jinak z načtené zprávy nebo položky seznamu. */
+function msgView(cur) {
+  if (cur.view !== undefined) return cur.view;
+  return cur.item?.view ?? cur.data?.view ?? null;
+}
+
 function updateActions() {
   const ready = !!state.current;
-  const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat a (ne)spam
+  const multi = !ready && state.selected.size > 1;  // více vybraných zpráv – jde jen smazat, (ne)spam a obnovit
   if (ready || multi) $('#app').classList.remove('no-message');
+  const v = state.view;
+  const view = ready ? msgView(state.current) : (v.type === 'unified' ? v.filter : null);
+  const shown = new Set(visibleActions(view));
   document.querySelectorAll('#actions [data-act]').forEach(b => {
-    b.disabled = !(ready || (multi && ['delete', 'spam'].includes(b.dataset.act)));
+    b.hidden = !shown.has(b.dataset.act);
+    b.disabled = !(ready || (multi && ['delete', 'spam', 'restore'].includes(b.dataset.act)));
   });
+  $('#actionsSep').hidden = !shown.has('replyAll');
+  $('#actionsSorting').hidden = !SORTING_ACTIONS.some(a => shown.has(a));
   // ToDo jen pro zprávy doručené pošty; ve zprávě v ToDo místo něj „Vyřešeno“
   const tb = $('#actions [data-act="todo"]'), todo = !!state.current && inTodo(state.current);
   if (ready && state.current.folder !== 'INBOX') tb.disabled = true;
   tb.querySelector('.label').textContent = todo ? t('action.todoResolved') : t('actions.todo');
   tb.title = todo ? t('action.todoResolvedTitle') : t('action.todoTitle');
   const sb = $('#actions [data-act="spam"]');
-  const inSpam = state.view.type === 'spam';
-  sb.classList.toggle('active', inSpam);
+  const inSpam = v.type === 'spam';
   sb.querySelector('.label').textContent = inSpam ? t('action.notSpam') : t('view.spam');
   sb.title = inSpam ? t('action.notSpamTitle') : t('action.spamTitle');
   for (const [cat, c] of Object.entries(CATEGORIES)) {
     const b = $(`#actions [data-act="${c.act}"]`);
-    const on = !!state.current && inCategory(state.current, cat);
-    b.classList.toggle('active', on);
-    b.querySelector('.label').textContent = on ? c.off : c.title;
-    b.title = on ? t(`category.${cat}.offTitle`) : t(`category.${cat}.onTitle`);
+    b.querySelector('.label').textContent = c.title;
+    b.title = t(`category.${cat}.onTitle`);
   }
+}
+
+/** Zpráva změnila zařazení a do zobrazeného pohledu už nepatří: ze seznamu zmizí, ale zůstane otevřená,
+ *  aby ji uživatel neztratil z očí (a mohl ji případně hned zařadit jinam). */
+function leaveListKeepOpen(cur, alsoRemove = null) {
+  const same = m => m.account_id === cur.accountId && m.folder === cur.folder && m.uid === cur.uid;
+  state.messages = state.messages.filter(m => !same(m) && !(alsoRemove && alsoRemove(m)));
+  renderList();
+  if (state.current === cur) updateActions();
+}
+
+/** Opustí zpráva po přeřazení (do pohledu view) zobrazený pohled? */
+function leavesUnified(cur, view) {
+  const v = state.view;
+  return v.type === 'unified' && v.filter !== 'all' && cur.folder === 'INBOX' && view !== v.filter;
 }
 
 const MOVE_DONE = { archive: 'action.archived', spam: 'action.movedToSpam', delete: 'action.movedToTrash' };
@@ -1035,9 +1077,10 @@ async function toggleTodo(cur, btn) {
     if (cur.data) cur.data.todo = value;
     const item = findListItem(cur);
     if (item) item.todo = value;
+    const view = value ? 'todo' : (res.view || null);
+    if (cur.folder === 'INBOX') cur.view = view;
     toast(value ? t('todo.added') : t('todo.resolved', { view: unifiedTitle(res.view) || '' }));
-    const v = state.view;
-    if (v.type === 'unified' && v.filter !== 'all' && res.view !== v.filter) removeAndAdvance(cur);
+    if (leavesUnified(cur, view)) leaveListKeepOpen(cur);
     else updateActions();
     pollSync();  // počty v levém sloupci
   } catch (err) {
@@ -1047,11 +1090,24 @@ async function toggleTodo(cur, btn) {
   }
 }
 
-/** Patří zpráva do kategorie? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
-function inCategory(cur, cat) {
-  if (cur.category !== undefined) return cur.category === cat;
-  const flag = CATEGORIES[cat].flag;
-  return !!(cur.data ? cur.data[flag] : cur.item?.[flag]);
+/** Důležité: zpráva přestane patřit do kategorií (zruší se i pravidla, která jí odpovídají) a je označená
+ *  jako důležitá – i když je jen v kopii. */
+async function markImportant(cur, btn) {
+  btn.classList.add('busy');
+  try {
+    const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/important`,
+      { method: 'POST', body: { folder: cur.folder } });
+    if (cur.folder === 'INBOX') cur.view = res.view || 'important';
+    toast(t('action.markedImportant'));
+    if (leavesUnified(cur, cur.view)) leaveListKeepOpen(cur);
+    else updateActions();
+    if (state.view.type === 'unified') loadList({ quiet: true, keepLoaded: true });  // zrušená pravidla
+    pollSync();  // počty v levém sloupci
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.classList.remove('busy');
+  }
 }
 
 /** Odpověď/přeposlání potřebují obsah zprávy – počkáme na jeho načtení. */
@@ -1066,6 +1122,10 @@ async function withLoadedMessage(cur, fn) {
 async function doAction(act, btn) {
   const cur = state.current;
   if (act === 'delete' && !cur && state.selected.size > 1) return moveItems(selectedItems(), { type: 'trash' });
+  if (act === 'restore') {  // ze Smazaných do doručené pošty účtu, ze kterého zpráva je
+    const items = !cur ? selectedItems() : [cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid }];
+    return moveItems(items, { type: 'inbox', view: 'all' });
+  }
   if (act === 'spam' && (state.view.type === 'spam' || (!cur && state.selected.size > 1))) {
     const items = !cur ? selectedItems() : [cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid }];
     return moveItems(items, state.view.type === 'spam' ? { type: 'inbox', view: 'all' } : { type: 'spam' });
@@ -1078,6 +1138,7 @@ async function doAction(act, btn) {
   if (act === 'forward') return withLoadedMessage(cur, forward);
   if (act === 'notification') return categorize(cur, 'notifications', btn);
   if (act === 'unimportant') return categorize(cur, 'unimportant', btn);
+  if (act === 'important') return markImportant(cur, btn);
   if (act === 'rule') return openRuleDialog(cur);
   if (act === 'todo') return toggleTodo(cur, btn);
   if (act === 'snoozeDay' || act === 'snoozeWeek') return snooze(cur, act === 'snoozeDay' ? 1 : 7, btn);
@@ -1216,10 +1277,11 @@ function askCustomCategoryRule(cur, cat, submit) {
   });
 }
 
-/** Nedůležité / Notifikace: zařadit (jen zprávu, nebo pravidlem) – nebo, je-li už zařazená, vyřadit. */
+/** Nedůležité / Notifikace: zařadit (jen zprávu, nebo pravidlem). Ven z kategorie zprávu dostane tlačítko
+ *  Důležité nebo druhá kategorie. */
 async function categorize(cur, cat, btn) {
-  const value = !inCategory(cur, cat);
-  const scope = value ? await askCategoryScope(cur, cat) : 'message';
+  const value = true;
+  const scope = await askCategoryScope(cur, cat);
   if (!scope || state.current !== cur) return;
   const send = rule => api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/categorize`,
     { method: 'POST', body: { folder: cur.folder, category: cat, scope, value, rule } });
@@ -1232,23 +1294,20 @@ async function categorize(cur, cat, btn) {
   try {
     const res = custom || await send();
     // kam zpráva teď patří: odpověď serveru (uložená zpráva v doručené poště), jinak odhad
-    const now = res.view || (value ? cat : null);
-    cur.category = CATEGORIES[now] ? now : null;
-    const other = value && CATEGORIES[now] && now !== cat ? CATEGORIES[now] : null;
-    toast(!value ? t(`category.${cat}.removed`)
-      : other ? t(`category.${now}.stays`)
+    const now = res.view || cat;
+    if (cur.folder === 'INBOX') cur.view = res.view || null;
+    const other = CATEGORIES[now] && now !== cat ? CATEGORIES[now] : null;
+    toast(other ? t(`category.${now}.stays`)
       : scope === 'message' ? t(`category.${cat}.added`)
       : scope === 'custom' && res.view && now !== cat ? t('category.customNoMatch')
       : scope === 'custom' ? t(`category.${cat}.customSaved`)
       : scope === 'sender' ? t(`category.${cat}.senderSaved`, { sender: res.sender })
       : t(`category.${cat}.subjectSaved`, { subject: res.subject }));
     const v = state.view;
-    const leaves = v.type === 'unified' && cur.folder === 'INBOX' && (now ? now !== v.filter : v.filter === cat);
-    if (leaves) {
-      const also = !value ? null
-        : scope === 'sender' ? m => m.from.some(a => a.addr.toLowerCase() === res.sender)
+    if (leavesUnified(cur, now)) {
+      const also = scope === 'sender' ? m => m.from.some(a => a.addr.toLowerCase() === res.sender)
         : scope === 'subject' ? m => m.base_subject === res.subject : null;
-      removeAndAdvance(cur, also);
+      leaveListKeepOpen(cur, also);
     } else updateActions();
     if (v.type === 'unified') loadList({ quiet: true, keepLoaded: true });  // další zprávy podle pravidla
     pollSync();  // počty v levém sloupci
@@ -1349,6 +1408,7 @@ function targetLabel(target) {
   if (target.type === 'trash') return state.view.type === 'trash' ? t('move.deletedPermanently') : t('move.toTrash');
   if (target.type === 'spam') return t('move.toSpam');
   if (state.view.type === 'spam' && target.view === 'all' && !target.account_id) return t('move.notSpam');
+  if (state.view.type === 'trash' && target.type === 'inbox' && !target.account_id) return t('move.restored');
   if (target.type === 'ufolder') return t('move.toFolder', { folder: state.userFolders.find(f => f.id === target.id)?.name || '' });
   if (target.account_id) { const a = accById(target.account_id); return t('move.toAccountInbox', { account: a?.name || a?.email || '' }); }
   return t(`move.to.${target.view}`);
@@ -2870,7 +2930,7 @@ document.querySelectorAll('#unimportantRules, #notificationsRules').forEach(list
 
 /** Po změně pravidla Nedůležitých / Notifikací: seznam pravidel, zobrazený seznam zpráv a počty. */
 async function afterCategoryRuleChange(cat) {
-  if (state.current) { delete state.current.category; updateActions(); }  // stav zjistí příští načtení
+  if (state.current) { delete state.current.view; updateActions(); }  // stav zjistí příští načtení
   await renderCategoryRules(cat);
   if (state.view.type === 'unified') loadList({ quiet: true });
   pollSync();

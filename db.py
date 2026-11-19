@@ -72,6 +72,9 @@ CREATE TABLE IF NOT EXISTS contacts(
 # Pravidlo má až tři podmínky (odesílatel, příjemce v Komu / Kopii, část předmětu); zpráva musí splnit všechny
 # vyplněné. (Dřívější tabulky notify_rules / unimportant_rules se jednou převedly do category_rules.)
 CATEGORIES = ("notifications", "unimportant")
+# Označení jedné zprávy (message_marks): kategorie, nebo „důležitá“ – ta zprávu přesune ze Vzít na vědomí
+# (i z kategorie) do Důležitých; stejně jako ostatní označení má přednost před pravidly.
+MARKS = CATEGORIES + ("important",)
 CATEGORY_RULE_FIELDS = ("sender", "recipient", "subject")
 CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || ',') > 0)"
                        " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
@@ -79,6 +82,18 @@ CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || '
                        " AND (r.subject='' OR instr(m.base_subject, r.subject) > 0)")
 # Klíč zprávy pro označení „jen tento email“ – Message-ID (přežije přesun), jinak umístění zprávy.
 MSG_KEY = "COALESCE(NULLIF(m.message_id, ''), m.account_id || '|' || m.folder || '|' || m.uid)"
+
+
+def _inbox_view(r):
+    """Pohled sloučené doručené pošty, kam zpráva patří (stejně jako Database._VIEW); mimo doručenou None."""
+    keys = r.keys()
+    if r["folder"] != "INBOX" or "category" not in keys:
+        return None
+    if r["todo"]:
+        return "todo"
+    if r["category"]:
+        return r["category"]
+    return "important" if "direct" in keys and r["direct"] else "fyi"
 
 
 def message_key(rec) -> str:
@@ -115,7 +130,8 @@ IS_DIRECT = ("EXISTS (SELECT 1 FROM my_addresses a WHERE a.account_id=m.account_
 IS_TODO = f"EXISTS (SELECT 1 FROM todos td WHERE td.key={MSG_KEY})"
 VIEW_FILTERS = {
     "todo": IS_TODO,
-    "important": f"NOT {IS_TODO} AND ({CATEGORY}) IS NULL AND {IS_DIRECT}",
+    # Důležité: přímo pro mě, nebo zpráva ručně označená jako důležitá (tlačítko Důležité)
+    "important": f"NOT {IS_TODO} AND (({CATEGORY}) IS 'important' OR (({CATEGORY}) IS NULL AND {IS_DIRECT}))",
     "fyi": f"NOT {IS_TODO} AND ({CATEGORY}) IS NULL AND NOT {IS_DIRECT}",  # Vzít na vědomí: kopie / skrytá kopie
     "unimportant": f"NOT {IS_TODO} AND {IS_UNIMPORTANT}",
     "notifications": f"NOT {IS_TODO} AND {IS_NOTIFICATION}",
@@ -367,9 +383,10 @@ class Database:
             "notification": "category" in r.keys() and r["category"] == "notifications",
             "unimportant": "category" in r.keys() and r["category"] == "unimportant",
             "todo": "todo" in r.keys() and bool(r["todo"]),
+            "view": _inbox_view(r),
         }
 
-    _CATS = f"{CATEGORY} AS category, {IS_TODO} AS todo"
+    _CATS = f"{CATEGORY} AS category, {IS_TODO} AS todo, {IS_DIRECT} AS direct"
     _SELECT = f"""SELECT m.*, s.until AS snoozed_until, {_CATS} FROM messages m
                  LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid"""
 
@@ -386,6 +403,7 @@ class Database:
                  WHEN m.folder='INBOX' AND {IS_TODO} THEN '@view.todo'
                  WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN '@view.notifications'
                                                  WHEN 'unimportant' THEN '@view.unimportant'
+                                                 WHEN 'important' THEN '@view.important'
                                                  ELSE CASE WHEN {IS_DIRECT} THEN '@view.important' ELSE '@view.fyi' END END
                  WHEN f.role='trash' THEN '@view.trash' WHEN f.role='junk' THEN '@view.spam'
                  ELSE COALESCE(f.display, m.folder) END AS folder_label,
@@ -1000,7 +1018,7 @@ class Database:
 
     def mark_message(self, rec, category):
         """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
-        if not (category in CATEGORIES):
+        if category not in MARKS:
             raise ValueError("Invalid parameter.")
         self._q("INSERT OR REPLACE INTO message_marks VALUES(?, ?, ?)", (message_key(rec), category, time.time()))
 

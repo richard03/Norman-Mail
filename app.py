@@ -534,6 +534,7 @@ def message(acc_id, uid):
     data = mail.parse_message(raw, uid, folder, flags, size)
     data["snoozed_until"] = row["snoozed_until"] if row else None
     data["todo"] = bool(row and row["todo"])
+    data["view"] = row["view"] if row else None
     if row:
         data["notification"], data["unimportant"] = row["notification"], row["unimportant"]
     else:
@@ -645,6 +646,41 @@ def message_unsnooze(acc_id, uid):
     return jsonify(ok=True)
 
 
+def _unmark_others(rec, category):
+    """Zruší označení zprávy jinou kategorií nebo jako důležitá (to by mělo před pravidlem přednost)."""
+    for mark in db.MARKS:
+        if mark != category:
+            database.unmark_message(rec, mark)
+
+
+def _message_record(acc, acc_id, folder, uid):
+    """Záznam zprávy z databáze, jinak hlavičky ze serveru."""
+    rec = database.message(acc_id, folder, uid)
+    if rec is None:
+        with pool.get(acc) as M:
+            mail._select(M, folder, readonly=True)
+            recs = mail.fetch_header_records(M, [uid])
+        if not recs:
+            raise mail.MailError(tr("err.messageGoneShort"))
+        rec = {**recs[0], "account_id": acc_id, "folder": folder}
+    return rec
+
+
+@app.post("/api/accounts/<acc_id>/messages/<int:uid>/important")
+def message_important(acc_id, uid):
+    """Tlačítko Důležité (ve Vzít na vědomí, Nedůležitých a Notifikacích): zpráva přestane patřit do kategorií
+    (zruší se i pravidla, která jí odpovídají – jako dřív „Není nedůležité“) a je označená jako důležitá."""
+    acc = account_or_404(acc_id)
+    folder = folder_arg(request.get_json(force=True))
+    rec = _message_record(acc, acc_id, folder, uid)
+    for cat in db.CATEGORIES:
+        database.uncategorize(rec, cat)
+    database.mark_message(rec, "important")
+    database.bump()
+    view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
+    return jsonify(ok=True, view=view)
+
+
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/categorize")
 def message_categorize(acc_id, uid):
     """Notifikace / Nedůležité. scope: message = jen tato zpráva (bez pravidla), sender / subject = pravidlo
@@ -658,29 +694,21 @@ def message_categorize(acc_id, uid):
     if category not in db.CATEGORIES or scope not in ("message", "sender", "subject", "custom"):
         abort(400, tr("err.unknownCategory"))
     rule = _category_rule_fields(data.get("rule") or {}) if scope == "custom" and data.get("value", True) else None
-    rec = database.message(acc_id, folder, uid)
-    if rec is None:
-        with pool.get(acc) as M:
-            mail._select(M, folder, readonly=True)
-            recs = mail.fetch_header_records(M, [uid])
-        if not recs:
-            raise mail.MailError(tr("err.messageGoneShort"))
-        rec = {**recs[0], "account_id": acc_id, "folder": folder}
+    rec = _message_record(acc, acc_id, folder, uid)
     sender = (rec["from"][0]["addr"] if rec["from"] else "").lower()
     subject = rec.get("base_subject") or ""
-    other = next(c for c in db.CATEGORIES if c != category)
     if not data.get("value", True):
         database.uncategorize(rec, category)
     elif scope == "message":
         database.mark_message(rec, category)
     elif scope == "custom":
-        database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
+        _unmark_others(rec, category)  # označení zprávy by mělo před pravidlem přednost
         database.add_category_rule(category, **rule)
     else:
         value = sender if scope == "sender" else subject
         if not value:
             raise mail.MailError(tr("err.noSender") if scope == "sender" else tr("err.noSubject"))
-        database.unmark_message(rec, other)  # označení zprávy by mělo před pravidlem přednost
+        _unmark_others(rec, category)  # označení zprávy by mělo před pravidlem přednost
         database.add_category_rule(category, **{scope: value})
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
@@ -1008,12 +1036,11 @@ def messages_move():
     senders = {i["sender"] for i in items if i["sender"]}
     own = {a["email"].lower() for a in store.list_public()}
     if target["type"] == "inbox" and target["view"] in db.CATEGORIES:
-        other = next(c for c in db.CATEGORIES if c != target["view"])
         for s in senders - own:
             database.add_category_rule(target["view"], sender=s)
-        for i in items:  # označení „jen tento email“ v druhé kategorii by mělo před pravidlem přednost
+        for i in items:  # jiné označení zprávy (druhá kategorie, důležitá) by mělo před pravidlem přednost
             if i["rec"]:
-                database.unmark_message(i["rec"], other)
+                _unmark_others(i["rec"], target["view"])
     elif target["type"] == "inbox" and target["view"] in ("important", "fyi"):
         for i in items:
             for cat in db.CATEGORIES:
@@ -1021,6 +1048,10 @@ def messages_move():
                     database.uncategorize(i["rec"], cat)
                 elif i["sender"]:
                     database.remove_category_sender(cat, i["sender"])
+            if i["rec"] and target["view"] == "important":  # i kopie (jinak by zůstala ve Vzít na vědomí)
+                database.mark_message(i["rec"], "important")
+            elif i["rec"]:
+                database.unmark_message(i["rec"], "important")
     if target["type"] == "spam":
         for s in senders - own:
             database.add_spam_rule(s)

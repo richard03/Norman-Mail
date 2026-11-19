@@ -366,6 +366,7 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 .action:disabled { opacity: .45; cursor: default; }
 .action.busy { opacity: .6; pointer-events: none; }
 .action-sep { height: 8px; }
+#actions [hidden] { display: none; }
 .action-bottom { margin-top: auto; margin-bottom: 12px; }  /* Smazat: ukotvené dole */
 #actions .action-bottom { flex: none; }
 #contextBody { overflow-y: auto; flex: 1; }
@@ -453,7 +454,6 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 .rule-edit-actions { display: flex; gap: 6px; margin-left: auto; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
-.action.active { background: var(--active); border-color: var(--accent); }
 .settings-main h3.sub-head, .settings-rules h3.sub-head { margin-top: 28px; }  /* mezera nad podnadpisem, přebije margin: 0 výše */
 dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
 .bayes-actions { margin-top: 10px; }
