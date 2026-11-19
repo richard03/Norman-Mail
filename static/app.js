@@ -1028,6 +1028,8 @@ function updateActions() {
     b.disabled = !(ready || (multi && ['delete', 'spam', 'restore'].includes(b.dataset.act)));
   });
   $('#actionsSep').hidden = !shown.has('replyAll');
+  // nadpis Akce jen nad tlačítky horní části (ve Spamu jsou jen Není spam v Třídění a Smazat dole)
+  $('#actionsTitle').hidden = ![...shown].some(a => !SORTING_ACTIONS.includes(a) && a !== 'delete');
   $('#actionsSorting').hidden = !SORTING_ACTIONS.some(a => shown.has(a));
   // ToDo jen pro zprávy doručené pošty; ve zprávě v ToDo místo něj „Vyřešeno“
   const tb = $('#actions [data-act="todo"]'), todo = !!state.current && inTodo(state.current);
