@@ -1000,7 +1000,6 @@ function updateActions() {
   // ToDo jen pro zprávy doručené pošty; ve zprávě v ToDo místo něj „Vyřešeno“
   const tb = $('#actions [data-act="todo"]'), todo = !!state.current && inTodo(state.current);
   if (ready && state.current.folder !== 'INBOX') tb.disabled = true;
-  tb.classList.toggle('active', todo);
   tb.querySelector('.label').textContent = todo ? t('action.todoResolved') : t('actions.todo');
   tb.title = todo ? t('action.todoResolvedTitle') : t('action.todoTitle');
   const sb = $('#actions [data-act="spam"]');
