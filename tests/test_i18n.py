@@ -56,11 +56,11 @@ class ParseTest(unittest.TestCase):
 class CatalogTest(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())
-        self._dirs = i18n.user_dirs
-        i18n.user_dirs = lambda: [self.dir]
+        self._dir = i18n.user_dir
+        i18n.user_dir = lambda: self.dir
 
     def tearDown(self):
-        i18n.user_dirs = self._dirs
+        i18n.user_dir = self._dir
         i18n.reload()
         i18n.set_language("en")
 

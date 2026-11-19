@@ -24,7 +24,7 @@ import mail
 import sync
 import taskbar
 import updater
-from store import KEYRING_OK, AccountStore, ValidationError, normalize, portable_dir
+from store import DATA_DIR, KEYRING_OK, AccountStore, ValidationError, normalize, portable_dir
 from version import VERSION
 
 HOST = "127.0.0.1"
@@ -157,7 +157,7 @@ def app_info():
                 shortcuts[where] = os.path.exists(taskbar.shortcut_path(where, SHORTCUT_NAME))
             except OSError:
                 pass
-    return jsonify(version=VERSION, portable=bool(portable_dir()), shortcuts=shortcuts)
+    return jsonify(version=VERSION, portable=bool(portable_dir()), shortcuts=shortcuts, data_dir=str(DATA_DIR))
 
 
 @app.get("/api/update")
@@ -1160,36 +1160,38 @@ def i18n_get():
         i18n.set_language(database.settings()["language"])
     auto = i18n.resolve("")
     return jsonify(catalog=i18n.catalog(), languages=i18n.languages(), problems=i18n.problems(),
-                   auto=auto, folders=[str(d) for d in i18n.user_dirs()])
+                   auto=auto, folder=str(i18n.user_dir()))
+
+
+def _open_folder(folder):
+    """Otevře složku v Průzkumníku (vytvoří ji). Jen desktopová aplikace."""
+    if not EMBEDDED:
+        return jsonify(error=i18n.t("error.desktopOnly")), 400
+    folder.mkdir(parents=True, exist_ok=True)
+    os.startfile(folder)
+    return jsonify(folder=str(folder))
+
+
+@app.post("/api/app/data-folder")
+def app_open_data_folder():
+    return _open_folder(DATA_DIR)
 
 
 @app.post("/api/i18n/folder")
 def i18n_open_folder():
-    """Otevře složku s jazyky v Průzkumníku (vytvoří ji). Jen desktopová aplikace."""
-    if not EMBEDDED:
-        return jsonify(error=i18n.t("error.desktopOnly")), 400
-    folder = i18n.user_dirs()[0]
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        folder = i18n.user_dirs()[-1]  # vedle exe nejde zapisovat – složka dat
-        folder.mkdir(parents=True, exist_ok=True)
-    os.startfile(folder)
-    return jsonify(folder=str(folder))
+    return _open_folder(i18n.user_dir())
 
 
 @app.post("/api/i18n/template")
 def i18n_template():
     """Uloží anglickou šablonu překladu do složky s jazyky a vrátí její cestu."""
-    for folder in i18n.user_dirs():
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            path = folder / "_template.yaml"  # „_“ = loader ho přeskočí
-            path.write_text(i18n.template_text(), "utf-8")
-            return jsonify(path=str(path))
-        except OSError:
-            continue
-    return jsonify(error=i18n.t("error.templateFailed")), 500
+    try:
+        i18n.user_dir().mkdir(parents=True, exist_ok=True)
+        path = i18n.user_dir() / "_template.yaml"  # „_“ = loader ho přeskočí
+        path.write_text(i18n.template_text(), "utf-8")
+        return jsonify(path=str(path))
+    except OSError:
+        return jsonify(error=i18n.t("error.templateFailed")), 500
 
 
 @app.get("/api/bayes")

@@ -16,8 +16,8 @@ settings.language.openFolder: Otevřít složku s jazyky
 settings.language.export: Uložit šablonu překladu
 settings.language.exported: "Šablona uložena: {path}"
 settings.language.help: >
-  Další jazyk si můžete přidat sami, bez nové instalace: uložte šablonu překladu (uloží se do složky
-  s jazyky jako _template.yaml), přejmenujte ji podle kódu jazyka, např. de.yaml, změňte meta.language
+  Další jazyk si můžete přidat sami, bez nové instalace: uložte šablonu překladu (uloží se do podsložky
+  languages v datové složce jako _template.yaml), přejmenujte ji podle kódu jazyka, např. de.yaml, změňte meta.language
   a meta.name a přeložte texty. Nepřeložené texty se zobrazí anglicky. Aplikace soubor najde při
   příštím otevření Nastavení.
 settings.language.closeCompose: Nejdřív zavřete rozepsané zprávy, potom jazyk změňte.
@@ -156,6 +156,9 @@ settings.trash.emptyNote: "Tlačítko **Vyprázdnit** pod seznamem zpráv je po 
 settings.app.intro: "Norman Mail je jednoduchý e-mailový klient pro Windows, který spojí všechny vaše účty (Gmail i jakoukoli jinou schránku s IMAP a SMTP) do jedné společné pošty. Zprávy sám třídí: do **Důležité** jde to, co je psané přímo vám, kopie do **Vzít na vědomí** a newslettery a automatická upozornění do **Nedůležité** a **Notifikace**. Spam zachytí pravidla i filtr, který se učí z vašich rozhodnutí."
 settings.app.privacy: "Aplikace běží jen ve vašem počítači. Pošta, nastavení i naučený filtr zůstávají u vás a nikam jinam se neposílají (kromě poštovních serverů se aplikace připojuje jen ke GitHubu kvůli aktualizacím), hesla jsou ve Správci pověření Windows. Zprávy se ukládají do místní databáze, takže se otevírají okamžitě a jdou číst i offline. Obrázky a další vzdálený obsah se načtou, až když je povolíte, aby odesílatel nepoznal, že jste zprávu otevřeli."
 settings.app.portable: "Portable verze: všechna data jsou ve složce **data** vedle programu (dokud vedle něj leží soubor **portable.txt**)."
+settings.data.title: Datová složka
+settings.data.note: "Sem aplikace ukládá lokální data: databázi zpráv, nastavení, naučený filtr spamu a v podsložce **languages** také překlady. Hesla a přihlašovací tokeny jsou ve Správci pověření Windows."
+settings.data.open: Otevřít datovou složku
 settings.shortcut.title: "Zástupci"
 settings.shortcut.note: "Aplikace je jediný soubor bez instalace. Zástupce ji spustí odtud, kde soubor právě leží; když program přesunete, vytvořte zástupce znovu."
 settings.shortcut.addStart: "Přidat do nabídky Start"

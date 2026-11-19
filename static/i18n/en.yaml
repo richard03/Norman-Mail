@@ -21,7 +21,7 @@ settings.language.export: Save translation template
 settings.language.exported: "Template saved: {path}"
 settings.language.help: >
   You can add another language yourself, without reinstalling: save the translation template (it is saved
-  into the languages folder as _template.yaml), rename it to the language code, e.g. de.yaml, change
+  into the languages subfolder of the data folder as _template.yaml), rename it to the language code, e.g. de.yaml, change
   meta.language and meta.name and translate the texts. Untranslated texts are shown in English. The
   application finds the file the next time Settings are opened.
 settings.language.closeCompose: Close the messages you are writing first, then change the language.
@@ -160,6 +160,9 @@ settings.trash.emptyNote: "The **Empty** button below the message list deletes t
 settings.app.intro: "Norman Mail is a simple email client for Windows that brings all your accounts (Gmail and any other mailbox with IMAP and SMTP) together into one shared inbox. It sorts messages by itself: what is written directly to you goes to **Important**, copies to **For your information**, and newsletters and automatic alerts to **Unimportant** and **Notifications**. Spam is caught by rules and by a filter that learns from your decisions."
 settings.app.privacy: "The application runs only on your computer. Your mail, settings and the trained filter stay with you and are not sent anywhere else (apart from your mail servers, the application only connects to GitHub to check for updates); passwords are kept in Windows Credential Manager. Messages are stored in a local database, so they open instantly and can be read offline. Images and other remote content are loaded only when you allow it, so the sender cannot tell that you opened the message."
 settings.app.portable: "Portable version: all data is in the **data** folder next to the program (as long as the **portable.txt** file is next to it)."
+settings.data.title: Data folder
+settings.data.note: "This is where the application keeps its local data: the message database, settings, the trained spam filter and, in the **languages** subfolder, translations. Passwords and sign-in tokens are kept in Windows Credential Manager."
+settings.data.open: Open data folder
 settings.shortcut.title: "Shortcuts"
 settings.shortcut.note: "The application is a single file without installation. A shortcut starts it from where the file is now; if you move the program, create the shortcuts again."
 settings.shortcut.addStart: "Add to Start menu"

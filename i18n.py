@@ -1,8 +1,8 @@
 """Lokalizace: katalogy textů v jednoduchých YAML souborech.
 
 Vestavěné jazyky jsou ve static/i18n/ (angličtina je základ, čeština oficiální překlad) a aktualizují se
-s aplikací. Další jazyky nebo úpravy si uživatel přidá jako soubor <kód>.yaml do složky languages vedle
-NormanMail.exe nebo do složky dat (%APPDATA%\\Mailer\\languages, v portable režimu data\\languages).
+s aplikací. Další jazyky nebo úpravy si uživatel přidá jako soubor <kód>.yaml do podsložky languages
+ve složce dat (%APPDATA%\\Mailer\\languages, v portable režimu data\\languages vedle programu).
 Soubor se stejným kódem jazyka jako vestavěný přepíše jen klíče, které obsahuje.
 
 Formát je podmnožina YAML, která zná jen texty – nic se nepřevádí na čísla ani true/false:
@@ -246,12 +246,9 @@ def builtin_dir() -> Path:
     return base / "static" / "i18n"
 
 
-def user_dirs():
-    """Složky s uživatelskými jazyky: vedle exe (u zdrojových kódů vedle main.py) a ve složce dat."""
-    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) \
-        else Path(__file__).resolve().parent
-    dirs = [exe_dir / "languages", DATA_DIR / "languages"]
-    return list(dict.fromkeys(dirs))
+def user_dir() -> Path:
+    """Složka s uživatelskými jazyky: vždy podsložka languages ve složce dat (vedle databáze a nastavení)."""
+    return DATA_DIR / "languages"
 
 
 _lock = threading.Lock()
@@ -265,25 +262,24 @@ def _scan():
     for f in sorted(builtin_dir().glob("*.yaml")):
         meta, texts = load_file(f)  # vestavěný katalog musí být v pořádku (testy)
         catalogs[meta["language"]] = {"meta": meta, "texts": dict(texts), "sources": ["builtin"]}
-    for d in user_dirs():
-        try:
-            files = sorted(d.glob("*.yaml")) + sorted(d.glob("*.yml"))
-        except OSError:
+    try:
+        files = sorted(user_dir().glob("*.yaml")) + sorted(user_dir().glob("*.yml"))
+    except OSError:
+        files = []
+    for f in files:
+        if f.name.startswith("_"):  # _template.yaml a jiné odložené soubory
             continue
-        for f in files:
-            if f.name.startswith("_"):  # _template.yaml a jiné odložené soubory
-                continue
-            try:
-                meta, texts = load_file(f)
-            except (OSError, ValueError) as e:
-                problems.append({"file": str(f), "error": e})
-                continue
-            cat = catalogs.setdefault(meta["language"], {"meta": meta, "texts": {}, "sources": []})
-            if cat["sources"] == ["builtin"] and meta["language"] != BASE:
-                # úprava vestavěného jazyka: meta (název, formát data) může přepsat
-                cat["meta"] = {**cat["meta"], **{k: v for k, v in meta.items() if v}}
-            cat["texts"].update(texts)
-            cat["sources"].append(str(f))
+        try:
+            meta, texts = load_file(f)
+        except (OSError, ValueError) as e:
+            problems.append({"file": str(f), "error": e})
+            continue
+        cat = catalogs.setdefault(meta["language"], {"meta": meta, "texts": {}, "sources": []})
+        if cat["sources"] == ["builtin"] and meta["language"] != BASE:
+            # úprava vestavěného jazyka: meta (název, formát data) může přepsat
+            cat["meta"] = {**cat["meta"], **{k: v for k, v in meta.items() if v}}
+        cat["texts"].update(texts)
+        cat["sources"].append(str(f))
     return catalogs, problems
 
 

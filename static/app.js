@@ -2526,6 +2526,7 @@ async function renderAppInfo() {
   try { info = await api('/api/app'); } catch { return; }
   $('#appVersion').textContent = t('settings.app.version', { version: info.version });
   $('#appPortable').hidden = !info.portable;
+  $('#appDataDir').textContent = info.data_dir || '';
   const sc = info.shortcuts || {};
   $('#appShortcuts').hidden = !Object.keys(sc).length;  // jen v desktopové aplikaci
   $('#appShortcutStatus').textContent = sc.programs && sc.desktop ? t('settings.shortcut.both')
@@ -2622,6 +2623,9 @@ $('#languageSelect').addEventListener('change', async e => {
     state.settings = await api('/api/settings', { method: 'PUT', body: { language: e.target.value } });
     location.reload();  // celé rozhraní znovu v novém jazyce
   } catch (err) { toast(err.message, true); }
+});
+$('#appDataFolder').addEventListener('click', async () => {
+  try { await api('/api/app/data-folder', { method: 'POST' }); } catch (err) { toast(err.message, true); }
 });
 $('#languageFolder').addEventListener('click', async () => {
   try { await api('/api/i18n/folder', { method: 'POST' }); } catch (err) { toast(err.message, true); }

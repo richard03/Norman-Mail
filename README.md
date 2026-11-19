@@ -153,7 +153,7 @@ Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudovan
 
 **Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor se stejným kódem jako vestavěný jazyk (třeba `cs.yaml`) přepíše jen texty, které obsahuje.
 
-Soubory s jazyky se hledají ve složce `languages` vedle `NormanMail.exe` a ve složce `languages` ve složce s daty (`%APPDATA%\Mailer\languages`, v portable režimu `data\languages`). Soubory začínající podtržítkem se přeskakují.
+Soubory s jazyky se hledají jen v podsložce `languages` datové složky aplikace (`%APPDATA%\Mailer\languages`, v portable režimu `data\languages` vedle programu), takže lokální data i překlady jsou vždy pohromadě. Cestu k datové složce ukazuje **Nastavení → O aplikaci**. Soubory začínající podtržítkem se přeskakují.
 
 Formát je zjednodušený YAML, který zná jen texty, takže `no`, `yes` ani čísla se nepřevádějí:
 

@@ -306,6 +306,7 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 .note.ok { color: #059669; }
 .note.bad { color: var(--danger); }
 .update-notes { white-space: pre-line; }
+.data-path { overflow-wrap: anywhere; user-select: all; }
 [hidden] { display: none !important; }
 
 /* ---------- misc ---------- */
