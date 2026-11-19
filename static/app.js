@@ -991,7 +991,8 @@ $('#messageHead').addEventListener('click', async e => {
 // ------------------------------------------------------------------ sloupec Akce
 
 // Tlačítka Akcí podle toho, kde zpráva je. ToDo: bez Třídění a odložení; Důležité tam, kde zpráva důležitá
-// není; tlačítko kategorie, ve které zpráva už je, se nezobrazí; Spam: jen Není spam a Smazat; Smazané: jen Obnovit.
+// není; tlačítko kategorie, ve které zpráva už je, se nezobrazí; Spam: jen Není spam a Smazat; Smazané: jen Obnovit;
+// Odeslané: bez Třídění, ToDo a odložení.
 const ALL_ACTIONS = ['restore', 'replyAll', 'forward', 'todo', 'snoozeDay', 'snoozeWeek', 'archive',
                      'important', 'unimportant', 'notification', 'spam', 'rule', 'delete'];
 const SORTING_ACTIONS = ['important', 'unimportant', 'notification', 'spam', 'rule'];
@@ -1000,6 +1001,7 @@ function visibleActions(view) {
   const type = state.view.type;
   if (type === 'trash') return ['restore'];
   if (type === 'spam') return ['spam', 'delete'];
+  if (type === 'sent') return ['replyAll', 'forward', 'archive', 'delete'];
   if (view === 'todo') return ['replyAll', 'forward', 'todo', 'archive', 'delete'];
   return ALL_ACTIONS.filter(a => a !== 'restore'
     && (a !== 'important' || ['fyi', 'unimportant', 'notifications'].includes(view))
