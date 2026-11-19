@@ -7,7 +7,6 @@ meta:
 settings.app.title: O aplikaci
 settings.language.label: Jazyk
 language.chooseTitle: Vyberte jazyk
-language.chooseText: "Ve složce s jazyky jsou překlady. V jakém jazyce má Norman Mail být? Později ho můžete změnit v Nastavení → O aplikaci."
 language.chooseOk: Pokračovat
 settings.language.missing:
   one: "{name}: {count} text zatím není přeložený, zobrazuje se anglicky."
