@@ -533,8 +533,6 @@ dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
 #settingsFolders { display: flex; flex-direction: column; gap: 2px; }
 .settings-nav button { display: flex; align-items: center; gap: 6px; }
 .settings-nav button .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settings-nav .nav-new { color: var(--muted); font-size: 13px; }
-.settings-nav .nav-new:hover, .settings-nav .nav-new.active { color: var(--text); }
 .settings-main form.folder-form { padding: 0; }
 .settings-rules .rules { margin-top: 10px; }
 .settings-rules .rule-add input { min-width: 0; }

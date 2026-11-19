@@ -2674,6 +2674,7 @@ function renderSettingsFolders() {
       <svg class="folder-ico" viewBox="0 0 24 24" style="color:${acc ? accColor(acc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
       <span class="label">${esc(f.name)}</span>${acc ? '' : `<span class="warn-mark" title="${esc(t('folder.setTargetAccount'))}">!</span>`}</button>`;
   }).join('');
+  $('#settingsFoldersHead').hidden = !state.userFolders.length;
   markSettingsNav();
 }
 
@@ -2681,7 +2682,6 @@ function markSettingsNav() {
   const dlg = $('#settingsDialog'), folder = settingsSection === 'folder';
   dlg.querySelectorAll('.settings-nav [data-section]').forEach(b => b.classList.toggle('active',
     b.dataset.section === settingsSection && (!folder || +b.dataset.folderId === state.editingFolder)));
-  dlg.querySelector('.settings-nav [data-new-folder]').classList.toggle('active', folder && !state.editingFolder);
 }
 
 /** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil. */
@@ -2699,7 +2699,6 @@ async function openSettings(section = settingsSection, folderId = state.editingF
 }
 
 $('#settingsDialog .settings-nav').addEventListener('click', e => {
-  if (e.target.closest('[data-new-folder]')) return openFolderDialog(null);
   const b = e.target.closest('[data-section]');
   if (!b) return;
   if (b.dataset.section === 'folder') return openFolderDialog(+b.dataset.folderId);
