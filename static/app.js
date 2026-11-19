@@ -205,7 +205,7 @@ async function loadFolders(id) {
 
 function renderSidebar() {
   let h = '';
-  if (state.accounts.length) {
+  {  // pohledy jsou vidět vždy, i bez účtu (jen prázdné)
     const vu = state.viewUnread || {};
     for (const [filter, label] of UNIFIED_VIEWS) {
       const active = state.view.type === 'unified' && state.view.filter === filter;
@@ -224,9 +224,8 @@ function renderSidebar() {
     h += `<div class="nav-item unified trash-item ${state.view.type === 'trash' ? 'active' : ''}" data-trash
             title="${esc(t('nav.trashTitle'))}">${TRASH_ICON}<span class="label">${esc(t('view.trash'))}</span>
             ${state.trashTotal ? `<span class="badge total">${state.trashTotal}</span>` : ''}</div>`;
-  } else {
-    h += `<p class="muted pad">${esc(t('nav.noAccounts'))}</p>`;
   }
+  if (!state.accounts.length) h += `<p class="muted pad">${esc(t('nav.noAccounts'))}</p>`;
   if (state.accounts.length) {
     h += `<div class="nav-section">${esc(t('nav.folders'))}</div>`;
     for (const f of state.userFolders) {
