@@ -189,6 +189,7 @@ function folderRole(accountId, folder) {
 async function loadAccounts() {
   state.accounts = await api('/api/accounts');
   renderSidebar();
+  if ($('#settingsDialog').open) renderSettingsList();
   // Složky se načítají na pozadí – na ně se nečeká (seznam zpráv se zobrazí hned z databáze).
   state.accounts.forEach(a => loadFolders(a.id));
 }
@@ -284,14 +285,13 @@ function navItemInfo(el) {
              settings: () => openSettings('trash') };
   if (el.hasAttribute('data-sent'))
     return { label: t('view.sent'), target: null, unread: 0, readNote: t('nav.sentAlwaysRead'),
-             settings: null, settingsNote: t('nav.folderNoSettings') };
+             settings: () => openSettings('sent') };  // jen vysvětlení, nastavení nemá
   if (el.hasAttribute('data-spam'))
     return { label: t('view.spam'), target: { type: 'spam' }, unread: state.spamUnread, settings: () => openSettings('spam') };
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     return { label: unifiedTitle(view), target: { type: 'unified', view }, unread: state.viewUnread?.[view] || 0,
-             settings: CATEGORIES[view] ? () => openSettings(view) : null,
-             settingsNote: CATEGORIES[view] ? '' : t('nav.viewNoSettings') };
+             settings: () => openSettings(view) };  // ToDo, Důležité a Vzít na vědomí: vysvětlení
   }
   if (el.dataset.ufolder) {
     const f = state.userFolders.find(x => x.id === +el.dataset.ufolder);
@@ -2053,7 +2053,38 @@ function updatePasswordRequirement() {
 $('#accountForm').addEventListener('input', updatePasswordRequirement);
 $('#accountForm').addEventListener('change', updatePasswordRequirement);
 
+/** Nový účet: samostatné okno (formulář se do něj vrátí, pokud byl naposledy v Nastavení). */
 function openAccountDialog(id = null) {
+  if (id) return openSettings('account', id);  // existující účet se upravuje v Nastavení → Účty
+  $('#accountDialog').prepend($('#accountForm'));
+  fillAccountForm(null);
+  $('#accountDialog').showModal();
+}
+
+/** Nastavení → Účty → účet: stejný formulář jako v okně, jen přenesený do prostředního sloupce. */
+function openAccountSettings(id) {
+  if (!accById(id)) return showSettingsSection('none', 'accounts');
+  settingsAccount = id;
+  $('#settingsAccountHost').appendChild($('#accountForm'));
+  fillAccountForm(id);
+  showSettingsSection('account');
+}
+
+const accountInSettings = () => $('#settingsAccountHost').contains($('#accountForm'));
+function leaveAccountSettings() {
+  if (accountInSettings()) stopGooglePolling();
+}
+
+/** Po uložení / smazání / přihlášení přes Google: okno zavřít, v Nastavení aktualizovat seznam účtů. */
+function accountDone(deleted = false) {
+  if ($('#accountDialog').open) $('#accountDialog').close();
+  else if (accountInSettings() && $('#settingsDialog').open) {
+    if (deleted) showSettingsSection('none', 'accounts');
+    else openAccountSettings(state.editingId);
+  }
+}
+
+function fillAccountForm(id) {
   const f = $('#accountForm');
   f.reset();
   state.editingId = id;
@@ -2085,7 +2116,6 @@ function openAccountDialog(id = null) {
   const isGmail = acc && (acc.imap_host === 'imap.gmail.com');
   if (isGmail) f.elements.namedItem('preset').value = 'gmail';
   $('#googleBox').hidden = !(oauth || isGmail);
-  $('#accountDialog').showModal();
 }
 
 // ------------------------------------------------------------------ Google OAuth
@@ -2127,10 +2157,10 @@ async function googleLogin() {
       if (res.status === 'pending') return;
       stopGooglePolling();
       if (res.status === 'error') { setGoogleStatus(res.error, 'bad'); return; }
-      $('#accountDialog').close();
       toast(t('account.googleConnected'));
       delete state.folders[res.account_id];
       await loadAccounts();
+      accountDone();
       loadList({ quiet: true });
     }, 1500);
   } catch (err) {
@@ -2170,10 +2200,10 @@ $('#accountForm').addEventListener('submit', async e => {
     const id = state.editingId;
     const res = id ? await api(`/api/accounts/${id}`, { method: 'PUT', body })
                    : await api('/api/accounts', { method: 'POST', body });
-    $('#accountDialog').close();
     toast(id ? t('account.saved') : t('account.added'));
     delete state.folders[res.id];
     await loadAccounts();
+    accountDone();
     if (!id && state.accounts.length === 1) setView({ type: 'unified', filter: 'important' }); else loadList({ quiet: true });
   } catch (err) {
     $('#accountError').textContent = err.message;
@@ -2193,10 +2223,10 @@ $('#deleteAccountBtn').addEventListener('click', async e => {
   const id = state.editingId;
   try {
     await api(`/api/accounts/${id}`, { method: 'DELETE' });
-    $('#accountDialog').close();
     delete state.folders[id];
     if (state.current?.accountId === id) clearCurrent();
     await loadAccounts();
+    accountDone(true);
     setView({ type: 'unified', filter: 'important' });
     toast(t('account.deleted'));
   } catch (err) { $('#accountError').textContent = err.message; }
@@ -2208,7 +2238,7 @@ $('#addAccountBtn').addEventListener('click', () => openAccountDialog());
 
 async function loadUserFolders() {
   try { state.userFolders = await api('/api/user-folders'); } catch { return; }
-  renderSettingsFolders();
+  if ($('#settingsDialog').open) renderSettingsList();
   if (state.view.type === 'ufolder' && !state.userFolders.some(f => f.id === state.view.id))
     setView({ type: 'unified', filter: 'important' });  // zobrazená složka byla smazána
   else renderSidebar();
@@ -2504,18 +2534,42 @@ $('#folderDeletePanel').addEventListener('click', async e => {
 
 const RULE_KINDS = { sender: 'common.sender', subject: 'common.subject' };
 
+// Nastavení: skupiny (O aplikaci / Složky / Účty) → položky skupiny ve druhém sloupci → obrazovka položky.
+// Sekce = obrazovka: 'app', pohledy a složky (todo … trash, 'folder' = uživatelská složka), 'account',
+// 'none' = skupina bez vybrané položky.
 let settingsSection = 'app';
+let settingsGroup = 'app';
+let settingsAccount = null;  // účet zobrazený v Nastavení → Účty
+// složky bez vlastních nastavení: místo nich krátké vysvětlení, k čemu slouží a jak se do nich zprávy dostanou
+const SETTINGS_INFO = { todo: 'view.todo', important: 'view.important', fyi: 'view.fyi', sent: 'view.sent' };
+const SETTINGS_FOLDERS = [...UNIFIED_VIEWS.map(([key, label]) => [key, label]),
+                          ['sent', 'view.sent', SENT_ICON], ['spam', 'view.spam', SPAM_ICON], ['trash', 'view.trash', TRASH_ICON]];
+const settingsGroupOf = section => section === 'app' ? 'app' : section === 'account' ? 'accounts'
+  : section === 'none' ? settingsGroup : 'folders';
 
-/** Přepne téma v levém sloupci nastavení (prostřední a pravý sloupec ukážou jeho obsah). */
-function showSettingsSection(section) {
+/** Zobrazí obrazovku Nastavení (prostřední sloupec), u položek se skupinou i druhý sloupec, a pravidla. */
+function showSettingsSection(section, group = settingsGroupOf(section)) {
+  if (section !== 'account') leaveAccountSettings();
   settingsSection = section;
+  settingsGroup = group;
   const dlg = $('#settingsDialog');
-  dlg.querySelectorAll('[data-panel]').forEach(el => { el.hidden = el.dataset.panel !== section; });
+  const panel = SETTINGS_INFO[section] ? 'info' : section;
+  dlg.querySelectorAll('[data-panel]').forEach(el => { el.hidden = el.dataset.panel !== panel; });
+  if (panel === 'info') {
+    $('#settingsInfoTitle').textContent = t(SETTINGS_INFO[section]);
+    $('#settingsInfoText').innerHTML = tHtml('settings.info.' + section);
+  }
+  if (section === 'none') {
+    $('#settingsPick').textContent = group === 'accounts'
+      ? t(state.accounts.length ? 'settings.pickAccount' : 'nav.noAccounts') : t('settings.pickFolder');
+  }
   // pravý sloupec jen pokud téma má pravidla (nová, ještě neuložená složka je nemá)
   const hasRules = section === 'folder' ? !!state.editingFolder
-    : !!dlg.querySelector(`.settings-rules [data-panel="${section}"]`);
-  dlg.querySelector('.settings-body').classList.toggle('no-rules', !hasRules);
-  markSettingsNav();
+    : !!dlg.querySelector(`.settings-rules [data-panel="${panel}"]`);
+  const body = dlg.querySelector('.settings-body');
+  body.classList.toggle('no-rules', !hasRules);
+  body.classList.toggle('no-list', group === 'app');
+  renderSettingsList();
   if (section === 'app') renderAppInfo();
 }
 
@@ -2666,44 +2720,56 @@ $('#appShortcuts').addEventListener('click', async e => {
   finally { b.disabled = false; }
 });
 
-/** Složky v levém sloupci Nastavení – každá má svou obrazovku. */
-function renderSettingsFolders() {
-  $('#settingsFolders').innerHTML = state.userFolders.map(f => {
-    const acc = accById(f.account_id);
-    return `<button type="button" data-section="folder" data-folder-id="${f.id}" title="${esc(f.name)}">
-      <svg class="folder-ico" viewBox="0 0 24 24" style="color:${acc ? accColor(acc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      <span class="label">${esc(f.name)}</span>${acc ? '' : `<span class="warn-mark" title="${esc(t('folder.setTargetAccount'))}">!</span>`}</button>`;
-  }).join('');
-  $('#settingsFoldersHead').hidden = !state.userFolders.length;
-  markSettingsNav();
+/** Druhý sloupec Nastavení: všechny složky (pohledy i uživatelské), nebo účty. Plus zvýraznění. */
+function renderSettingsList() {
+  const list = $('#settingsList');
+  const active = (sec, id) => sec === settingsSection
+    && (sec === 'folder' ? id === state.editingFolder : sec === 'account' ? id === settingsAccount : true) ? 'active' : '';
+  if (settingsGroup === 'folders') {
+    list.innerHTML = SETTINGS_FOLDERS.map(([key, label, icon]) =>
+      `<button type="button" data-section="${key}" class="${active(key)}">${icon || ''}<span class="label">${esc(t(label))}</span></button>`
+    ).join('') + state.userFolders.map(f => {
+      const acc = accById(f.account_id);
+      return `<button type="button" data-section="folder" data-folder-id="${f.id}" title="${esc(f.name)}" class="${active('folder', f.id)}">
+        <svg class="folder-ico" viewBox="0 0 24 24" style="color:${acc ? accColor(acc.id) : 'var(--danger)'}"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="label">${esc(f.name)}</span>${acc ? '' : `<span class="warn-mark" title="${esc(t('folder.setTargetAccount'))}">!</span>`}</button>`;
+    }).join('');
+  } else if (settingsGroup === 'accounts') {
+    list.innerHTML = state.accounts.map(a =>
+      `<button type="button" data-section="account" data-acc-id="${esc(a.id)}" title="${esc(a.email)}" class="${active('account', a.id)}">
+        <span class="dot" style="background:${accColor(a.id)}"></span><span class="label">${esc(a.name || a.email)}</span></button>`
+    ).join('');
+  } else list.innerHTML = '';
+  $('#settingsDialog').querySelectorAll('.settings-nav [data-group]').forEach(b =>
+    b.classList.toggle('active', b.dataset.group === settingsGroup));
 }
 
-function markSettingsNav() {
-  const dlg = $('#settingsDialog'), folder = settingsSection === 'folder';
-  dlg.querySelectorAll('.settings-nav [data-section]').forEach(b => b.classList.toggle('active',
-    b.dataset.section === settingsSection && (!folder || +b.dataset.folderId === state.editingFolder)));
-}
-
-/** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil. */
-async function openSettings(section = settingsSection, folderId = state.editingFolder) {
-  if (section === 'folder' && folderId && !state.userFolders.some(f => f.id === folderId)) section = 'app';
+/** Otevře Nastavení na daném tématu; bez argumentů tam, kde uživatel naposledy skončil.
+ *  id = uživatelská složka (section 'folder') nebo účet (section 'account'). */
+async function openSettings(section = settingsSection, id = section === 'account' ? settingsAccount : state.editingFolder) {
+  if (section === 'folder' && id && !state.userFolders.some(f => f.id === id)) section = 'app';
+  if (section === 'account' && !accById(id)) section = 'app';
   $('#spamRules').innerHTML = $('#notificationsRules').innerHTML = $('#unimportantRules').innerHTML =
     `<li class="empty-rules">${esc(t('common.loading'))}</li>`;
-  renderSettingsFolders();
   renderSettingOptions();
-  if (section !== 'folder') showSettingsSection(section);
+  if (section !== 'folder' && section !== 'account') showSettingsSection(section);
   $('#settingsDialog').showModal();
-  if (section === 'folder') openFolderDialog(folderId);
+  if (section === 'folder') openFolderDialog(id);
+  if (section === 'account') openAccountSettings(id);
   await Promise.all([renderSpamRules(), ...Object.keys(CATEGORIES).map(renderCategoryRules), renderBayesStatus(),
                      loadSettings().then(renderSettingOptions)]);
 }
 
-$('#settingsDialog .settings-nav').addEventListener('click', e => {
-  const b = e.target.closest('[data-section]');
+$('#settingsDialog .settings-body').addEventListener('click', e => {
+  const g = e.target.closest('.settings-nav [data-group]');
+  if (g) return showSettingsSection(g.dataset.group === 'app' ? 'app' : 'none', g.dataset.group);
+  const b = e.target.closest('.settings-list [data-section]');
   if (!b) return;
   if (b.dataset.section === 'folder') return openFolderDialog(+b.dataset.folderId);
+  if (b.dataset.section === 'account') return openAccountSettings(b.dataset.accId);
   showSettingsSection(b.dataset.section);
 });
+$('#settingsDialog').addEventListener('close', () => leaveAccountSettings());
 // klik mimo dialog (na ztmavené pozadí) nastavení zavře
 $('#settingsDialog').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.close();

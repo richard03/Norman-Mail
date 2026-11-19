@@ -276,13 +276,13 @@
     <div class="dialog-actions">
       <button type="button" id="deleteAccountBtn" class="btn danger" data-i18n="account.delete"></button>
       <span class="spacer"></span>
-      <button type="button" class="btn" data-close data-i18n="common.cancel"></button>
+      <button type="button" class="btn" id="accountCancel" data-close data-i18n="common.cancel"></button>
       <button type="submit" id="saveAccountBtn" class="btn primary" data-i18n="common.save"></button>
     </div>
   </form>
 </dialog>
 
-<!-- Nastavení: témata | nastavení | pravidla -->
+<!-- Nastavení: skupiny | položky skupiny (složky / účty) | nastavení | pravidla -->
 <dialog id="settingsDialog" class="settings">
   <div class="settings-head">
     <h2 data-i18n="settings.title"></h2>
@@ -290,16 +290,21 @@
   </div>
   <div class="settings-body">
     <nav class="settings-nav">
-      <button type="button" data-section="app" data-i18n="settings.nav.about"></button>
-      <button type="button" data-section="unimportant" data-i18n="view.unimportantLabel"></button>
-      <button type="button" data-section="notifications" data-i18n="view.notificationsLabel"></button>
-      <button type="button" data-section="spam" data-i18n="view.spamLabel"></button>
-      <button type="button" data-section="trash" data-i18n="view.trashLabel"></button>
-      <div class="settings-nav-section" id="settingsFoldersHead" data-i18n="settings.nav.folders"></div>
-      <div id="settingsFolders"></div>
+      <button type="button" data-group="app" data-i18n="settings.nav.about"></button>
+      <button type="button" data-group="folders" data-i18n="settings.nav.folders"></button>
+      <button type="button" data-group="accounts" data-i18n="nav.accounts"></button>
     </nav>
+    <nav class="settings-nav settings-list" id="settingsList"></nav>
 
     <section class="settings-main">
+      <div data-panel="none">
+        <p id="settingsPick" class="note"></p>
+      </div>
+      <div data-panel="info">
+        <h3 id="settingsInfoTitle"></h3>
+        <p id="settingsInfoText" class="note"></p>
+      </div>
+      <div data-panel="account" id="settingsAccountHost"></div>
       <div data-panel="unimportant">
         <h3 data-i18n="view.unimportantLabel"></h3>
         <p class="note" data-i18n="settings.unimportant.intro"></p>
