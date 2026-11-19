@@ -149,9 +149,9 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 
 ## Jazyky a překlady
 
-Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudované v `NormanMail.exe` a aktualizuje se s aplikací. Jazyk se vybírá v **Nastavení → O aplikaci**. Nová instalace začíná anglicky. Pokud ale v podsložce `languages` datové složky už leží překlad, aplikace hned při prvním spuštění nabídne okno s výběrem jazyka. Kdo aplikaci používal před verzí 1.0.3 (kdy se jazyk řídil Windows), dostane natrvalo jazyk, který viděl dosud.
+V `NormanMail.exe` je zabudovaná jen angličtina (základní jazyk), která se aktualizuje s aplikací. Ostatní jazyky jsou samostatné soubory. Čeština je v repozitáři jako `languages/cs.yaml` a je přiložená ke každému vydání na GitHubu (`cs.yaml`). Stačí ji dát do podsložky `languages` datové složky. Automatická aktualizace vymění jen exe, takže nové texty se v překladu objeví až s novým `cs.yaml` (do té doby anglicky). Jazyk se vybírá v **Nastavení → O aplikaci**. Nová instalace začíná anglicky. Pokud ale v podsložce `languages` datové složky už leží překlad, aplikace hned při prvním spuštění nabídne okno s výběrem jazyka. Kdo aplikaci používal před verzí 1.0.3 (kdy se jazyk řídil Windows), dostane natrvalo jazyk, který viděl dosud.
 
-**Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor se stejným kódem jako vestavěný jazyk (třeba `cs.yaml`) přepíše jen texty, které obsahuje.
+**Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor `en.yaml` přepíše jen ty anglické texty, které obsahuje.
 
 Soubory s jazyky se hledají jen v podsložce `languages` datové složky aplikace (`%APPDATA%\Mailer\languages`, v portable režimu `languages` vedle programu), takže lokální data i překlady jsou vždy pohromadě. Cestu k datové složce ukazuje **Nastavení → O aplikaci**. Soubory začínající podtržítkem se přeskakují.
 
@@ -175,7 +175,7 @@ about.text: |
 - Jediné formátování je `**tučně**`. Texty se vždy vkládají jako prostý text: HTML, odkazy ani skripty z překladu se neprovedou, takže ani soubor stažený z internetu nemůže podvrhnout ovládací prvky.
 - Soubor s chybou se nepoužije vůbec. Nastavení ukáže soubor a číslo řádku s chybou.
 
-**Pro vývojáře:** texty jsou v `static/i18n/en.yaml` a `cs.yaml`. Ve frontendu `t('klíč', {proměnné})` a `tn('klíč', počet)`, ve statickém HTML atributy `data-i18n`, `data-i18n-title`, `data-i18n-placeholder` a `data-i18n-aria-label`, v Pythonu `tr("klíč", proměnná=…)` (`from i18n import t as tr`). Test `tests/test_i18n.py` hlídá, že každý klíč použitý v kódu je v obou katalozích.
+**Pro vývojáře:** texty jsou v `static/i18n/en.yaml` (zabudovaná angličtina) a `languages/cs.yaml` (čeština, `tools/release.py` ji přikládá k vydání). Ve frontendu `t('klíč', {proměnné})` a `tn('klíč', počet)`, ve statickém HTML atributy `data-i18n`, `data-i18n-title`, `data-i18n-placeholder` a `data-i18n-aria-label`, v Pythonu `tr("klíč", proměnná=…)` (`from i18n import t as tr`). Test `tests/test_i18n.py` hlídá, že každý klíč použitý v kódu je v obou katalozích.
 
 ## Struktura
 
@@ -188,7 +188,7 @@ about.text: |
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
 | `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
 | `google_oauth.py` | Přihlášení přes Google (OAuth) |
-| `i18n.py`, `static/i18n/` | Lokalizace: načítání katalogů textů (vestavěných i uživatelských), anglický a český katalog |
+| `i18n.py`, `static/i18n/`, `languages/` | Lokalizace: načítání katalogů textů, zabudovaná angličtina, čeština jako samostatný soubor |
 | `tests/` | Testy (`.venv\Scripts\python -m unittest discover tests`) |
 | `tools/release.py` | Vydání nové verze (sestavení, podepsaný `latest.json`, GitHub release) |
 | `tools/make_icon.py` | Z předlohy `assets/mailer-256.png` vygeneruje `assets/mailer.ico`, logo 120×120 a ikony webu `site/` (potřebuje Pillow) |

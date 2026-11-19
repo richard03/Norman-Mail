@@ -11,6 +11,8 @@ os.environ.setdefault("MAILER_DATA", tempfile.mkdtemp())
 
 import i18n  # noqa: E402
 
+REPO_LANGUAGES = Path(__file__).resolve().parent.parent / "languages"  # překlady dodávané mimo exe
+
 
 class ParseTest(unittest.TestCase):
     def test_plain_and_quoted(self):
@@ -64,14 +66,20 @@ class CatalogTest(unittest.TestCase):
         i18n.reload()
         i18n.set_language("en")
 
-    def test_builtin_catalogs_are_valid_and_complete(self):
+    def test_only_english_is_builtin(self):
         i18n.reload()
-        en = set(i18n.catalog("en")["texts"])
-        for lang in i18n.languages():
-            if lang["builtin"]:
-                self.assertEqual(lang["missing"], 0, f"{lang['code']}: chybí překlady")
-        self.assertIn("cs", {l["code"] for l in i18n.languages()})
-        self.assertTrue(en)
+        self.assertTrue(i18n.catalog("en")["texts"])
+        self.assertEqual([l["code"] for l in i18n.languages()], ["en"])
+
+    def test_shipped_translations_are_valid_and_complete(self):
+        """Překlady v languages/ (čeština) se načtou bez chyb a nic v nich nechybí."""
+        i18n.user_dir = lambda: REPO_LANGUAGES
+        i18n.reload()
+        self.assertEqual(i18n.problems(), [])
+        langs = {l["code"]: l for l in i18n.languages()}
+        self.assertIn("cs", langs)
+        for code, lang in langs.items():
+            self.assertEqual(lang["missing"], 0, f"{code}: chybí překlady")
 
     def test_user_file_override_new_language_and_bad_file(self):
         (self.dir / "cs.yaml").write_text("meta:\n  language: cs\nsettings.app.title: Můj titulek\n", "utf-8")
@@ -108,12 +116,16 @@ class CatalogTest(unittest.TestCase):
         keys |= set(re.findall(r'data-i18n(?:-[a-z-]+)?="([^"]+)"', html))
         keys |= set(re.findall(r"dataset\.i18n\w*\s*=\s*'([^']+)'", js))
         keys |= set(re.findall(r"""\b(?:tr|_tr|i18n\.t)\(\s*["']([A-Za-z0-9_.\-]+)["']""", py))
+        i18n.user_dir = lambda: REPO_LANGUAGES
         i18n.reload()
         for lang in ("en", "cs"):
             texts = i18n._catalogs[lang]["texts"]
             self.assertEqual(sorted(k for k in keys if k not in texts), [], f"{lang}: chybějící klíče")
 
     def test_resolve(self):
+        i18n.reload()
+        self.assertEqual(i18n.resolve("cs"), "en")  # čeština není v aplikaci, jen jako soubor
+        i18n.user_dir = lambda: REPO_LANGUAGES
         i18n.reload()
         self.assertEqual(i18n.resolve("cs"), "cs")
         self.assertEqual(i18n.resolve("zz"), "en")

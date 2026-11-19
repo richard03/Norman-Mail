@@ -1,9 +1,9 @@
 """Lokalizace: katalogy textů v jednoduchých YAML souborech.
 
-Vestavěné jazyky jsou ve static/i18n/ (angličtina je základ, čeština oficiální překlad) a aktualizují se
-s aplikací. Další jazyky nebo úpravy si uživatel přidá jako soubor <kód>.yaml do podsložky languages
-ve složce dat (%APPDATA%\\Mailer\\languages, v portable režimu languages vedle programu).
-Soubor se stejným kódem jazyka jako vestavěný přepíše jen klíče, které obsahuje.
+V aplikaci je zabudovaná jen angličtina (static/i18n/en.yaml), aktualizuje se s ní. Ostatní jazyky
+(i oficiální čeština, v repozitáři languages/cs.yaml a jako soubor u každého vydání) si uživatel dá jako
+soubor <kód>.yaml do podsložky languages ve složce dat (%APPDATA%\\Mailer\\languages, v portable režimu
+languages vedle programu). Chybějící texty se doplní anglicky.
 
 Formát je podmnožina YAML, která zná jen texty – nic se nepřevádí na čísla ani true/false:
 

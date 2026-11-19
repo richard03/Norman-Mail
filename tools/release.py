@@ -9,7 +9,7 @@ Vydání (nejdřív zvyšte VERSION ve version.py, commitněte a pushněte):
     .venv\\Scripts\\python tools\\release.py --notes "Co je nového"      (nebo --notes-file soubor.txt)
   Zkontroluje čistý strom a novou verzi, sestaví dist\\NormanMail.exe, vytvoří a podepíše
   dist\\latest.json a přes GitHub CLI (gh) založí release vX.Y.Z se soubory NormanMail.exe,
-  latest.json a latest.json.sig. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
+  latest.json a latest.json.sig a s překlady z languages\\*.yaml. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
 """
 
 import argparse
@@ -121,6 +121,8 @@ def main():
     (DIST / updater.MANIFEST).write_bytes(body)
     (DIST / (updater.MANIFEST + ".sig")).write_text(sig.hex() + "\n", "ascii")
     files = [str(DIST / n) for n in (updater.ASSET, updater.MANIFEST, updater.MANIFEST + ".sig")]
+    # překlady (nejsou v exe) jako samostatné soubory ke stažení
+    files += [str(p) for p in sorted((ROOT / "languages").glob("*.yaml")) if not p.name.startswith("_")]
     print(body.decode("utf-8"))
 
     if args.no_publish or args.allow_dirty:

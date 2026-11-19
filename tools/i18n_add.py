@@ -1,4 +1,4 @@
-"""Přidá texty do vestavěných katalogů (pomocník pro převod; klíče, které už v katalogu jsou, přeskočí).
+"""Přidá texty do katalogů (static/i18n/en.yaml a languages/cs.yaml) (pomocník pro převod; klíče, které už v katalogu jsou, přeskočí).
 
     .venv\\Scripts\\python tools\\i18n_add.py cs.json en.json "# Nadpis oddílu"
 
@@ -12,7 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import i18n  # noqa: E402
 
-DIR = Path(__file__).resolve().parent.parent / "static" / "i18n"
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def catalog_path(lang):
+    """Angličtina je zabudovaná v aplikaci, ostatní jazyky jsou samostatné soubory v languages/."""
+    return ROOT / "static" / "i18n" / "en.yaml" if lang == "en" else ROOT / "languages" / f"{lang}.yaml"
 
 
 def quote(s):
@@ -26,7 +31,7 @@ def render(key, value):
 
 
 def add(lang, entries, heading):
-    path = DIR / f"{lang}.yaml"
+    path = catalog_path(lang)
     text = path.read_text("utf-8")
     existing = i18n.parse(text)
     new = [render(k, v) for k, v in entries.items() if k not in existing]

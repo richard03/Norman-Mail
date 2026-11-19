@@ -2620,7 +2620,7 @@ async function renderLanguages() {
   i18nInfo = info;
   const sel = $('#languageSelect'), chosen = state.settings?.language ?? '';
   sel.innerHTML = info.languages.map(l =>
-    `<option value="${esc(l.code)}">${esc(l.name)}${l.builtin ? '' : ' *'}</option>`).join('');
+    `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
   sel.value = info.languages.some(l => l.code === chosen) ? chosen : info.catalog.language;  // nezvolený = angličtina
   const cur = info.languages.find(l => l.code === sel.value);
   $('#languageMissing').hidden = !cur?.missing;
