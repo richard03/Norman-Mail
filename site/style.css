@@ -36,7 +36,7 @@ footer { margin-top: 56px; padding-top: 16px; padding-bottom: 32px; border-top: 
 .hero .lead { color: #e6f6fb; }
 .hero .muted { color: var(--foam); }
 .hero .button { background: #fff; color: var(--navy); }
-.hero-icon { flex: none; width: 168px; height: 168px; filter: drop-shadow(0 10px 24px rgba(0, 20, 50, .45)); }
+.hero-icon { flex: none; width: 168px; height: 168px; border-radius: 22%; filter: drop-shadow(0 10px 24px rgba(0, 20, 50, .45)); }
 @media (max-width: 640px) {
   .hero-inner { flex-direction: column-reverse; align-items: flex-start; gap: 16px; padding-top: 28px; }
   .hero-icon { width: 88px; height: 88px; }
