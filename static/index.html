@@ -204,6 +204,19 @@
   </form>
 </dialog>
 
+<!-- Výběr jazyka při prvním spuštění (jen když ve složce s jazyky leží překlad) -->
+<dialog id="languageDialog" class="confirm">
+  <form method="dialog">
+    <h2 data-i18n="language.chooseTitle"></h2>
+    <p data-i18n="language.chooseText"></p>
+    <div id="languageChoices" class="options"></div>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button value="ok" class="btn primary" data-i18n="language.chooseOk"></button>
+    </div>
+  </form>
+</dialog>
+
 <!-- Nastavení účtu -->
 <dialog id="accountDialog">
   <form id="accountForm" method="dialog">

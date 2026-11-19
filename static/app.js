@@ -2594,17 +2594,35 @@ function renderUpdateButton(up) {
   }
 }
 
-/** Výběr jazyka: vestavěné jazyky a soubory nalezené ve složkách s jazyky (projdou se znovu). */
+/** První spuštění s překlady ve složce s jazyky: modální výběr jazyka. Volba (i zavření Esc = angličtina)
+ *  se uloží, takže se dialog už neukáže. Jiný jazyk než angličtina = znovu načíst celé rozhraní. */
+async function chooseLanguage() {
+  const dlg = $('#languageDialog');
+  $('#languageChoices').innerHTML = i18nInfo.languages.map(l =>
+    `<label class="option"><input type="radio" name="language" value="${esc(l.code)}"${l.code === I18N.lang ? ' checked' : ''}>
+       <span lang="${esc(l.code)}">${esc(l.name)}</span></label>`).join('');
+  dlg.showModal();
+  await new Promise(resolve => dlg.addEventListener('close', resolve, { once: true }));
+  const code = dlg.returnValue === 'ok' && dlg.querySelector('input[name=language]:checked')?.value || I18N.lang;
+  try {
+    state.settings = await api('/api/settings', { method: 'PUT', body: { language: code } });
+  } catch (err) { toast(err.message, true); return; }
+  if (code !== I18N.lang) {
+    location.reload();
+    await new Promise(() => {});  // stránka se načítá znovu – dál nepokračovat
+  }
+}
+
+/** Výběr jazyka: vestavěné jazyky a soubory nalezené ve složce s jazyky (projde se znovu). */
 async function renderLanguages() {
   let info;
   try { [info] = await Promise.all([api('/api/i18n?reload=1'), loadSettings()]); } catch { return; }
   i18nInfo = info;
   const sel = $('#languageSelect'), chosen = state.settings?.language ?? '';
-  const autoName = info.languages.find(l => l.code === info.auto)?.name || info.auto;
-  sel.innerHTML = `<option value="">${esc(t('settings.language.auto', { name: autoName }))}</option>`
-    + info.languages.map(l => `<option value="${esc(l.code)}">${esc(l.name)}${l.builtin ? '' : ' *'}</option>`).join('');
-  sel.value = info.languages.some(l => l.code === chosen) ? chosen : '';
-  const cur = info.languages.find(l => l.code === (sel.value || info.auto));
+  sel.innerHTML = info.languages.map(l =>
+    `<option value="${esc(l.code)}">${esc(l.name)}${l.builtin ? '' : ' *'}</option>`).join('');
+  sel.value = info.languages.some(l => l.code === chosen) ? chosen : info.catalog.language;  // nezvolený = angličtina
+  const cur = info.languages.find(l => l.code === sel.value);
   $('#languageMissing').hidden = !cur?.missing;
   if (cur?.missing) $('#languageMissing').textContent = tn('settings.language.missing', cur.missing, { name: cur.name });
   const box = $('#languageProblems');
@@ -2616,7 +2634,7 @@ async function renderLanguages() {
 $('#languageSelect').addEventListener('change', async e => {
   if (state.composeWins?.length) {
     toast(t('settings.language.closeCompose'), true);
-    e.target.value = state.settings?.language ?? '';
+    e.target.value = I18N.lang;
     return;
   }
   try {
@@ -3140,6 +3158,7 @@ loadColumnWidths();
 
 (async () => {
   try { await loadI18n(); } catch (e) { console.error('Katalog textů se nenačetl', e); }
+  if (i18nInfo?.choose) await chooseLanguage();
   try {
     await loadAccounts();  // jen seznam účtů z lokálního úložiště – okamžité
     if (!state.accounts.length) openAccountDialog();

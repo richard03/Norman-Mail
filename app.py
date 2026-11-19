@@ -53,7 +53,16 @@ def refresh_my_addresses():
         database.set_my_addresses(a["id"], {a["email"], a.get("username") or ""})
 
 
+def migrate_language():
+    """Do verze 1.0.2 znamenal nezvolený jazyk „podle Windows“, teď angličtinu. Kdo aplikaci už používá
+    (má účet), dostane natrvalo jazyk, který viděl dosud, aby se mu po aktualizaci nepřepnul."""
+    if not database.settings()["language"] and store.list_public():
+        win = i18n.windows_language()
+        database.update_settings({"language": win if win in {l["code"] for l in i18n.languages()} else i18n.BASE})
+
+
 refresh_my_addresses()
+migrate_language()
 i18n.set_language(database.settings()["language"])
 
 
@@ -1158,9 +1167,10 @@ def i18n_get():
     if request.args.get("reload"):
         i18n.reload()
         i18n.set_language(database.settings()["language"])
-    auto = i18n.resolve("")
+    # jazyk zatím nezvolený a ve složce s jazyky leží překlad → rozhraní hned na začátku nabídne výběr
+    choose = not database.settings()["language"] and i18n.has_user_files()
     return jsonify(catalog=i18n.catalog(), languages=i18n.languages(), problems=i18n.problems(),
-                   auto=auto, folder=str(i18n.user_dir()))
+                   choose=choose, folder=str(i18n.user_dir()))
 
 
 def _open_folder(folder):

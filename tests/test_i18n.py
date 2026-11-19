@@ -116,7 +116,15 @@ class CatalogTest(unittest.TestCase):
     def test_resolve(self):
         i18n.reload()
         self.assertEqual(i18n.resolve("cs"), "cs")
-        self.assertIn(i18n.resolve("zz"), {l["code"] for l in i18n.languages()})
+        self.assertEqual(i18n.resolve("zz"), "en")
+        self.assertEqual(i18n.resolve(""), "en")  # nezvolený jazyk = angličtina, ne jazyk Windows
+
+    def test_has_user_files(self):
+        i18n.reload()
+        self.assertFalse(i18n.has_user_files())
+        (self.dir / "de.yaml").write_text("meta:\n  language: de\n  name: Deutsch\nnav.important: Wichtig\n", "utf-8")
+        i18n.reload()
+        self.assertTrue(i18n.has_user_files())
 
 
 if __name__ == "__main__":

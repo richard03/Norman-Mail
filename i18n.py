@@ -327,12 +327,15 @@ def windows_language():
 
 
 def resolve(preferred=""):
-    """Kód jazyka, který se použije: zvolený, jinak jazyk Windows, jinak angličtina."""
+    """Kód jazyka, který se použije: zvolený (pokud je k dispozici), jinak angličtina."""
     _ensure()
-    for code in (preferred, windows_language()):
-        if code and code in _catalogs:
-            return code
-    return BASE
+    return preferred if preferred and preferred in _catalogs else BASE
+
+
+def has_user_files():
+    """Leží ve složce s jazyky aspoň jeden použitelný překlad? (pak se při prvním spuštění nabídne výběr)"""
+    _ensure()
+    return any(s != "builtin" for cat in _catalogs.values() for s in cat["sources"])
 
 
 def set_language(preferred=""):

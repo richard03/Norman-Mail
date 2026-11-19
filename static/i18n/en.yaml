@@ -11,7 +11,9 @@ meta:
 
 settings.app.title: About
 settings.language.label: Language
-settings.language.auto: Automatic ({name})
+language.chooseTitle: Choose a language
+language.chooseText: "Translations were found in the languages folder. Which language should Norman Mail use? You can change it later in Settings → About."
+language.chooseOk: Continue
 settings.language.missing:
   one: "{name}: {count} text is not translated yet and is shown in English."
   other: "{name}: {count} texts are not translated yet and are shown in English."

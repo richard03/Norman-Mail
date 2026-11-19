@@ -146,7 +146,7 @@ DEFAULT_SETTINGS = {
     "spam_delete_after_month": False,           # … starší než měsíc
     "bayes_enabled": True,                    # bayesovský filtr přesouvá rozpoznaný spam
     "bayes_sensitivity": "medium",            # high / medium / low
-    "language": "",                           # kód jazyka rozhraní; "" = podle Windows (i18n.resolve)
+    "language": "",                           # kód jazyka rozhraní; "" = zatím nezvolený (angličtina)
     "auto_update": True,                      # kontrolovat a stahovat aktualizace (updater.py)
 }
 SETTING_CHOICES = {"bayes_sensitivity": ("high", "medium", "low")}

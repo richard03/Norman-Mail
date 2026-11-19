@@ -149,7 +149,7 @@ Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permiss
 
 ## Jazyky a překlady
 
-Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudované v `NormanMail.exe` a aktualizuje se s aplikací. Jazyk se vybírá v **Nastavení → O aplikaci**. Výchozí volba *Automaticky* použije jazyk Windows, pokud pro něj aplikace má překlad, jinak angličtinu.
+Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudované v `NormanMail.exe` a aktualizuje se s aplikací. Jazyk se vybírá v **Nastavení → O aplikaci**. Nová instalace začíná anglicky. Pokud ale v podsložce `languages` datové složky už leží překlad, aplikace hned při prvním spuštění nabídne okno s výběrem jazyka. Kdo aplikaci používal před verzí 1.0.3 (kdy se jazyk řídil Windows), dostane natrvalo jazyk, který viděl dosud.
 
 **Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor se stejným kódem jako vestavěný jazyk (třeba `cs.yaml`) přepíše jen texty, které obsahuje.
 
