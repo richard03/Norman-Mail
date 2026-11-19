@@ -5,7 +5,7 @@ Jednoduchý desktopový emailový klient pro Windows, který obslouží více ú
 ## Spuštění
 
 **Pro Windows bez Pythonu** (Windows 10/11, 64bit): celá aplikace je jediný soubor `NormanMail.exe` (asi 12 MB, obsahuje vše potřebné včetně Pythonu). Nic se neinstaluje: uložte ho kamkoli a spusťte. Zástupce v nabídce Start nebo na ploše vytvoříte v **Nastavení → O aplikaci**. Data jsou v `%APPDATA%\Mailer`, hesla ve Správci pověření Windows. Aplikaci odstraníte smazáním souboru (a zástupců).
-- **Portable režim:** když vedle `NormanMail.exe` položíte soubor `portable.txt` (je v `assets\`), ukládá aplikace všechna data do složky `data` vedle sebe, např. na flash disku. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
+- **Portable režim:** když vedle `NormanMail.exe` položíte soubor `portable.txt` (je v `assets\`), ukládá aplikace všechna data přímo do složky, ve které leží (verze do 1.0.2 je měly v podsložce `data`, při prvním spuštění se přesunou), např. na flash disku. Hesla jsou z bezpečnostních důvodů ve Správci pověření Windows daného počítače, takže na jiném počítači je zadáte znovu.
 - Při každém spuštění se aplikace nejdřív rozbalí do dočasné složky (`%TEMP%\_MEI…`), což zabere asi 2 s. Úplně první spuštění trvá déle (kontrola antivirem, příprava WebView2). Dočasné složky, které zůstanou po pádu, aplikace při dalším spuštění sama uklidí.
 - Běží vždy jen jedna instance. Druhé spuštění jen přenese okno běžící aplikace do popředí.
 - **Automatické aktualizace:** jednou denně se aplikace podívá do [GitHub Releases](https://github.com/richard03/Norman-Mail/releases), stáhne novou verzi na pozadí vedle sebe (`NormanMail.exe.new`) a nainstaluje ji po kliknutí na *Aktualizovat na X.Y.Z* v levém panelu, nebo sama při zavření aplikace. Vypnout jde v **Nastavení → O aplikaci**, tam je i tlačítko *Zkontrolovat teď*. Když do složky s exe nejde zapisovat (třeba `C:\Program Files`), aplikace jen nabídne stránku ke stažení. Na GitHub se neposílá nic o uživateli, jen běžný požadavek s verzí aplikace.
@@ -153,7 +153,7 @@ Rozhraní je v angličtině (základní jazyk) a češtině; obojí je zabudovan
 
 **Vlastní jazyk bez nového sestavení:** v **Nastavení → O aplikaci** klikněte na *Uložit šablonu překladu*. Do složky s jazyky se uloží `_template.yaml` s celou angličtinou. Přejmenujte ho podle kódu jazyka (např. `de.yaml`), v oddílu `meta` změňte `language` a `name` a přeložte texty. Aplikace soubor najde při příštím otevření Nastavení a nabídne ho ve výběru jazyků. Nepřeložené texty zůstanou anglicky (Nastavení ukáže, kolik jich chybí). Soubor se stejným kódem jako vestavěný jazyk (třeba `cs.yaml`) přepíše jen texty, které obsahuje.
 
-Soubory s jazyky se hledají jen v podsložce `languages` datové složky aplikace (`%APPDATA%\Mailer\languages`, v portable režimu `data\languages` vedle programu), takže lokální data i překlady jsou vždy pohromadě. Cestu k datové složce ukazuje **Nastavení → O aplikaci**. Soubory začínající podtržítkem se přeskakují.
+Soubory s jazyky se hledají jen v podsložce `languages` datové složky aplikace (`%APPDATA%\Mailer\languages`, v portable režimu `languages` vedle programu), takže lokální data i překlady jsou vždy pohromadě. Cestu k datové složce ukazuje **Nastavení → O aplikaci**. Soubory začínající podtržítkem se přeskakují.
 
 Formát je zjednodušený YAML, který zná jen texty, takže `no`, `yes` ani čísla se nepřevádějí:
 

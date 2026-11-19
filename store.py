@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -20,7 +21,8 @@ except Exception:  # keyring není nainstalovaný nebo nemá backend
 SERVICE = "Mailer"  # neměnit (původní název aplikace): pod tímto jménem jsou uložená hesla
 
 
-PORTABLE_MARKER = "portable.txt"  # leží-li vedle NormanMail.exe, data jsou ve složce data vedle něj
+PORTABLE_MARKER = "portable.txt"  # leží-li vedle NormanMail.exe, data jsou přímo ve složce s ním
+PORTABLE_LEGACY = "data"          # do verze 1.0.2 byla data portable verze v podsložce data
 
 
 def portable_dir():
@@ -32,11 +34,45 @@ def portable_dir():
     return None
 
 
+def _migrate_portable(base: Path) -> Path:
+    """Přesune data portable verze z dřívější podsložky data přímo do složky s exe. Vrací složku dat.
+
+    Po automatické aktualizaci se nová verze spouští, zatímco stará se ještě ukončuje a může mít databázi
+    otevřenou – proto se přesun chvíli zkouší znovu. Když se nepovede celý, vrátí se, co se už přesunulo,
+    a aplikace tentokrát použije původní složku (přesun zkusí při dalším spuštění)."""
+    old = base / PORTABLE_LEGACY
+    if not old.is_dir() or (base / "accounts.json").exists() or (base / "mailer.db").exists():
+        return base
+    items = [p for p in old.iterdir() if not (base / p.name).exists()]
+    moved = []
+    deadline = time.monotonic() + 30
+    for item in items:
+        while True:
+            try:
+                item.rename(base / item.name)
+                moved.append(item)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    for m in reversed(moved):
+                        try:
+                            (base / m.name).rename(m)
+                        except OSError:
+                            pass
+                    return old
+                time.sleep(0.5)
+    try:
+        old.rmdir()  # jen když je prázdná
+    except OSError:
+        pass
+    return base
+
+
 def _data_dir() -> Path:
     if os.environ.get("MAILER_DATA"):
         return Path(os.environ["MAILER_DATA"])
     if portable_dir():
-        return portable_dir() / "data"
+        return _migrate_portable(portable_dir())
     target = Path(os.environ.get("APPDATA") or Path.home()) / "Mailer"  # původní název aplikace, neměnit
     legacy = Path(__file__).resolve().parent / "data"  # dřívější umístění vedle zdrojáků
     if not target.exists() and legacy.is_dir():
