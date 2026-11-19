@@ -2024,8 +2024,8 @@ function applyPreset(key) {
   $('#presetNote').textContent = editingOauth || !p?.note ? '' : t(p.note);
   $('#googleBox').hidden = !(key === 'gmail' || editingOauth);
   if (!editingOauth) {
-    const base = state.editingId ? t('account.keepPassword') : '*';
-    $('#pwHint').textContent = key === 'gmail' ? t('account.gmailAppPassword', { hint: base }) : base;
+    const base = state.editingId ? t('account.keepPassword') : '';
+    $('#pwHint').textContent = key === 'gmail' ? [base, t('account.gmailAppPassword')].filter(Boolean).join(' – ') : base;
   }
   if (!p) return;
   [f.imap_host.value, f.imap_port.value, f.imap_security.value] = p.imap;
@@ -2065,7 +2065,7 @@ function openAccountDialog(id = null) {
   delete $('#deleteAccountBtn').dataset.confirm;
   $('#accountError').textContent = '';
   $('#presetNote').textContent = '';
-  $('#pwHint').textContent = acc ? t('account.keepPassword') : '*';
+  $('#pwHint').textContent = acc ? t('account.keepPassword') : '';
   delete $('#pwHint').dataset.changed;
   f.elements.namedItem('password').required = false;
   if (acc) for (const k of Object.keys(acc)) {
