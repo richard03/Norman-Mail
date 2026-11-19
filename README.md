@@ -191,6 +191,7 @@ about.text: |
 | `i18n.py`, `static/i18n/` | Lokalizace: načítání katalogů textů (vestavěných i uživatelských), anglický a český katalog |
 | `tests/` | Testy (`.venv\Scripts\python -m unittest discover tests`) |
 | `tools/release.py` | Vydání nové verze (sestavení, podepsaný `latest.json`, GitHub release) |
+| `tools/make_icon.py` | Z předlohy `assets/mailer-256.png` vygeneruje `assets/mailer.ico`, logo 120×120 a ikony webu `site/` (potřebuje Pillow) |
 | `tools/i18n_add.py` | Pomocník pro přidání textů do obou vestavěných katalogů |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |

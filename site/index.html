@@ -5,22 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Norman Mail – email client for Windows</title>
 <meta name="description" content="Norman Mail is a free email client for Windows that brings Gmail and other IMAP accounts into one inbox and sorts messages for you. Your mail stays on your computer.">
-<link rel="icon" href="icon.png">
+<link rel="icon" href="icon-32.png" sizes="32x32">
+<link rel="icon" href="icon.png" sizes="256x256">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#003771">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <a class="brand" href="./"><img src="icon.png" alt="" width="32" height="32"> Norman Mail</a>
+  <a class="brand" href="./"><img src="icon-32.png" srcset="icon.png 2x" alt="" width="32" height="32"> Norman Mail</a>
   <nav><a href="privacy.html">Privacy Policy</a> <a href="terms.html">Terms of Service</a> <a href="#cs" lang="cs">Česky</a></nav>
 </header>
-<main>
+<section class="hero">
+<div class="hero-inner">
+<div class="hero-text">
 <h1>Norman Mail</h1>
 <p class="lead">A free, simple email client for Windows. All your accounts in one inbox, sorted for you, and your mail stays on your computer.</p>
-<p><a class="button" href="https://github.com/richard03/Norman-Mail/releases/latest">Download for Windows</a>
-   <span class="muted">Windows 10 and 11, a single file without installation, updates itself.</span></p>
-
+<p><a class="button" href="https://github.com/richard03/Norman-Mail/releases/latest">Download for Windows</a></p>
+<p class="muted note">Windows 10 and 11, a single file without installation, updates itself.</p>
+</div>
+<img class="hero-icon" src="icon.png" alt="Norman Mail logo" width="168" height="168">
+</div>
+</section>
+<main>
 <h2>What it does</h2>
-<ul>
+<ul class="features">
   <li><b>One inbox for all accounts:</b> Gmail and any other mailbox with IMAP and SMTP.</li>
   <li><b>Automatic sorting:</b> messages written directly to you go to <i>Important</i>, copies to <i>For your information</i>, newsletters and automatic alerts to <i>Unimportant</i> and <i>Notifications</i>.</li>
   <li><b>ToDo</b> for messages you still need to deal with, and <b>snoozing</b> messages to a later day.</li>

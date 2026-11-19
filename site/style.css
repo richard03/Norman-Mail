@@ -1,19 +1,49 @@
-:root { --bg: #fff; --text: #1f2933; --muted: #6b7280; --accent: #2563eb; --border: #e5e7eb; --code: #f3f4f6; --on-accent: #fff; }
+:root {
+  --navy: #003771; --ocean: #014d8c; --sea: #0277b0; --teal: #12c8cc; --foam: #a6e0f0;
+  --bg: #fff; --surface: #f2f9fc; --text: #10243a; --muted: #5b6b7d; --accent: #00618f; --border: #d9e8f0; --code: #e8f4f9;
+}
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #111827; --text: #e5e7eb; --muted: #9ca3af; --accent: #60a5fa; --border: #374151; --code: #1f2937; --on-accent: #0b1220; }
+  :root { --bg: #0a1626; --surface: #0f2034; --text: #e3eef6; --muted: #93a7ba; --accent: #5ee0e6; --border: #1f3550; --code: #14283f; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "Segoe UI", system-ui, sans-serif; }
-header, main, footer { max-width: 760px; margin: 0 auto; padding: 0 16px; }
-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 18px; color: var(--text); text-decoration: none; }
-nav a { margin-left: 14px; }
+body::before { content: ""; display: block; height: 4px; background: linear-gradient(90deg, var(--navy), var(--sea), var(--teal)); }
+header, main, footer, .hero-inner { max-width: 820px; margin: 0 auto; padding: 0 16px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; padding-bottom: 14px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; letter-spacing: .2px; }
+.brand img { border-radius: 8px; }
+nav { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+nav a { text-decoration: none; font-weight: 500; }
+nav a:hover { text-decoration: underline; }
 a { color: var(--accent); }
-h1 { margin: 32px 0 8px; font-size: 32px; }
-h2 { margin: 32px 0 8px; font-size: 21px; }
+h1 { margin: 32px 0 8px; font-size: 34px; line-height: 1.2; }
+h2 { margin: 36px 0 8px; font-size: 22px; }
 .lead { font-size: 19px; }
 .muted { color: var(--muted); }
-.button { display: inline-block; margin-right: 12px; padding: 10px 18px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; }
+.button { display: inline-block; margin: 0 12px 8px 0; padding: 11px 20px; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; }
+@media (prefers-color-scheme: dark) { .button { color: #04202b; } }
 code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 14px; overflow-wrap: anywhere; }
 section[lang="cs"] { margin-top: 48px; padding-top: 8px; border-top: 1px solid var(--border); }
-footer { margin-top: 48px; padding-top: 16px; padding-bottom: 32px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+footer { margin-top: 56px; padding-top: 16px; padding-bottom: 32px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+
+/* Úvodní pás v barvách ikony */
+.hero { color: #fff; background:
+    radial-gradient(ellipse 60% 120% at 100% 100%, rgba(18, 200, 204, .9), transparent 70%),
+    linear-gradient(135deg, #002a5c, var(--ocean) 55%, var(--sea)); }
+.hero-inner { display: flex; align-items: center; gap: 32px; padding-top: 40px; padding-bottom: 44px; }
+.hero-text { flex: 1; min-width: 0; }
+.hero h1 { margin-top: 0; font-size: 40px; }
+.hero .lead { color: #e6f6fb; }
+.hero .muted { color: var(--foam); }
+.hero .button { background: #fff; color: var(--navy); }
+.hero-icon { flex: none; width: 168px; height: 168px; filter: drop-shadow(0 10px 24px rgba(0, 20, 50, .45)); }
+@media (max-width: 640px) {
+  .hero-inner { flex-direction: column-reverse; align-items: flex-start; gap: 16px; padding-top: 28px; }
+  .hero-icon { width: 88px; height: 88px; }
+  .hero h1 { font-size: 32px; }
+}
+
+/* Seznam funkcí jako karty */
+.features { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.features li { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--teal); border-radius: 10px; padding: 12px 14px; }
+.hero .note { margin: 0; font-size: 14px; }
