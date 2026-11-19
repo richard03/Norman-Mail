@@ -5,6 +5,7 @@ Neběží žádný síťový server: stránka se načítá ze složky static př
 ani jiný uživatel počítače se tak k aplikaci nepřipojí. Jen při přihlášení přes Google krátce běží
 server pro návrat z prohlížeče (app.OAuthListener)."""
 
+import json
 import os
 import sys
 import webbrowser
@@ -232,6 +233,47 @@ def pin_identity(window, icon):
         print("Identitu okna pro hlavní panel nelze nastavit:", e)
 
 
+WINDOW_FILE = DATA_DIR / "window.json"  # poloha a velikost okna z posledního zavření
+
+
+def restore_window(window):
+    """Před zobrazením okna: poloha, velikost a maximalizace z minula (ve fyzických pixelech WinForms).
+    Okno, které by po odpojení monitoru nebo změně rozlišení leželo mimo obrazovku, zůstane na výchozím místě."""
+    try:
+        st = json.loads(WINDOW_FILE.read_text("utf-8"))
+        from System.Drawing import Point, Rectangle, Size
+        from System.Windows.Forms import FormStartPosition, FormWindowState, Screen
+        form = window.native
+        rect = Rectangle(int(st["x"]), int(st["y"]), max(int(st["width"]), form.MinimumSize.Width),
+                         max(int(st["height"]), form.MinimumSize.Height))
+        visible = any(s.WorkingArea.IntersectsWith(Rectangle(rect.X + 40, rect.Y, max(rect.Width - 80, 1), 40))
+                      for s in Screen.AllScreens)  # titulek okna musí jít chytit myší
+        if visible:
+            form.StartPosition = FormStartPosition.Manual
+            form.Location = Point(rect.X, rect.Y)
+            form.Size = Size(rect.Width, rect.Height)
+        if st.get("maximized"):
+            form.WindowState = FormWindowState.Maximized
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print("Polohu okna nelze obnovit:", e)
+
+
+def save_window(window):
+    """Při zavírání okna: uloží běžnou (nemaximalizovanou) polohu a velikost a zda bylo maximalizované."""
+    try:
+        from System.Windows.Forms import FormWindowState
+        form = window.native
+        normal = form.WindowState == FormWindowState.Normal
+        b = form.Bounds if normal else form.RestoreBounds
+        st = {"x": b.X, "y": b.Y, "width": b.Width, "height": b.Height,
+              "maximized": form.WindowState == FormWindowState.Maximized}
+        WINDOW_FILE.write_text(json.dumps(st), "utf-8")
+    except Exception as e:
+        print("Polohu okna nelze uložit:", e)
+
+
 WEBVIEW2_CLIENT = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 WEBVIEW2_DOWNLOAD = "https://developer.microsoft.com/microsoft-edge/webview2/"
 
@@ -282,6 +324,8 @@ def main():
                                    min_size=(960, 600), text_select=True)
     api._window = window
     server_app.QUIT = window.destroy
+    window.events.before_show += restore_window  # obě události běží synchronně ve vlákně okna
+    window.events.closing += save_window
     icon = resource("assets/mailer.ico")
     window.events.shown += lambda: pin_identity(window, icon)
     window.events.shown += updater.cleanup  # nová verze naběhla: stará (.old) už není potřeba
