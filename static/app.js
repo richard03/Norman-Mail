@@ -2666,7 +2666,7 @@ async function renderUpdate() {
     ready: t('update.status.ready', v),
     installed: t('update.status.installed', v),
     error: t('update.status.error', { error: st.error }),
-  }[st.status] ?? (st.can_install ? t('update.status.idle') : t('update.status.devOnly'));
+  }[st.status] ?? (st.can_install ? t('update.status.idle') : '');  // spuštěno ze zdrojáků: bez hlášky
   const el = $('#updateStatus');
   el.textContent = text;
   el.className = 'note' + (st.status === 'error' ? ' bad' : ['current', 'ready'].includes(st.status) ? ' ok' : '');
