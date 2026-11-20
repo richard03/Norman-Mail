@@ -159,7 +159,7 @@ settings.app.intro: "Norman Mail je jednoduchý e-mailový klient pro Windows, k
 settings.app.privacy: "Aplikace se připojuje k mailovým serverům, které zadáte, a ke GitHubu kvůli aktualizacím. Jinak běží jen ve vašem počítači a nikam jinam se nepřipojuje. Hesla jsou bezpečně uložena ve „Správci pověření“ systému Windows. Kopie zpráv se ukládají do místní databáze, takže jdou číst i offline. Obrázky a další vzdálený obsah se načtou, až když je výslovně povolíte. Pokud obrázky nepovolíte, odesílatel nemá jak poznat, zda jste zprávu otevřeli."
 settings.app.portable: "Portable verze: všechna data jsou přímo ve složce s programem (dokud vedle něj leží soubor **portable.txt**)."
 settings.data.title: Datová složka
-settings.data.note: "Sem aplikace ukládá lokální data: databázi zpráv, nastavení, naučený filtr spamu a v podsložce **languages** také překlady. Hesla a přihlašovací tokeny jsou ve Správci pověření Windows."
+settings.data.note: "Sem aplikace ukládá lokální data: databázi zpráv, nastavení, naučený filtr spamu a v podsložce **languages** také překlady."
 settings.data.open: Otevřít datovou složku
 settings.shortcut.title: "Zástupci"
 settings.shortcut.note: "Aplikace je jediný soubor bez instalace. Zástupce ji spustí odtud, kde soubor právě leží; když program přesunete, vytvořte zástupce znovu."
