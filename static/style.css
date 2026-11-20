@@ -407,7 +407,7 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 /* ---------- nastavení ---------- */
 .sidebar-bottom { display: flex; flex-direction: column; gap: 6px; }
 dialog.settings {
-  width: min(1300px, calc(100vw - 48px)); height: min(720px, calc(100vh - 48px));
+  width: calc(100vw - 48px); height: calc(100vh - 48px);  /* roste s oknem aplikace, bez horní meze */
   max-height: none; overflow: hidden;
 }
 dialog.settings[open] { display: flex; flex-direction: column; }
