@@ -2764,12 +2764,7 @@ $('#appDataFolder').addEventListener('click', async () => {
 $('#languageFolder').addEventListener('click', async () => {
   try { await api('/api/i18n/folder', { method: 'POST' }); } catch (err) { toast(err.message, true); }
 });
-$('#languageTemplate').addEventListener('click', async () => {
-  try {
-    const r = await api('/api/i18n/template', { method: 'POST' });
-    toast(t('settings.language.exported', { path: r.path }));
-  } catch (err) { toast(err.message, true); }
-});
+
 
 $('#appShortcuts').addEventListener('click', async e => {
   const b = e.target.closest('[data-shortcut]');

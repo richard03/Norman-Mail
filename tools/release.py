@@ -9,7 +9,7 @@ Vydání (nejdřív zvyšte VERSION ve version.py, commitněte a pushněte):
     .venv\\Scripts\\python tools\\release.py --notes "Co je nového"      (nebo --notes-file soubor.txt)
   Zkontroluje čistý strom a novou verzi, sestaví dist\\NormanMail.exe, vytvoří a podepíše
   dist\\latest.json a přes GitHub CLI (gh) založí release vX.Y.Z se soubory NormanMail.exe,
-  latest.json a latest.json.sig a s překlady z languages\\*.yaml. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
+  latest.json a latest.json.sig a s překlady z languages\\*.yaml a šablonou translation-template.yaml. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
 """
 
 import argparse
@@ -32,6 +32,7 @@ from version import VERSION  # noqa: E402
 
 KEY_FILE = Path(os.environ.get("NORMANMAIL_RELEASE_KEY") or Path.home() / ".normanmail" / "release_key")
 DIST = ROOT / "dist"
+TEMPLATE = "translation-template.yaml"  # anglická šablona pro nový překlad (příloha release)
 
 
 def die(msg):
@@ -121,8 +122,11 @@ def main():
     (DIST / updater.MANIFEST).write_bytes(body)
     (DIST / (updater.MANIFEST + ".sig")).write_text(sig.hex() + "\n", "ascii")
     files = [str(DIST / n) for n in (updater.ASSET, updater.MANIFEST, updater.MANIFEST + ".sig")]
-    # překlady (nejsou v exe) jako samostatné soubory ke stažení
+    # překlady (nejsou v exe) jako samostatné soubory ke stažení, k tomu anglická šablona pro nový překlad
     files += [str(p) for p in sorted((ROOT / "languages").glob("*.yaml")) if not p.name.startswith("_")]
+    template = DIST / TEMPLATE
+    template.write_text((ROOT / "static" / "i18n" / "en.yaml").read_text("utf-8"), "utf-8")
+    files.append(str(template))
     print(body.decode("utf-8"))
 
     if args.no_publish or args.allow_dirty:

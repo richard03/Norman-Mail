@@ -357,11 +357,6 @@ def catalog(code=None):
     return {"language": cat["meta"]["language"], "locale": cat["meta"]["locale"], "texts": texts}
 
 
-def template_text():
-    """Šablona pro nový překlad: vestavěná angličtina."""
-    return (builtin_dir() / f"{BASE}.yaml").read_text("utf-8")
-
-
 def _format(text, params):
     # žádné str.format – to by z překladu umělo číst atributy objektů ({x.__class__})
     return PARAM_RE.sub(lambda m: str(params[m.group(1)]) if m.group(1) in params else m.group(0), text)

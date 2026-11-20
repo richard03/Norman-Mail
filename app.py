@@ -1223,18 +1223,6 @@ def i18n_open_folder():
     return _open_folder(i18n.user_dir())
 
 
-@app.post("/api/i18n/template")
-def i18n_template():
-    """Uloží anglickou šablonu překladu do složky s jazyky a vrátí její cestu."""
-    try:
-        i18n.user_dir().mkdir(parents=True, exist_ok=True)
-        path = i18n.user_dir() / "_template.yaml"  # „_“ = loader ho přeskočí
-        path.write_text(i18n.template_text(), "utf-8")
-        return jsonify(path=str(path))
-    except OSError:
-        return jsonify(error=i18n.t("error.templateFailed")), 500
-
-
 @app.get("/api/bayes")
 def bayes_status():
     return jsonify(syncer.bayes.status())

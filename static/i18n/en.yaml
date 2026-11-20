@@ -1,7 +1,8 @@
 # Norman Mail – English (base language, built into the application)
 #
 # To create a translation, save a copy of this file as <language code>.yaml (e.g. de.yaml) into the
-# "languages" folder next to NormanMail.exe, change meta.language and meta.name and translate the texts.
+# "languages" subfolder of the data folder (Settings → About → Open languages folder), change meta.language
+# and meta.name and translate the texts.
 # Missing texts are shown in English. Texts are always shown as plain text; **bold** is the only formatting.
 # {name} placeholders must stay as they are. Plural forms: zero, one, two, few, many, other.
 meta:
@@ -18,17 +19,9 @@ settings.language.missing:
   other: "{name}: {count} texts are not translated yet and are shown in English."
 settings.language.problems: "These translation files could not be used:"
 settings.language.openFolder: Open languages folder
-settings.language.export: Save translation template
-settings.language.exported: "Template saved: {path}"
-settings.language.help: >
-  You can add another language yourself, without reinstalling: save the translation template (it is saved
-  into the languages subfolder of the data folder as _template.yaml), rename it to the language code, e.g. de.yaml, change
-  meta.language and meta.name and translate the texts. Untranslated texts are shown in English. The
-  application finds the file the next time Settings are opened.
 settings.language.closeCompose: Close the messages you are writing first, then change the language.
 
 error.desktopOnly: This is only available in the desktop application.
-error.templateFailed: The translation template could not be saved.
 
 # --- Statické texty rozhraní (index.html)
 sidebar.newMessage: "New message"

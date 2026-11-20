@@ -383,20 +383,17 @@
         </div>
         <!-- podsekce: nadpis, vlevo nastavení a text, vpravo tlačítka; mezi podsekcemi oddělovač -->
         <section class="app-sub">
-          <h3 class="sub-head" data-i18n="settings.language.label"></h3>
+          <h3 class="sub-head" id="languageHead" data-i18n="settings.language.label"></h3>
           <div class="app-sub-body">
             <div>
               <div class="options">
-                <label class="option select-option"><span data-i18n="settings.language.label"></span>
-                  <select id="languageSelect"></select></label>
+                <select id="languageSelect" aria-labelledby="languageHead"></select>
               </div>
               <p id="languageMissing" class="note" hidden></p>
               <div id="languageProblems" class="note bad" hidden></div>
-              <p class="note" data-i18n="settings.language.help"></p>
             </div>
             <div class="app-sub-buttons">
               <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
-              <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
             </div>
           </div>
         </section>

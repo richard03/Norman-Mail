@@ -467,7 +467,7 @@ dialog.settings .note { font-size: 14px; line-height: 1.45; }
 .app-sub-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; align-items: start; }  /* tlačítka: stejná šířka ve všech podsekcích */
 .app-sub-buttons { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .app-sub-body .note:last-child { margin-bottom: 0; }
-dialog .app-sub label.select-option select { flex: 0 1 280px; }  /* výběr jazyka se neroztahuje přes celou šířku */
+dialog #languageSelect { width: 280px; max-width: 100%; }  /* výběr jazyka se neroztahuje přes celou šířku */
 dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
 .bayes-actions { margin-top: 10px; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }

@@ -14,17 +14,9 @@ settings.language.missing:
   other: "{name}: {count} textů zatím není přeložených, zobrazují se anglicky."
 settings.language.problems: "Tyto soubory s překladem nešlo použít:"
 settings.language.openFolder: Otevřít složku s jazyky
-settings.language.export: Uložit šablonu překladu
-settings.language.exported: "Šablona uložena: {path}"
-settings.language.help: >
-  Další jazyk si můžete přidat sami, bez nové instalace: uložte šablonu překladu (uloží se do podsložky
-  languages v datové složce jako _template.yaml), přejmenujte ji podle kódu jazyka, např. de.yaml, změňte meta.language
-  a meta.name a přeložte texty. Nepřeložené texty se zobrazí anglicky. Aplikace soubor najde při
-  příštím otevření Nastavení.
 settings.language.closeCompose: Nejdřív zavřete rozepsané zprávy, potom jazyk změňte.
 
 error.desktopOnly: Tohle jde jen v desktopové aplikaci.
-error.templateFailed: Šablonu překladu nešlo uložit.
 
 # --- Statické texty rozhraní (index.html)
 sidebar.newMessage: "Napsat zprávu"
