@@ -461,10 +461,14 @@ dialog.settings .note { font-size: 14px; line-height: 1.45; }
 
 .settings-main h3.sub-head, .settings-rules h3.sub-head { margin-top: 28px; }  /* mezera nad podnadpisem, přebije margin: 0 výše */
 /* O aplikaci: podsekce (Jazyk, Aktualizace, Datová složka, Zástupci) – vlevo nastavení a text, vpravo tlačítka */
-.app-sub { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+/* tři sloupce: nadpis | obsah | tlačítka (stejné šířky ve všech podsekcích, ať sloupce lícují) */
+.app-sub { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px;
+           display: grid; grid-template-columns: 160px minmax(0, 1fr) 200px; gap: 24px; align-items: start; }
 .app-sub[hidden] { display: none; }
-.settings-main .app-sub h3.sub-head { margin-top: 0; }
-.app-sub-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; align-items: start; }  /* tlačítka: stejná šířka ve všech podsekcích */
+.settings-main .app-sub h3.sub-head { margin: 0; line-height: 1.4; }
+.app-sub-body { display: contents; }
+.app-sub .options:first-child { margin-top: 0; }
+@media (max-width: 760px) { .app-sub { grid-template-columns: 1fr; gap: 10px; } }
 .app-sub-buttons { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .app-sub-body .note:last-child { margin-bottom: 0; }
 dialog #languageSelect { width: 280px; max-width: 100%; }  /* výběr jazyka se neroztahuje přes celou šířku */
