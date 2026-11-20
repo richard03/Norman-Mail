@@ -411,7 +411,7 @@ account.passwordAgain: "* – změnili jste server nebo jméno, zadejte heslo zn
 account.editTitle: "Upravit účet"
 account.googleRelogin: "Přihlásit znovu"
 account.googleConnectedNote: "Účet je připojen přes Google (bez hesla)."
-account.googleFinishInBrowser: "Dokončete přihlášení v prohlížeči, který se právě otevřel…"
+account.googleFinishInBrowser: "Dokončete přihlášení v prohlížeči, který se právě otevřel. Google upozorní, že aplikaci neověřil (Norman Mail zatím ověřený u Googlu není): rozbalte **pokročilé možnosti** a pokračujte do aplikace **Norman Mail**."
 account.googleOpenLogin: "Otevřít přihlášení"
 account.googleExpired: "Přihlášení vypršelo."
 account.googleConnected: "Účet Google připojen"

@@ -400,7 +400,7 @@ account.passwordAgain: "* – you changed the server or user name, enter the pas
 account.editTitle: "Edit account"
 account.googleRelogin: "Sign in again"
 account.googleConnectedNote: "The account is connected through Google (no password)."
-account.googleFinishInBrowser: "Finish signing in in the browser that has just opened…"
+account.googleFinishInBrowser: "Finish signing in in the browser that has just opened. Google will warn that it has not verified the app (Norman Mail is not verified by Google yet): click **Advanced** and then **Go to Norman Mail**."
 account.googleOpenLogin: "Open sign-in"
 account.googleExpired: "Sign-in expired."
 account.googleConnected: "Google account connected"

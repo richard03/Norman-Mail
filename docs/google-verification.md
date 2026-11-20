@@ -1,8 +1,33 @@
-# Ověření aplikace u Googlu
+# Přihlášení přes Google: nastavení v Google Cloud
 
-Cíl: uživatel klikne na **Přihlásit přes Google**, přihlásí se a povolí přístup. Nic nenastavuje, nevidí varování „Google tuto aplikaci neověřil“ a neplatí žádný limit 100 uživatelů.
+## Současný stav: In production, bez ověření
 
-Aplikace žádá scope `https://mail.google.com/`. Google ho řadí mezi **restricted** scopes, takže ověření má dvě části:
+Aplikace je v Google Cloud ve stavu **In production**, ale u Googlu **neověřená**. Plné ověření (scope `https://mail.google.com/` patří mezi restricted, takže vyžaduje placený bezpečnostní audit CASA každý rok) se zatím nevyplatí.
+
+**Co to znamená pro uživatele:**
+- Nic nenastavuje: OAuth klient je vestavěný v aplikaci.
+- Při přihlášení uvidí varování „Google tuto aplikaci neověřil“ a musí rozbalit pokročilé možnosti a pokračovat do aplikace Norman Mail. Aplikace na to upozorní přímo pod tlačítkem po jeho stisknutí.
+- Přihlášení nevyprší (na rozdíl od stavu Testing, kde platí 7 dní).
+
+**Limit 100 uživatelů:** neověřená aplikace s citlivými nebo restricted scopes smí mít nejvýš 100 uživatelů za celou dobu existence projektu. Počítá se každý účet Google, který se kdy přihlásil, a počet se nedá vynulovat. Po dosažení limitu Google další nové uživatele odmítne (ti, kdo už jsou přihlášení, fungují dál). Stav ukazuje **Google Auth Platform → Audience → OAuth user cap**. Až se počet začne blížit stovce, je čas na plné ověření (níže).
+
+### Nastavení projektu (jednorázově)
+
+1. **APIs & Services → Library:** zapněte **Gmail API**.
+2. **Google Auth Platform → Branding:** App name `Norman Mail`, User support email, Developer contact. **Logo nenahrávejte.** Nahrané logo vyžaduje ověření značky a do té doby by se souhlas nezobrazil správně. Odkazy na web, zásady a podmínky můžete vyplnit, až bude web běžet (nejsou povinné).
+3. **Audience:** User type **External**, pak **Publish app** (stav In production). Testery přidávat netřeba.
+4. **Data access:** scopes `openid`, `.../auth/userinfo.email` a `https://mail.google.com/`. O ověření nežádejte (Google ho po publikování nabídne, stačí ho nespouštět).
+5. **Clients:** OAuth client typu **Desktop app**, stáhněte JSON a uložte ho jako `%USERPROFILE%\.normanmail\google_client.json`. Odtud ho `NormanMail.spec` přibalí do exe a `tools/release.py` bez něj vydání odmítne.
+
+Na vlastním počítači máte `%APPDATA%\Mailer\google_client.json` z dřívějšího testování. Ten má přednost před vestavěným klientem. Chcete-li vyzkoušet vestavěného klienta, soubor smažte a účty Gmail přihlaste znovu.
+
+---
+
+# Později: plné ověření u Googlu
+
+Až se počet uživatelů bude blížit stovce. Pak uživatel uvidí běžné přihlášení bez varování a limit zmizí.
+
+Ověření má dvě části:
 
 1. **Kontrola značky a scopes** (brand verification a restricted scope review). Kontroluje se web, zásady ochrany soukromí, video a zdůvodnění scopes.
 2. **Bezpečnostní audit CASA** (Cloud Application Security Assessment, úroveň Tier 2). Dělá ho externí laboratoř schválená App Defense Alliance a platí se jí. Opakuje se každých 12 měsíců.
@@ -31,15 +56,10 @@ Google ověřuje vlastnictví domény domovské stránky v [Google Search Consol
 
 ### 2. Google Cloud Console → Google Auth Platform
 
-Použijte projekt, ve kterém už máte klienta, nebo založte nový. Doporučuju samostatný projekt jen pro vydávanou aplikaci.
+Doplňte projekt z první části (stejný projekt, aby přihlášení stávajících uživatelů zůstala platná):
 
-- **Branding:** App name `Norman Mail` (stejný název jako na webu i v aplikaci), User support email, logo `assets/mailer-120.png`, Application home page, Privacy policy link (`…/privacy.html`), Terms of service link (`…/terms.html`), Authorized domains (doména z kroku 1), Developer contact.
-- **Audience:** User type **External**, stav **In production** (Publish app).
-- **Data access:** přidejte scopes `openid`, `.../auth/userinfo.email` (nejsou citlivé) a `https://mail.google.com/` (restricted). Žádné další, Google chce co nejmenší rozsah.
-- **Clients:** OAuth client typu **Desktop app**. Stáhněte JSON a uložte ho jako `%USERPROFILE%\.normanmail\google_client.json`. Odtud ho sestavení přibalí do exe.
-- **APIs & Services → Library:** zapněte **Gmail API**.
-
-Na vlastním počítači máte `%APPDATA%\Mailer\google_client.json` z dřívějšího testování. Ten má přednost před vestavěným klientem. Chcete-li vyzkoušet vestavěného klienta, soubor smažte a účty Gmail přihlaste znovu.
+- **Branding:** doplňte logo `assets/mailer-120.png`, Application home page, Privacy policy link (`…/privacy.html`), Terms of service link (`…/terms.html`) a Authorized domains (doména z kroku 1).
+- **Data access:** ke scope `https://mail.google.com/` vyplňte zdůvodnění (krok 3) a odkaz na video (krok 4) a odešlete žádost o ověření.
 
 ### 3. Zdůvodnění scope (do formuláře, anglicky)
 
@@ -69,4 +89,4 @@ Po schválení scopes pošle Google e-mail s pokyny. Audit (Tier 2) provede labo
 
 ### 6. Po schválení
 
-Vydejte novou verzi přes `tools/release.py`. Vydání bez souboru s klientem skript odmítne. Uživatelé starších verzí, kteří si zadali vlastního klienta, ho dál používají. Kdo chce přejít na vestavěného klienta, smaže `%APPDATA%\Mailer\google_client.json` a účet Gmail přihlásí znovu.
+Klient zůstává stejný, takže stačí v `static/i18n/en.yaml` a `languages/cs.yaml` z textu `account.googleFinishInBrowser` odstranit upozornění na neověřenou aplikaci a vydat novou verzi.

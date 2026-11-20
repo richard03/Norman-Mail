@@ -2208,7 +2208,7 @@ async function googleLogin() {
     let opened;
     if (desktop()) opened = await desktop().open_external(url);  // systémový prohlížeč
     else opened = !!window.open(url, '_blank');
-    $('#googleStatus').innerHTML = esc(t('account.googleFinishInBrowser')) +
+    $('#googleStatus').innerHTML = tHtml('account.googleFinishInBrowser') +
       (opened ? '' : ` <a href="${esc(url)}" target="_blank" rel="noopener">${esc(t('account.googleOpenLogin'))}</a>`);
     $('#googleStatus').className = 'note';
     stopGooglePolling();
