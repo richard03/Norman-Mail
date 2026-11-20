@@ -379,47 +379,70 @@
         <h3>Norman Mail <span id="appVersion" class="muted"></span></h3>
         <p class="note" data-i18n="settings.app.intro"></p>
         <p class="note" data-i18n="settings.app.privacy"></p>
-        <h3 class="sub-head" data-i18n="settings.language.label"></h3>
-        <div class="options">
-          <label class="option select-option"><span data-i18n="settings.language.label"></span>
-            <select id="languageSelect"></select></label>
-        </div>
-        <p id="languageMissing" class="note" hidden></p>
-        <div id="languageProblems" class="note bad" hidden></div>
-        <p class="note" data-i18n="settings.language.help"></p>
-        <div class="bayes-actions">
-          <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
-          <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
-        </div>
-        <h3 class="sub-head" data-i18n="settings.update.title"></h3>
-        <div class="options">
-          <label class="option"><input type="checkbox" data-setting="auto_update">
-            <span data-i18n="settings.update.auto"></span></label>
-        </div>
-        <p class="note" data-i18n="settings.update.note"></p>
-        <p id="updateStatus" class="note"></p>
-        <p id="updateNotes" class="note update-notes" hidden></p>
-        <div class="bayes-actions">
-          <button type="button" class="btn" id="updateCheck" data-i18n="settings.update.check"></button>
-          <button type="button" class="btn primary" id="updateInstall" hidden data-i18n="settings.update.restart"></button>
-          <button type="button" class="btn" id="updatePage" hidden data-i18n="settings.update.downloadPage"></button>
-        </div>
-        <h3 class="sub-head" data-i18n="settings.data.title"></h3>
-        <p class="note"><code id="appDataDir" class="data-path"></code></p>
-        <p class="note" data-i18n="settings.data.note"></p>
-        <p id="appPortable" class="note" hidden data-i18n="settings.app.portable"></p>
-        <div class="bayes-actions">
-          <button type="button" class="btn" id="appDataFolder" data-i18n="settings.data.open"></button>
-        </div>
-        <div id="appShortcuts" hidden>
-          <h3 class="sub-head" data-i18n="settings.shortcut.title"></h3>
-          <p class="note" data-i18n="settings.shortcut.note"></p>
-          <div class="bayes-actions">
-            <button type="button" class="btn" data-shortcut="programs" data-i18n="settings.shortcut.addStart"></button>
-            <button type="button" class="btn" data-shortcut="desktop" data-i18n="settings.shortcut.addDesktop"></button>
+        <!-- podsekce: nadpis, vlevo nastavení a text, vpravo tlačítka; mezi podsekcemi oddělovač -->
+        <section class="app-sub">
+          <h3 class="sub-head" data-i18n="settings.language.label"></h3>
+          <div class="app-sub-body">
+            <div>
+              <div class="options">
+                <label class="option select-option"><span data-i18n="settings.language.label"></span>
+                  <select id="languageSelect"></select></label>
+              </div>
+              <p id="languageMissing" class="note" hidden></p>
+              <div id="languageProblems" class="note bad" hidden></div>
+              <p class="note" data-i18n="settings.language.help"></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
+              <button type="button" class="btn" id="languageTemplate" data-i18n="settings.language.export"></button>
+            </div>
           </div>
-          <p id="appShortcutStatus" class="note"></p>
-        </div>
+        </section>
+        <section class="app-sub">
+          <h3 class="sub-head" data-i18n="settings.update.title"></h3>
+          <div class="app-sub-body">
+            <div>
+              <div class="options">
+                <label class="option"><input type="checkbox" data-setting="auto_update">
+                  <span data-i18n="settings.update.auto"></span></label>
+              </div>
+              <p class="note" data-i18n="settings.update.note"></p>
+              <p id="updateStatus" class="note"></p>
+              <p id="updateNotes" class="note update-notes" hidden></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" id="updateCheck" data-i18n="settings.update.check"></button>
+              <button type="button" class="btn primary" id="updateInstall" hidden data-i18n="settings.update.restart"></button>
+              <button type="button" class="btn" id="updatePage" hidden data-i18n="settings.update.downloadPage"></button>
+            </div>
+          </div>
+        </section>
+        <section class="app-sub">
+          <h3 class="sub-head" data-i18n="settings.data.title"></h3>
+          <div class="app-sub-body">
+            <div>
+              <p class="note"><code id="appDataDir" class="data-path"></code></p>
+              <p class="note" data-i18n="settings.data.note"></p>
+              <p id="appPortable" class="note" hidden data-i18n="settings.app.portable"></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" id="appDataFolder" data-i18n="settings.data.open"></button>
+            </div>
+          </div>
+        </section>
+        <section class="app-sub" id="appShortcuts" hidden>
+          <h3 class="sub-head" data-i18n="settings.shortcut.title"></h3>
+          <div class="app-sub-body">
+            <div>
+              <p class="note" data-i18n="settings.shortcut.note"></p>
+              <p id="appShortcutStatus" class="note"></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" data-shortcut="programs" data-i18n="settings.shortcut.addStart"></button>
+              <button type="button" class="btn" data-shortcut="desktop" data-i18n="settings.shortcut.addDesktop"></button>
+            </div>
+          </div>
+        </section>
       </div>
       <div data-panel="folder">
         <form id="folderForm" class="folder-form" autocomplete="off">

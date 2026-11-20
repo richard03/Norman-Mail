@@ -458,6 +458,13 @@ dialog.settings .note { font-size: 14px; line-height: 1.45; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
 .settings-main h3.sub-head, .settings-rules h3.sub-head { margin-top: 28px; }  /* mezera nad podnadpisem, přebije margin: 0 výše */
+/* O aplikaci: podsekce (Jazyk, Aktualizace, Datová složka, Zástupci) – vlevo nastavení a text, vpravo tlačítka */
+.app-sub { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+.app-sub[hidden] { display: none; }
+.settings-main .app-sub h3.sub-head { margin-top: 0; }
+.app-sub-body { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 24px; align-items: start; }  /* tlačítka: stejná šířka ve všech podsekcích */
+.app-sub-buttons { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.app-sub-body .note:last-child { margin-bottom: 0; }
 dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
 .bayes-actions { margin-top: 10px; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
