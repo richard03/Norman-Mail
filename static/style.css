@@ -419,8 +419,9 @@ dialog.settings[open] { display: flex; flex-direction: column; }
 /* skupiny | položky skupiny | nastavení | pravidla; sloupec položek a pravidel jen když je potřeba */
 .settings-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 150px 190px minmax(0, 1fr) minmax(0, 1fr); }
 /* Hlavní sloupec je vždy stejně široký jako vedle Pravidel; bez nich zůstane vpravo volné místo (kratší řádky).
-   O aplikaci nemá seznam: šířku 190 px přidáme vpravo, aby hlavní sloupec vyšel stejně. */
-.settings-body.no-list { grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr) 190px; }
+   O aplikaci nemá seznam: hlavní sloupec zabere místo seznamu i nastavení (2. a 3. sloupec). */
+.settings-body.no-list .settings-main { grid-column: 2 / 4; }
+@media (max-width: 760px) { .settings-body.no-list .settings-main { grid-column: auto; } }  /* úzké okno: jeden sloupec */
 .settings-body.no-rules .settings-rules, .settings-body.no-list .settings-list { display: none; }
 .settings-list .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .settings-list .empty { padding: 8px 12px; margin: 0; }
