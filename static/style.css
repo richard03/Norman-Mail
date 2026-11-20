@@ -301,7 +301,19 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
   display: flex; flex-direction: column; gap: 8px; background: var(--bg);
 }
 .google-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.btn.google { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; padding: 8px 14px; }
+/* Tlačítko podle pravidel značky Google (developers.google.com/identity/branding-guidelines):
+   standardní logo, text „Sign in with Google“, světlá / tmavá varianta s danými barvami. */
+.btn.google {
+  display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 20px;
+  font: 500 14px/20px Roboto, "Segoe UI", system-ui, sans-serif; letter-spacing: .25px;
+  background: #ffffff; border: 1px solid #747775; color: #1f1f1f;
+}
+.btn.google svg { width: 20px; height: 20px; flex: none; }
+.btn.google:hover { background: #f2f2f2; }
+@media (prefers-color-scheme: dark) {
+  .btn.google { background: #131314; border-color: #8e918f; color: #e3e3e3; }
+  .btn.google:hover { background: #24262a; }
+}
 .google-config { display: flex; flex-direction: column; gap: 8px; }
 .note.ok { color: #059669; }
 .note.bad { color: var(--danger); }

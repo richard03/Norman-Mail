@@ -4,19 +4,22 @@ import base64
 import hashlib
 import json
 import secrets
+import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
+from google_client import BUILTIN_NAME, build_client_file, parse_client
 from i18n import t as tr
 from store import DATA_DIR
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPES = "https://mail.google.com/ openid email"
-CONFIG_FILE = DATA_DIR / "google_client.json"
+CONFIG_FILE = DATA_DIR / "google_client.json"  # vlastní klient uživatele (má přednost před vestavěným)
 PENDING_TTL = 600  # s – jak dlouho čekáme na dokončení přihlášení
 
 GMAIL_SERVERS = {
@@ -37,13 +40,20 @@ def _b64url(data: bytes) -> str:
 # Konfigurace OAuth klienta (z Google Cloud Console)
 # --------------------------------------------------------------------------
 
+def _builtin_file() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / BUILTIN_NAME
+    return build_client_file()  # spuštění ze zdrojáků: stejný klient, jaký se přibalí do exe
+
+
 def load_config():
-    try:
-        cfg = json.loads(CONFIG_FILE.read_text("utf-8"))
-        if cfg.get("client_id") and cfg.get("client_secret"):
+    for path in (CONFIG_FILE, _builtin_file()):
+        try:
+            cfg = parse_client(path.read_text("utf-8"))
+        except OSError:
+            continue
+        if cfg:
             return cfg
-    except (OSError, ValueError):
-        pass
     return None
 
 

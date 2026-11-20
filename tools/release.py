@@ -5,6 +5,9 @@ Jednorázově vytvořit pár klíčů pro podepisování aktualizací:
   Soukromý klíč se uloží do %USERPROFILE%\\.normanmail\\release_key (mimo repozitář, zálohujte ho,
   bez něj už žádnou aktualizaci nepodepíšete). Vypsaný veřejný klíč patří do updater.PUBLIC_KEY.
 
+OAuth klient pro přihlášení přes Google (přibalí se do exe, viz google_client.py):
+  %USERPROFILE%\\.normanmail\\google_client.json (JSON stažený z Google Cloud Console). Bez něj vydání neproběhne.
+
 Vydání (nejdřív zvyšte VERSION ve version.py, commitněte a pushněte):
     .venv\\Scripts\\python tools\\release.py --notes "Co je nového"      (nebo --notes-file soubor.txt)
   Zkontroluje čistý strom a novou verzi, sestaví dist\\NormanMail.exe, vytvoří a podepíše
@@ -27,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import ed25519  # noqa: E402
+import google_client  # noqa: E402
 import updater  # noqa: E402
 from version import VERSION  # noqa: E402
 
@@ -63,6 +67,17 @@ def load_key() -> bytes:
     if ed25519.public_key(secret) != updater.PUBLIC_KEY:
         die("Soukromý klíč nepatří k updater.PUBLIC_KEY – aplikace by aktualizaci odmítla.")
     return secret
+
+
+def check_google_client():
+    """Vydání musí mít vestavěného OAuth klienta, jinak by uživatelé museli zadávat Client ID a Secret."""
+    src = google_client.build_client_file()
+    try:
+        ok = google_client.parse_client(src.read_text("utf-8"))
+    except OSError:
+        ok = None
+    if not ok:
+        die(f"{src} chybí nebo neobsahuje platného OAuth klienta (Client ID a Secret, viz README → Gmail).")
 
 
 def check_repo(tag):
@@ -110,6 +125,7 @@ def main():
     if not args.allow_dirty:
         check_repo(tag)
     if not args.no_build:
+        check_google_client()
         build()
     exe = DIST / updater.ASSET
     if not exe.is_file():

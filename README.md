@@ -123,22 +123,11 @@ Nastavení účtů je uložené v `%APPDATA%\Mailer\` (název složky zůstal z 
 
 ## Gmail – přihlášení přes Google (OAuth)
 
-Gmail se dá připojit bez hesla tlačítkem **Přihlásit přes Google**. Aplikace k tomu potřebuje vlastního *OAuth klienta*. Jednorázově ho vytvoříte takto (asi 10 minut):
+Gmail se připojí bez hesla tlačítkem **Přihlásit přes Google**: v prohlížeči se přihlásíte ke svému účtu Google a povolíte aplikaci Norman Mail přístup k poště. Adresa i servery se vyplní samy. Obnovovací token se uloží do Správce pověření Windows, krátkodobé přístupové tokeny si aplikace obnovuje sama.
 
-1. Otevřete <https://console.cloud.google.com/> a vytvořte nový projekt (např. „Norman Mail“).
-2. **APIs & Services → Library**: vyhledejte **Gmail API** a klikněte na **Enable**.
-3. **APIs & Services → OAuth consent screen** (v novějším rozhraní *Google Auth Platform*):
-   - User type: **External**, vyplňte název aplikace a svůj email.
-   - V části **Audience / Test users** přidejte svou Gmail adresu (i všechny další adresy, které chcete připojit).
-4. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
-   - Application type: **Desktop app**. Redirect URI se nezadává, protože aplikace používá `http://127.0.0.1:<port>/oauth/callback`, který Google u desktopových klientů povoluje automaticky.
-   - Zkopírujte **Client ID** a **Client Secret**.
-5. V aplikaci Norman Mail klikněte na **+ Přidat účet**, zvolte Gmail a **Přihlásit přes Google**. Při prvním použití vložte Client ID a Client Secret. Uloží se do `%APPDATA%\Mailer\google_client.json`.
-6. V okně Googlu se přihlaste a povolte přístup. Google zobrazí varování „Google tuto aplikaci neověřil“. Je to v pořádku, protože jde o vaši vlastní aplikaci: klikněte na **Pokračovat**.
+**Pro vývojáře:** OAuth klient aplikace (Client ID a Client Secret) není v repozitáři. Leží v `%USERPROFILE%\.normanmail\google_client.json` (jiné umístění: proměnná `NORMANMAIL_GOOGLE_CLIENT`) a `NormanMail.spec` ho při sestavení přibalí do exe. Při spuštění ze zdrojáků se použije přímo tento soubor. `tools/release.py` bez něj vydání odmítne. Stačí do souboru uložit JSON stažený z Google Cloud Console (Credentials → OAuth client typu **Desktop app** → Download JSON). U desktopových aplikací Google Client Secret za tajný nepovažuje, bezpečnost přihlášení zajišťuje PKCE. Postup ověření aplikace u Googlu je v [docs/google-verification.md](docs/google-verification.md).
 
-Obnovovací token se uloží do Správce pověření Windows. Krátkodobé přístupové tokeny si aplikace obnovuje sama.
-
-> **Důležité:** dokud je aplikace v Google Cloud ve stavu **Testing**, platnost přihlášení vyprší po 7 dnech a bude potřeba se přihlásit znovu (Nastavení účtu → Přihlásit znovu). Tomu se vyhnete, když na stránce OAuth consent screen / Audience kliknete na **Publish app** (stav „In production“). Pro osobní použití není nutné ověření aplikace u Googlu, jen zůstane zobrazené varování o neověřené aplikaci.
+Sestavení bez vestavěného klienta se při prvním přihlášení zeptá na Client ID a Client Secret vlastního klienta a uloží je do `%APPDATA%\Mailer\google_client.json`. Ten má vždy přednost před vestavěným klientem (tokeny vydané pro jednoho klienta s jiným obnovit nejdou). Vlastního klienta si vytvoříte v <https://console.cloud.google.com/>: nový projekt, zapnout **Gmail API**, OAuth consent screen typu **External** (svou adresu přidejte mezi testery) a OAuth client ID typu **Desktop app**. Dokud je takový projekt ve stavu **Testing**, přihlášení vyprší po 7 dnech.
 
 Přihlášení můžete kdykoli zrušit na <https://myaccount.google.com/permissions>.
 
@@ -188,7 +177,8 @@ about.text: |
 | `updater.py`, `ed25519.py` | Automatické aktualizace z GitHub Releases, ověření podpisu |
 | `app.py` | Jádro aplikace (Flask endpointy `/api/*`), volané přes most pywebview |
 | `tools/dev_server.py` | Vývojový server pro ladění v prohlížeči (není v `NormanMail.exe`) |
-| `google_oauth.py` | Přihlášení přes Google (OAuth) |
+| `google_oauth.py`, `google_client.py` | Přihlášení přes Google (OAuth), načtení OAuth klienta aplikace |
+| `site/` | Web aplikace se zásadami ochrany soukromí a podmínkami použití (GitHub Pages, `.github/workflows/pages.yml`) |
 | `i18n.py`, `static/i18n/`, `languages/` | Lokalizace: načítání katalogů textů, zabudovaná angličtina, čeština jako samostatný soubor |
 | `tests/` | Testy (`.venv\Scripts\python -m unittest discover tests`) |
 | `tools/release.py` | Vydání nové verze (sestavení, podepsaný `latest.json`, GitHub release) |

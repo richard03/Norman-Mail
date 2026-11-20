@@ -6,3 +6,4 @@ dist/
 *.spec
 !NormanMail.spec
 languages/_*
+google_client.json

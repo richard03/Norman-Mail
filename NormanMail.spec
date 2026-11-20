@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Sestavení jediného souboru dist\NormanMail.exe (spouští build.bat: pyinstaller --noconfirm --clean NormanMail.spec).
+import json
 import os
 import sys
 
@@ -7,6 +8,7 @@ from PyInstaller.utils.win32.versioninfo import (FixedFileInfo, StringFileInfo, 
                                                   VarFileInfo, VarStruct, VSVersionInfo)
 
 sys.path.insert(0, SPECPATH)
+from google_client import BUILTIN_NAME, build_client_file, parse_client  # noqa: E402
 from version import VERSION  # noqa: E402
 
 APP_NAME = "Norman Mail"
@@ -25,9 +27,27 @@ def unneeded(dest):
     return dest.replace("\\", "/").lower().endswith("python.runtime.xml")
 
 
+def google_client_datas():
+    """OAuth klient Norman Mail (přihlášení přes Google) z počítače vývojáře – do exe jako google_client.json.
+    Bez něj se sestaví exe, ve kterém si uživatel musí zadat vlastního klienta (release.py takové vydání odmítne)."""
+    src = build_client_file()
+    try:
+        cfg = parse_client(src.read_text("utf-8"))
+    except OSError:
+        cfg = None
+    if not cfg:
+        print(f"UPOZORNĚNÍ: {src} chybí nebo neobsahuje platného OAuth klienta – exe bude bez přihlášení přes Google.")
+        return []
+    out = os.path.join(workpath, BUILTIN_NAME)
+    os.makedirs(workpath, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(cfg, f)
+    return [(out, ".")]
+
+
 a = Analysis(
     ["main.py"],
-    datas=[("static", "static"), ("assets/mailer.ico", "assets")],
+    datas=[("static", "static"), ("assets/mailer.ico", "assets")] + google_client_datas(),
     excludes=EXCLUDES,
     noarchive=False,
     optimize=2,  # bez docstringů a assertů (kontroly za běhu proto nesmí stát na assert)
