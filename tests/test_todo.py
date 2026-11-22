@@ -101,6 +101,29 @@ class TodoTest(unittest.TestCase):
         self.assertEqual(keys, {db.message_key(d.message("a", "INBOX", 5)), "a|INBOX|99"})
         self.assertTrue(d.message("a", "INBOX", 5)["todo"])
 
+    def test_migrates_fingerprint_without_size(self):
+        path = Path(tempfile.mkdtemp()) / "m.db"
+        d = db.Database(path)
+        r = rec(5)
+        r["message_id"] = ""
+        d.insert_messages("a", "INBOX", [r])
+        old = db.message_key(d.message("a", "INBOX", 5)).rsplit("|", 1)[0]  # otisk bez velikosti
+        d._q("DELETE FROM meta WHERE key='fingerprint_size_migrated'")
+        d._q("INSERT INTO todos VALUES(?, 0)", (old,))
+        d._conn.close()
+        d = db.Database(path)
+        self.assertTrue(d.message("a", "INBOX", 5)["todo"])
+        self.assertEqual({k for (k,) in d._q("SELECT key FROM todos")}, {db.message_key(d.message("a", "INBOX", 5))})
+
+    def test_same_headers_different_size_are_different(self):
+        r1, r2 = rec(5), rec(6)
+        for r in (r1, r2):
+            r.update(message_id="", date=1_700_000_000.0)
+        r2["size"] = 999
+        self.d.insert_messages("a", "INBOX", [r1, r2])
+        self.d.set_todo(self.msg(5), True)
+        self.assertEqual(self.uids("todo"), [5])
+
     def test_todo_survives_move_by_message_id_and_skips_auto_delete(self):
         self.d.mark_message(self.msg(2), "notifications")
         self.d.set_todo(self.msg(2), True)

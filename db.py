@@ -80,10 +80,12 @@ CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || '
                        " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
                        "      OR instr(m.cc_addrs, ',' || r.recipient || ',') > 0)"
                        " AND (r.subject='' OR instr(m.base_subject, r.subject) > 0)")
-# Klíč zprávy pro označení „jen tento email“ a ToDo – Message-ID, jinak otisk odesílatele, data (celé sekundy)
-# a předmětu. Obojí přežije přesun do jiné složky. Stejný řetězec skládá message_key() v Pythonu.
-_FINGERPRINT = ("'h:' || COALESCE({p}from_addrs, '') || '|' || COALESCE(CAST({p}date AS INTEGER), '') "
-                "|| '|' || COALESCE({p}subject, '')")
+# Klíč zprávy pro označení „jen tento email“ a ToDo – Message-ID, jinak otisk odesílatele, data (celé sekundy),
+# předmětu a velikosti (dvě různé zprávy se stejnými hlavičkami se skoro vždy liší velikostí). Obojí přežije
+# přesun do jiné složky. Stejný řetězec skládá message_key() v Pythonu.
+_FINGERPRINT_V1 = ("'h:' || COALESCE({p}from_addrs, '') || '|' || COALESCE(CAST({p}date AS INTEGER), '') "
+                   "|| '|' || COALESCE({p}subject, '')")  # bez velikosti – jen pro migraci
+_FINGERPRINT = _FINGERPRINT_V1 + " || '|' || COALESCE({p}size, '')"
 MSG_KEY = f"COALESCE(NULLIF(m.message_id, ''), {_FINGERPRINT.format(p='m.')})"
 
 
@@ -105,8 +107,9 @@ def message_key(rec) -> str:
     """Klíč zprávy (stejně jako MSG_KEY v SQL)."""
     if rec.get("message_id"):
         return rec["message_id"]
-    date = rec.get("date")
-    return f"h:{_addrs(rec.get('from') or [])}|{'' if date is None else int(date)}|{rec.get('subject') or ''}"
+    date, size = rec.get("date"), rec.get("size")
+    return (f"h:{_addrs(rec.get('from') or [])}|{'' if date is None else int(date)}|{rec.get('subject') or ''}"
+            f"|{'' if size is None else int(size)}")
 
 
 def _category_rule(cat):
@@ -260,6 +263,15 @@ class Database:
                     WHERE key IN (SELECT account_id || '|' || folder || '|' || uid FROM messages
                                   WHERE COALESCE(message_id, '') = '')""")
             self._conn.execute("INSERT INTO meta VALUES('fingerprint_keys_migrated', '1')")
+        # migrace: do otisku přibyla velikost zprávy
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='fingerprint_size_migrated'").fetchone():
+            old, new = _FINGERPRINT_V1.format(p=''), _FINGERPRINT.format(p='')
+            for table in ("todos", "message_marks"):
+                self._conn.execute(f"""UPDATE OR REPLACE {table} SET key=(
+                        SELECT {new} FROM messages WHERE COALESCE(message_id, '') = '' AND {old} = {table}.key
+                        LIMIT 1)
+                    WHERE key LIKE 'h:%' AND key IN (SELECT {old} FROM messages WHERE COALESCE(message_id, '') = '')""")
+            self._conn.execute("INSERT INTO meta VALUES('fingerprint_size_migrated', '1')")
         # migrace: pořadí kontaktů podle četnosti i stáří zpráv
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(contacts)")}
         if "rank_sent" not in cols:
