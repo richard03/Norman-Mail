@@ -1772,6 +1772,7 @@ function wireComposeWindow(win) {
   el.addEventListener('dragover', e => {
     if (!draggingFiles(e)) return;
     e.preventDefault();
+    e.stopPropagation();  // globální handler na document by jinak přepsal dropEffect na 'none' a drop by nepřišel
     e.dataTransfer.dropEffect = 'copy';
     el.classList.add('drop-files');
   });
