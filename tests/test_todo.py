@@ -68,6 +68,39 @@ class TodoTest(unittest.TestCase):
         self.assertEqual(self.uids("todo"), [])
         self.assertIsNone(self.d.message("a", "Projekty", 7)["view"])
 
+    def test_without_message_id_survives_move(self):
+        """Zpráva bez Message-ID: ToDo i ruční kategorie drží otisk (odesílatel, datum, předmět), ne umístění."""
+        self.d.create_user_folder("Projekty", "a", "Projekty", False, False)
+        r = rec(5, subject="Bez ID")
+        r["message_id"] = ""
+        self.d.insert_messages("a", "INBOX", [r])
+        self.d.set_todo(self.msg(5), True)
+        self.d.mark_message(self.msg(5), "notifications")
+        self.d.delete_uids("a", "INBOX", [5])
+        self.d.insert_messages("a", "Projekty", [dict(r, uid=50)])
+        m = self.d.message("a", "Projekty", 50)
+        self.assertTrue(m["todo"])
+        self.assertEqual(self.uids("todo"), [50])
+        self.d.set_todo(m, False)
+        self.d.delete_uids("a", "Projekty", [50])
+        self.d.insert_messages("a", "INBOX", [dict(r, uid=51)])
+        self.assertEqual(self.d.view_of("a", "INBOX", 51), "notifications")
+
+    def test_migrates_location_keys(self):
+        path = Path(tempfile.mkdtemp()) / "m.db"
+        d = db.Database(path)
+        r = rec(5)
+        r["message_id"] = ""
+        d.insert_messages("a", "INBOX", [r])
+        d._q("DELETE FROM meta WHERE key='fingerprint_keys_migrated'")
+        d._q("INSERT INTO todos VALUES('a|INBOX|5', 0)")
+        d._q("INSERT INTO todos VALUES('a|INBOX|99', 0)")  # zpráva už v databázi není: zůstane
+        d._conn.close()
+        d = db.Database(path)
+        keys = {k for (k,) in d._q("SELECT key FROM todos")}
+        self.assertEqual(keys, {db.message_key(d.message("a", "INBOX", 5)), "a|INBOX|99"})
+        self.assertTrue(d.message("a", "INBOX", 5)["todo"])
+
     def test_todo_survives_move_by_message_id_and_skips_auto_delete(self):
         self.d.mark_message(self.msg(2), "notifications")
         self.d.set_todo(self.msg(2), True)

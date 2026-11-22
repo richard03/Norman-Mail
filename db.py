@@ -80,8 +80,11 @@ CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || '
                        " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
                        "      OR instr(m.cc_addrs, ',' || r.recipient || ',') > 0)"
                        " AND (r.subject='' OR instr(m.base_subject, r.subject) > 0)")
-# Klíč zprávy pro označení „jen tento email“ – Message-ID (přežije přesun), jinak umístění zprávy.
-MSG_KEY = "COALESCE(NULLIF(m.message_id, ''), m.account_id || '|' || m.folder || '|' || m.uid)"
+# Klíč zprávy pro označení „jen tento email“ a ToDo – Message-ID, jinak otisk odesílatele, data (celé sekundy)
+# a předmětu. Obojí přežije přesun do jiné složky. Stejný řetězec skládá message_key() v Pythonu.
+_FINGERPRINT = ("'h:' || COALESCE({p}from_addrs, '') || '|' || COALESCE(CAST({p}date AS INTEGER), '') "
+                "|| '|' || COALESCE({p}subject, '')")
+MSG_KEY = f"COALESCE(NULLIF(m.message_id, ''), {_FINGERPRINT.format(p='m.')})"
 
 
 def _inbox_view(r):
@@ -99,7 +102,11 @@ def _inbox_view(r):
 
 
 def message_key(rec) -> str:
-    return rec.get("message_id") or f"{rec['account_id']}|{rec['folder']}|{rec['uid']}"
+    """Klíč zprávy (stejně jako MSG_KEY v SQL)."""
+    if rec.get("message_id"):
+        return rec["message_id"]
+    date = rec.get("date")
+    return f"h:{_addrs(rec.get('from') or [])}|{'' if date is None else int(date)}|{rec.get('subject') or ''}"
 
 
 def _category_rule(cat):
@@ -244,6 +251,15 @@ class Database:
                     SELECT ?, CASE kind WHEN 'sender' THEN value ELSE '' END,
                               CASE kind WHEN 'subject' THEN value ELSE '' END, created FROM {table}""", (cat,))
             self._conn.execute("INSERT INTO meta VALUES('category_rules_migrated', '1')")
+        # migrace: klíč zprávy bez Message-ID bylo umístění (účet|složka|uid), teď otisk (přežije přesun)
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='fingerprint_keys_migrated'").fetchone():
+            for table in ("todos", "message_marks"):
+                self._conn.execute(f"""UPDATE OR REPLACE {table} SET key=(
+                        SELECT {_FINGERPRINT.format(p='')} FROM messages
+                        WHERE account_id || '|' || folder || '|' || uid = {table}.key)
+                    WHERE key IN (SELECT account_id || '|' || folder || '|' || uid FROM messages
+                                  WHERE COALESCE(message_id, '') = '')""")
+            self._conn.execute("INSERT INTO meta VALUES('fingerprint_keys_migrated', '1')")
         # migrace: pořadí kontaktů podle četnosti i stáří zpráv
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(contacts)")}
         if "rank_sent" not in cols:
