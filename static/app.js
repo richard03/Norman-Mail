@@ -1031,9 +1031,9 @@ function updateActions() {
   // nadpis Akce jen nad tlačítky horní části (ve Spamu jsou jen Není spam v Třídění a Smazat dole)
   $('#actionsTitle').hidden = ![...shown].some(a => !SORTING_ACTIONS.includes(a) && a !== 'delete');
   $('#actionsSorting').hidden = !SORTING_ACTIONS.some(a => shown.has(a));
-  // ToDo jen pro zprávy doručené pošty; ve zprávě v ToDo místo něj „Vyřešeno“
+  // ToDo jen pro zprávy doručené pošty a složek aplikace; ve zprávě v ToDo místo něj „Vyřešeno“
   const tb = $('#actions [data-act="todo"]'), todo = !!state.current && inTodo(state.current);
-  if (ready && state.current.folder !== 'INBOX') tb.disabled = true;
+  if (ready && !todoAllowed(state.current)) tb.disabled = true;
   tb.querySelector('.label').textContent = todo ? t('action.todoResolved') : t('actions.todo');
   tb.title = todo ? t('action.todoResolvedTitle') : t('action.todoTitle');
   const sb = $('#actions [data-act="spam"]');
@@ -1059,10 +1059,18 @@ function leaveListKeepOpen(cur, alsoRemove = null) {
 /** Opustí zpráva po přeřazení (do pohledu view) zobrazený pohled? */
 function leavesUnified(cur, view) {
   const v = state.view;
-  return v.type === 'unified' && v.filter !== 'all' && cur.folder === 'INBOX' && view !== v.filter;
+  return v.type === 'unified' && v.filter !== 'all' && (cur.folder === 'INBOX' || v.filter === 'todo')
+    && view !== v.filter;
 }
 
 const MOVE_DONE = { archive: 'action.archived', spam: 'action.movedToSpam', delete: 'action.movedToTrash' };
+
+/** Jde zprávu dát do ToDo? Z doručené pošty, ze složky aplikace a v pohledu ToDo (tam už je). */
+function todoAllowed(cur) {
+  const v = state.view;
+  return cur.folder === 'INBOX' || v.type === 'ufolder' || (v.type === 'unified' && v.filter === 'todo')
+    || inTodo(cur);
+}
 
 /** Je zpráva v ToDo? (přepnuto v této relaci, z načtené zprávy, jinak z položky seznamu) */
 function inTodo(cur) {
@@ -1082,8 +1090,8 @@ async function toggleTodo(cur, btn) {
     const item = findListItem(cur);
     if (item) item.todo = value;
     const view = value ? 'todo' : (res.view || null);
-    if (cur.folder === 'INBOX') cur.view = view;
-    toast(value ? t('todo.added') : t('todo.resolved', { view: unifiedTitle(res.view) || '' }));
+    cur.view = view;  // u zprávy ze složky aplikace „todo“, nebo null
+    toast(value ? t('todo.added') : t('todo.resolved', { view: res.label || unifiedTitle(res.view) || '' }));
     if (leavesUnified(cur, view)) leaveListKeepOpen(cur);
     else updateActions();
     pollSync();  // počty v levém sloupci

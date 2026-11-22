@@ -87,10 +87,12 @@ MSG_KEY = "COALESCE(NULLIF(m.message_id, ''), m.account_id || '|' || m.folder ||
 def _inbox_view(r):
     """Pohled sloučené doručené pošty, kam zpráva patří (stejně jako Database._VIEW); mimo doručenou None."""
     keys = r.keys()
-    if r["folder"] != "INBOX" or "category" not in keys:
+    if "category" not in keys:
         return None
     if r["todo"]:
-        return "todo"
+        return "todo"  # i zpráva ze složky aplikace (je vidět v pohledu ToDo)
+    if r["folder"] != "INBOX":
+        return None
     if r["category"]:
         return r["category"]
     return "important" if "direct" in keys and r["direct"] else "fyi"
@@ -128,6 +130,9 @@ IS_DIRECT = ("EXISTS (SELECT 1 FROM my_addresses a WHERE a.account_id=m.account_
 # ToDo: zpráva označená k vyřízení je jen v pohledu ToDo. Značka je místní (podle Message-ID, přežije
 # přesun na serveru); po „Vyřešeno“ zpráva zase patří tam, kam ji řadí kategorie a adresa.
 IS_TODO = f"EXISTS (SELECT 1 FROM todos td WHERE td.key={MSG_KEY})"
+# Pohled ToDo ukazuje i zprávy označené k vyřízení ve složkách aplikace (zpráva zůstává i ve své složce).
+IN_TODO_FOLDERS = ("(m.folder=? OR m.folder IN (SELECT u.imap_name FROM user_folders u "
+                   "WHERE u.account_id=m.account_id))")
 VIEW_FILTERS = {
     "todo": IS_TODO,
     # Důležité: přímo pro mě, nebo zpráva ručně označená jako důležitá (tlačítko Důležité)
@@ -519,7 +524,8 @@ class Database:
             where = "WHERE (" + " OR ".join(["(m.account_id=? AND m.folder=?)"] * len(folder)) + ")"
             params = [x for pair in folder.items() for x in pair]
         else:
-            where = f"WHERE m.account_id IN ({','.join('?' * len(acc_ids))}) AND m.folder=?"
+            in_folder = IN_TODO_FOLDERS if view == "todo" and folder == "INBOX" else "m.folder=?"
+            where = f"WHERE m.account_id IN ({','.join('?' * len(acc_ids))}) AND {in_folder}"
             params = [*acc_ids, folder]
         return where + f" AND {VIEW_FILTERS[view]}", params
 
@@ -551,7 +557,8 @@ class Database:
                                "GROUP BY v", (folder,)):
             out[view] = n
         out["all"] = sum(n for v, n in out.items() if v != "all")
-        out["todo"] = self._q(f"SELECT COUNT(*) FROM messages m WHERE m.folder=? AND {IS_TODO}", (folder,))[0][0]
+        in_folder = IN_TODO_FOLDERS if folder == "INBOX" else "m.folder=?"
+        out["todo"] = self._q(f"SELECT COUNT(*) FROM messages m WHERE {in_folder} AND {IS_TODO}", (folder,))[0][0]
         return out
 
     def set_todo(self, rec, value: bool):

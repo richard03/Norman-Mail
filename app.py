@@ -600,16 +600,20 @@ def message_archive(acc_id, uid):
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/todo")
 def message_todo(acc_id, uid):
     """ToDo: {value: true} přesune zprávu doručené pošty do pohledu ToDo, {value: false} (Vyřešeno) ji vrátí
-    do pohledu, kam patří. Jen místní značka, na serveru se nic nemění. Vrací pohled, kam zpráva teď patří."""
+    do pohledu, kam patří. Zpráva ve složce aplikace v ní zůstane a navíc se ukáže v ToDo.
+    Jen místní značka, na serveru se nic nemění. Vrací pohled, kam zpráva teď patří (u složky aplikace
+    „todo“, nebo None)."""
     account_or_404(acc_id)
     data = request.get_json(force=True) or {}
     folder = folder_arg(data)
     rec = database.message(acc_id, folder, uid)
-    if folder != "INBOX" or rec is None:
+    if rec is None or (folder != "INBOX" and folder not in database.user_folder_names(acc_id)):
         raise ValidationError(tr("err.todoInboxOnly"))
-    database.set_todo(rec, bool(data.get("value", True)))
+    value = bool(data.get("value", True))
+    database.set_todo(rec, value)
     database.bump()
-    return jsonify(ok=True, view=database.view_of(acc_id, folder, uid))
+    view = database.view_of(acc_id, folder, uid) if folder == "INBOX" else ("todo" if value else None)
+    return jsonify(ok=True, view=view, label=None if folder == "INBOX" else database.folder_label(acc_id, folder))
 
 
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/snooze")

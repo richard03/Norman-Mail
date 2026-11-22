@@ -51,6 +51,23 @@ class TodoTest(unittest.TestCase):
         self.assertEqual(self.uids("important"), [1])
         self.assertEqual(self.uids("todo"), [3])
 
+    def test_todo_in_user_folder(self):
+        """Zpráva ve vlastní složce: v ToDo se ukáže, ze složky nezmizí, po Vyřešeno z ToDo odejde."""
+        self.d.create_user_folder("Projekty", "a", "Projekty", False, False)
+        self.d.insert_messages("a", "Projekty", [rec(7)])
+        self.d.insert_messages("a", "Ostatni", [rec(8)])
+        self.d.set_todo(self.d.message("a", "Projekty", 7), True)
+        self.d.set_todo(self.d.message("a", "Ostatni", 8), True)  # složka mimo aplikaci se do ToDo nepočítá
+        self.assertEqual(self.uids("todo"), [7])
+        self.assertEqual(self.d.view_unread()["todo"], 1)
+        m = self.d.message("a", "Projekty", 7)
+        self.assertEqual((m["todo"], m["view"]), (True, "todo"))
+        self.assertEqual([x["uid"] for x in self.d.list_messages(["a"], "Projekty", 0, 50)["messages"]], [7])
+        self.assertEqual(self.d.list_position(["a"], "INBOX", "todo", "a", "Projekty", 7), 0)
+        self.d.set_todo(m, False)
+        self.assertEqual(self.uids("todo"), [])
+        self.assertIsNone(self.d.message("a", "Projekty", 7)["view"])
+
     def test_todo_survives_move_by_message_id_and_skips_auto_delete(self):
         self.d.mark_message(self.msg(2), "notifications")
         self.d.set_todo(self.msg(2), True)
