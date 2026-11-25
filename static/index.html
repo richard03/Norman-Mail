@@ -307,6 +307,8 @@
         <h3 data-i18n="view.unimportantLabel"></h3>
         <p class="note" data-i18n="settings.unimportant.intro"></p>
         <div class="options">
+          <label class="option"><input type="checkbox" data-setting="sorter_unimportant">
+            <span data-i18n="settings.sorter.unimportant"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_mark_read_on_leave">
             <span data-i18n="settings.unimportant.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_week">
@@ -319,6 +321,7 @@
             <span data-i18n="settings.unimportant.deleteUnreadMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.unimportant.deleteNote"></p>
+        <p class="note" data-i18n="settings.sorter.note"></p>
       </div>
       <div data-panel="spam">
         <h3 data-i18n="view.spamLabel"></h3>
@@ -351,6 +354,8 @@
         <h3 data-i18n="view.notificationsLabel"></h3>
         <p class="note" data-i18n="settings.notifications.intro"></p>
         <div class="options">
+          <label class="option"><input type="checkbox" data-setting="sorter_notifications">
+            <span data-i18n="settings.sorter.notifications"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_mark_read_on_leave">
             <span data-i18n="settings.notifications.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_week">
@@ -363,6 +368,7 @@
             <span data-i18n="settings.notifications.deleteUnreadMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.notifications.deleteNote"></p>
+        <p class="note" data-i18n="settings.sorter.note"></p>
       </div>
       <div data-panel="trash">
         <h3 data-i18n="view.trashLabel"></h3>
@@ -455,6 +461,8 @@
             <p id="folderTargetNote" class="note"></p>
           </fieldset>
           <label class="option"><input type="checkbox" name="mark_read"> <span data-i18n="folder.markRead"></span></label>
+          <label class="option"><input type="checkbox" name="auto_sort"> <span data-i18n="folder.autoSort"></span></label>
+          <p class="note" data-i18n="folder.autoSortNote"></p>
           <p class="note" data-i18n="folder.whenNote"></p>
           <p id="folderError" class="error"></p>
           <div class="dialog-actions">

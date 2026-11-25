@@ -4,6 +4,7 @@ endpointy přes most pywebview uvnitř procesu. Jako skutečný server na 127.0.
 
 import base64
 import io
+import logging
 import os
 import threading
 import time
@@ -21,6 +22,7 @@ import google_oauth
 import i18n
 from i18n import t as tr
 import mail
+import sorter
 import sync
 import taskbar
 import updater
@@ -35,6 +37,7 @@ PAGE_SIZE = 50
 UNIFIED_PAGE_SIZE = 30
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
+log = logging.getLogger("mailer.app")
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # přílohy v base64
 store = AccountStore()
@@ -508,6 +511,27 @@ def _mark_seen_in_background(acc, folder, uid):
                    lambda M: mail.set_flag(M, folder, uid, "\\Seen", True))
 
 
+def _sorter_suggestion(row, placement):
+    """Návrh filtru podobnosti pro zprávu v doručené poště: kam podobné zprávy dáváte (složka / kategorie).
+    U ručně umístěných zpráv, zpráv podle pravidla a v ToDo se nenavrhuje nic."""
+    if row["todo"] or (placement and placement["layer"] in ("manual", "rule")):
+        return None
+    try:
+        guess = syncer.sorter.predict(row)
+    except Exception:
+        log.exception("Filtr podobnosti selhal")
+        return None
+    if not guess or guess[1] < sorter.SUGGEST_THRESHOLD:
+        return None
+    cls, score = guess
+    if cls in db.CATEGORIES:
+        return None if row["view"] == cls else {"type": "inbox", "view": cls, "score": score}
+    f = database.user_folder(int(cls.split(":", 1)[1]))
+    if not f or not f["account_id"]:
+        return None
+    return {"type": "ufolder", "id": f["id"], "name": f["name"], "score": score}
+
+
 @app.get("/api/accounts/<acc_id>/messages/<int:uid>")
 def message(acc_id, uid):
     """Zpráva z cache; ze serveru se stahuje jen poprvé."""
@@ -548,6 +572,7 @@ def message(acc_id, uid):
             data["bayes"] = {"score": v["score"], "tokens": syncer.bayes.explain(v["tokens"])}
     # proč je zpráva tady (ruční umístění / pravidlo / pole Komu); u spamu od filtru stačí jeho štítek
     data["placement"] = database.placement(row, acc_id, folder) if row and not data["bayes"] else None
+    data["suggestion"] = _sorter_suggestion(row, data["placement"]) if row and folder == "INBOX" else None
     return jsonify(data)
 
 
@@ -757,7 +782,8 @@ def _folder_config(data, current_id=None):
     if any(f["account_id"] == acc_id and f["imap_name"] == imap_name and f["id"] != current_id
            for f in database.user_folders()):
         raise ValidationError(tr("err.folderTaken"))
-    return name, acc_id, imap_name, bool(data.get("after_read")), bool(data.get("mark_read"))
+    return (name, acc_id, imap_name, bool(data.get("after_read")), bool(data.get("mark_read")),
+            bool(data.get("auto_sort")))
 
 
 @app.get("/api/user-folders")
@@ -1234,6 +1260,7 @@ def settings_put():
     if "language" in changes and changes["language"] not in {"", *(l["code"] for l in i18n.languages())}:
         changes.pop("language")
     result = database.update_settings(changes)
+    database.bump()  # např. vypnutý filtr podobnosti vrátí zprávy na jejich místo
     i18n.set_language(result["language"])
     syncer.trigger()  # případný úklid podle nového nastavení hned
     return jsonify(result)
@@ -1273,6 +1300,11 @@ def i18n_open_folder():
 @app.get("/api/bayes")
 def bayes_status():
     return jsonify(syncer.bayes.status())
+
+
+@app.get("/api/sorter")
+def sorter_status():
+    return jsonify(syncer.sorter.status())
 
 
 @app.post("/api/bayes/reset")

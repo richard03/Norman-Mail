@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS todos(
     key TEXT PRIMARY KEY, created REAL);
 CREATE TABLE IF NOT EXISTS message_marks(
     key TEXT PRIMARY KEY, category TEXT NOT NULL, created REAL);
+CREATE TABLE IF NOT EXISTS sorter_auto(
+    key TEXT PRIMARY KEY, target TEXT NOT NULL, score REAL, created REAL);  -- zařazeno filtrem podobnosti
 CREATE TABLE IF NOT EXISTS category_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
     sender TEXT NOT NULL DEFAULT '', recipient TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
@@ -132,9 +134,12 @@ def category_rule_matches(rule, rec) -> bool:
 # Kategorie zprávy (jediný výraz, vyhodnotí se jednou): ruční umístění má přednost před pravidly;
 # když zprávě odpovídají pravidla obou kategorií, vyhrává důležitější cíl (Nedůležité před Notifikacemi).
 # NULL = žádná kategorie.
-CATEGORY = (f"COALESCE((SELECT k.category FROM message_marks k WHERE k.key={MSG_KEY}), "
-            f"CASE WHEN {_category_rule('unimportant')} THEN 'unimportant' "
-            f"WHEN {_category_rule('notifications')} THEN 'notifications' END)")
+CATEGORY_EXPLICIT = (f"COALESCE((SELECT k.category FROM message_marks k WHERE k.key={MSG_KEY}), "
+                     f"CASE WHEN {_category_rule('unimportant')} THEN 'unimportant' "
+                     f"WHEN {_category_rule('notifications')} THEN 'notifications' END)")
+# Až po ručním umístění a pravidlech rozhoduje filtr podobnosti (sorter.py) – jen u nových zpráv, které zařadil.
+CATEGORY = (f"COALESCE({CATEGORY_EXPLICIT}, (SELECT a.target FROM sorter_auto a WHERE a.key={MSG_KEY} "
+            f"AND a.target IN ('unimportant', 'notifications')))")
 # Zpráva ručně umístěná uživatelem – automatické řazení ji nepřesouvá.
 IS_LOCKED = f"EXISTS (SELECT 1 FROM message_marks k WHERE k.key={MSG_KEY})"
 IS_NOTIFICATION = f"({CATEGORY}) IS 'notifications'"
@@ -186,6 +191,8 @@ DEFAULT_SETTINGS = {
     "bayes_sensitivity": "medium",            # high / medium / low
     "language": "",                           # kód jazyka rozhraní; "" = zatím nezvolený (angličtina)
     "auto_update": True,                      # kontrolovat a stahovat aktualizace (updater.py)
+    "sorter_unimportant": True,               # filtr podobnosti řadí nové zprávy do Nedůležitých
+    "sorter_notifications": True,             # … do Notifikací
 }
 SETTING_CHOICES = {"bayes_sensitivity": ("high", "medium", "low")}
 
@@ -249,6 +256,9 @@ class Database:
         if "account_id" not in cols:
             self._conn.execute("ALTER TABLE user_folders ADD COLUMN account_id TEXT")
         # migrace: „ihned / až po přečtení“ má každé pravidlo zvlášť (dřív celá složka) – převzít nastavení složky
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folders)")}
+        if "auto_sort" not in cols:  # migrace: filtr podobnosti smí do složky řadit sám
+            self._conn.execute("ALTER TABLE user_folders ADD COLUMN auto_sort INTEGER DEFAULT 0")
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folder_rules)")}
         if "after_read" not in cols:
             self._conn.execute("ALTER TABLE user_folder_rules ADD COLUMN after_read INTEGER DEFAULT 0")
@@ -769,6 +779,8 @@ class Database:
                 continue
             if k in DEFAULT_SETTINGS and isinstance(v, type(DEFAULT_SETTINGS[k])):
                 self._q("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("setting:" + k, json.dumps(v)))
+                if k.startswith("sorter_") and v is False:  # vypnuté řazení: zprávy se vrátí na své místo
+                    self._q("DELETE FROM sorter_auto WHERE target=?", (k[len("sorter_"):],))
         return self.settings()
 
     # ------------------------------------------------------------------ hromadné operace s Notifikacemi / Nedůležitými
@@ -827,17 +839,18 @@ class Database:
         """Názvy cílových složek na daném účtu (synchronizují se vždy)."""
         return {r[0] for r in self._q("SELECT imap_name FROM user_folders WHERE account_id=?", (acc_id,))}
 
-    def create_user_folder(self, name, account_id, imap_name, after_read, mark_read):
+    def create_user_folder(self, name, account_id, imap_name, after_read, mark_read, auto_sort=False):
         with self._lock:
             cur = self._conn.execute(
-                """INSERT INTO user_folders(name, account_id, imap_name, after_read, mark_read, created)
-                   VALUES(?,?,?,?,?,?)""",
-                (name, account_id, imap_name, int(after_read), int(mark_read), time.time()))
+                """INSERT INTO user_folders(name, account_id, imap_name, after_read, mark_read, auto_sort, created)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (name, account_id, imap_name, int(after_read), int(mark_read), int(auto_sort), time.time()))
             return cur.lastrowid
 
-    def update_user_folder(self, folder_id, name, account_id, imap_name, after_read, mark_read):
-        self._q("UPDATE user_folders SET name=?, account_id=?, imap_name=?, after_read=?, mark_read=? WHERE id=?",
-                (name, account_id, imap_name, int(after_read), int(mark_read), folder_id))
+    def update_user_folder(self, folder_id, name, account_id, imap_name, after_read, mark_read, auto_sort=False):
+        self._q("""UPDATE user_folders SET name=?, account_id=?, imap_name=?, after_read=?, mark_read=?, auto_sort=?
+                   WHERE id=?""", (name, account_id, imap_name, int(after_read), int(mark_read), int(auto_sort),
+                                   folder_id))
 
     def delete_user_folder(self, folder_id):
         def run(c):
@@ -1140,6 +1153,7 @@ class Database:
         nebo výchozí řazení podle pole Komu. {layer: manual|rule|default, target, rules}; None mimo
         doručenou poštu, složky aplikace a spam (bayesovský filtr ukazuje vlastní štítek)."""
         rules = self.matching_rules(rec)
+        auto = self._q("SELECT target, score FROM sorter_auto WHERE key=?", (message_key(rec),))
         user_folder = self._q("SELECT id FROM user_folders WHERE account_id=? AND imap_name=?", (acc_id, folder))
         if folder == "INBOX":
             mark = self._q("SELECT category FROM message_marks WHERE key=?", (message_key(rec),))
@@ -1149,9 +1163,13 @@ class Database:
             if cat:
                 return {"layer": "rule", "target": cat,
                         "rules": [r for r in rules if r["type"] == "category" and r["target"] == cat]}
+            if auto and auto[0][0] in CATEGORIES:
+                return {"layer": "bayes", "target": auto[0][0], "score": auto[0][1], "rules": []}
             return {"layer": "default", "target": "important" if self.is_direct(rec, acc_id) else "fyi", "rules": []}
         if user_folder:
             here = [r for r in rules if r["type"] == "folder" and r["target"] == user_folder[0][0]]
+            if not here and auto and auto[0][0] == f"folder:{user_folder[0][0]}":
+                return {"layer": "bayes", "target": "folder", "score": auto[0][1], "rules": []}
             return {"layer": "rule" if here else "manual", "target": "folder", "rules": here}
         if self.spam_folders().get(acc_id) == folder:
             here = [r for r in rules if r["type"] == "spam"]

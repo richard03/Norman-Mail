@@ -926,6 +926,7 @@ function renderReader() {
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
       ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
+      ${suggestionBanner(data.suggestion)}
       ${data.snoozed_until ? `<div class="banner snooze">⏰ ${esc(t('message.snoozed', { when: fmtSnooze(data.snoozed_until) }))}
           <button class="link" data-act="unsnooze">${esc(t('message.unsnooze'))}</button></div>` : ''}
       ${remote && !state.showImages ? `<div class="banner">${esc(t('message.imagesBlocked'))}
@@ -974,6 +975,11 @@ $('#messageHead').addEventListener('click', async e => {
     return renderReader();
   }
   if (e.target.closest('[data-act="unsnooze"]') && state.current?.data) return unsnooze(state.current);
+  if (e.target.closest('[data-act="suggest"]') && state.current?.data?.suggestion) {
+    const sg = state.current.data.suggestion;
+    return moveItems([itemOf(state.current)], sg.type === 'ufolder' ? { type: 'ufolder', id: sg.id }
+      : { type: 'inbox', view: sg.view });
+  }
   for (const [act, value] of [['original-colors', true], ['dark-colors', false]]) {
     if (e.target.closest(`[data-act="${act}"]`) && state.current?.data) {
       state.originalColors = value;
@@ -1277,10 +1283,19 @@ function targetName(target) {
   return target.view && target.view !== 'all' ? t(`view.${target.view}`) : t('folder.inbox');
 }
 
+/** Návrh filtru podobnosti: „Podobné zprávy dáváte do X (93 %) – Přesunout“. */
+function suggestionBanner(sg) {
+  if (!sg) return '';
+  const where = sg.type === 'ufolder' ? sg.name : t(`view.${sg.view}`);
+  return `<div class="banner suggest">${esc(t('suggest.text', { target: where, score: Math.round(sg.score * 100) }))}
+    <button class="link" data-act="suggest">${esc(t('suggest.move'))}</button></div>`;
+}
+
 /** Štítek „proč je zpráva tady“ v záhlaví: ručně přesunutá, pravidlo, nebo pole Komu / kopie. */
 function placementTag(p, todo) {
   if (!p || todo) return '';
   const text = p.layer === 'manual' ? t('placement.manual')
+    : p.layer === 'bayes' ? t('placement.bayes', { score: Math.round(p.score * 100) })
     : p.layer === 'rule' && p.rules.length ? t('placement.rule', { rule: ruleText(p.rules[0]) })
     : p.layer === 'default' ? t(`placement.default.${p.target}`) : '';
   if (!text) return '';
@@ -2539,6 +2554,7 @@ async function openFolderDialog(id) {
   $('#folderAccount').innerHTML = state.accounts.map(a =>
     `<option value="${a.id}" ${a.id === accId ? 'selected' : ''}>${esc(a.name || a.email)}</option>`).join('');
   f.namedItem('mark_read').checked = !!folder?.mark_read;
+  f.namedItem('auto_sort').checked = !!folder?.auto_sort;
   $('#folderTitle').textContent = folder ? t('folder.title', { name: folder.name }) : t('folder.newTitle');
   $('#folderSaveBtn').textContent = folder ? t('folder.saveChanges') : t('folder.create');
   $('#folderDeleteBtn').hidden = !folder;
@@ -2590,7 +2606,7 @@ $('#folderForm').addEventListener('submit', async e => {
   const body = { name: f.namedItem('name').value, account_id: f.namedItem('account_id').value,
                  server_folder: isNew ? null : f.namedItem('server_folder').value,
                  new_folder: isNew ? (f.namedItem('new_folder').value.trim() || f.namedItem('name').value) : null,
-                 mark_read: f.namedItem('mark_read').checked };
+                 mark_read: f.namedItem('mark_read').checked, auto_sort: f.namedItem('auto_sort').checked };
   const btn = $('#folderSaveBtn');
   btn.disabled = true;
   $('#folderError').textContent = '';

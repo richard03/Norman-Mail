@@ -74,6 +74,10 @@ Norman Mail si drží vlastní databázi metadat zpráv v souboru `%APPDATA%\Mai
   - Spam začne přesouvat, až zná aspoň 10 spamových a 10 dobrých zpráv. Citlivost: vysoká (hranice 80 %), střední (90 %), nízká (97 %). Filtr jde vypnout; „Zapomenout a naučit znovu“ ho vrátí do výchozího stavu.
   - U zprávy, kterou filtr přesunul do spamu, je v záhlaví štítek „Filtr spamu: 99 %“; po najetí myší ukáže slova, podle kterých rozhodl.
   - Metoda: Robinsonova/Fisherova kombinace pravděpodobností slov (jako SpamBayes), slova z předmětu, odesílatele, vybraných hlaviček, odkazů a prvních 32 kB zprávy. Všechno se počítá a ukládá lokálně v databázi aplikace.
+- **Filtr podobnosti** (vícetřídní bayesovský filtr, `sorter.py`): učí se, kam dáváte zprávy, a nové zprávy podle toho řadí. Třídy jsou doručená pošta, Nedůležité, Notifikace a každá složka aplikace (spam má vlastní filtr výše). Učí se jen z vašich rozhodnutí: ručně umístěné zprávy, zprávy zařazené vašimi pravidly, přečtené zprávy ponechané v doručené poště a obsah složek. Zprávy, které zařadil sám filtr, se do učení nepočítají, dokud je ručně nepotvrdíte. Slova bere jen z hlaviček (odesílatel, doména, jméno, slova předmětu, příjemci, příloha), nic se kvůli němu nestahuje.
+  - Pořadí rozhodování: ruční přesun > explicitní pravidlo > filtr podobnosti > výchozí řazení podle pole Komu. Filtr řadí jen nové zprávy, kterými si je jistý aspoň na 97 %, a začne, až má aspoň 30 zpráv doručené pošty a 15 zpráv v cílové třídě.
+  - Do **Nedůležitých** a **Notifikací** řadí sám (vypnout jde v Nastavení u každé z nich, zprávy se pak vrátí na své místo). Do **složek** jen navrhuje: v záhlaví podobné zprávy v doručené poště se ukáže „Podobné zprávy dáváte do: X (93 %) – Přesunout“. Automatické řazení do složky se zapíná v jejím nastavení (*Filtr podobnosti smí do této složky řadit nové zprávy sám*).
+  - Zpráva zařazená filtrem má v záhlaví štítek „Filtr podobnosti: 98 %“. Ruční přesun rozhodnutí filtru přebije a filtr se z něj učí.
 - **Výběr více zpráv:** Ctrl+klik přidá zprávu do výběru nebo ji z něj odebere, Shift+klik vybere rozsah, Ctrl+A vybere všechny načtené zprávy. Vybrané zprávy smažete klávesou **Delete** nebo tlačítkem Smazat, tlačítkem Spam (ve Spamu Není spam) je přesunete hromadně.
 - **Drag & drop:** zprávu nebo vybranou skupinu zpráv přetáhněte myší na položku v levém sloupci:
   - na **složku**: přesun do ní (i na jiný účet), případně s pravidlem složky pro odesílatele / předmět;
@@ -187,6 +191,7 @@ about.text: |
 | `tools/i18n_add.py` | Pomocník pro přidání textů do obou vestavěných katalogů |
 | `db.py` | Lokální databáze metadat (SQLite) |
 | `sync.py` | Synchronizace se servery na pozadí, probouzení odložených zpráv |
+| `sorter.py` | Filtr podobnosti: vícetřídní naivní Bayes nad hlavičkami (Nedůležité, Notifikace, složky) |
 | `mail.py` | Práce s IMAP a SMTP, parsování zpráv, sdílení spojení |
 | `store.py` | Ukládání účtů a hesel |
 | `static/` | Uživatelské rozhraní (HTML, CSS, JS) |

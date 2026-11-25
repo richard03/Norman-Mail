@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import bayes
+import sorter
 import db as db_module
 import mail
 from i18n import t as tr
@@ -59,6 +60,7 @@ class SyncManager:
     def __init__(self, store, db, pool):
         self.store, self.db, self.pool = store, db, pool
         self.bayes = bayes.BayesFilter(db)
+        self.sorter = sorter.Sorter(db)
         self.errors = {}               # acc_id -> poslední chyba synchronizace
         self._wake = threading.Event()
         self._locks = {}
@@ -180,6 +182,7 @@ class SyncManager:
                 self.cleanup_categories()
                 self.apply_folder_rules()
                 if full:
+                    self.sorter.prune()
                     self.bayes_maintenance()
             except Exception:
                 log.exception("Chyba synchronizace")
@@ -262,6 +265,8 @@ class SyncManager:
                     records = self._apply_bayes(acc, records)
                 if frules:
                     records = self._apply_folder_rules_new(acc, records, frules)
+                if folder == "INBOX":
+                    records = self._apply_sorter(acc, records)
                 records = held + records
                 self.db.insert_messages(acc_id, folder, records)
                 changed = True
@@ -396,6 +401,45 @@ class SyncManager:
             return records
         log.info("Bayes: přesunuto do spamu %d zpráv (účet %s)", len(spam), acc["name"])
         moved = set(spam)
+        return [r for r in records if r["uid"] not in moved]
+
+    def _apply_sorter(self, acc, records):
+        """Nové zprávy, které neřadí ruční umístění ani explicitní pravidlo, zařadí filtr podobnosti, když si
+        je dost jistý: do Nedůležitých / Notifikací (podle nastavení), do složky jen se zapnutým „řadit
+        automaticky“. Vrací zbylé záznamy (bez zpráv přesunutých do složek)."""
+        try:
+            if not self.sorter.ready():
+                return records
+            settings = self.db.settings()
+            folders = {f"folder:{f['id']}": f for f in self.db.user_folders() if f["account_id"] and f["auto_sort"]}
+            explicit = self.db.categorizer(marks=False)
+            to_folder = {}
+            for r in records:
+                if r.get("deleted") or explicit(r):
+                    continue
+                guess = self.sorter.predict(r)
+                if not guess or guess[1] < sorter.AUTO_THRESHOLD:
+                    continue
+                cls, score = guess
+                if cls in db_module.CATEGORIES and settings.get(f"sorter_{cls}"):
+                    self.sorter.remember(r, cls, score)
+                elif cls in folders:
+                    to_folder.setdefault(cls, []).append((r, score))
+        except Exception:
+            log.exception("Filtr podobnosti selhal")
+            return records
+        moved = set()
+        for cls, items in to_folder.items():
+            try:
+                done = set(self.move_messages(acc, "INBOX", [r["uid"] for r, _ in items], folders[cls]))
+            except Exception as e:  # zůstanou v doručené poště
+                self._error(acc, e)
+                continue
+            for r, score in items:
+                if r["uid"] in done:
+                    self.sorter.remember(r, cls, score)
+            moved |= done
+            log.info("Filtr podobnosti: do složky %s přesunuto %d zpráv", folders[cls]["name"], len(done))
         return [r for r in records if r["uid"] not in moved]
 
     def _trusted_authserv(self, acc):
