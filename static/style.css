@@ -621,7 +621,11 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }  /* místo
 .settings-main #accountForm { padding: 0; }
 .settings-main #accountForm h2 { font-size: 15px; }
 .settings-main #accountForm #accountCancel { display: none; }
-#messageHead .why-btn { position: absolute; top: 0; right: 0; }
+#messageHead .why-btn { position: absolute; top: 0; right: 0; display: flex; align-items: center; padding: 5px; }
+.why-btn svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
 #messageHead:has(.why-btn) h2 { padding-right: 32px; }
 .why-body p { margin: 0 0 6px; }
 .why-body ul { margin: 0 0 10px; padding-left: 20px; font-size: 13px; }

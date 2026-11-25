@@ -1320,7 +1320,7 @@ function placementButton(p, todo) {
   if (!info) return '';
   const title = info.map(x => [x.text, ...(x.list || [])].join('\n')).join('\n');
   return `<button type="button" class="icon-btn why-btn" data-act="why" title="${esc(title)}"
-    aria-label="${esc(t('placement.title'))}">ⓘ</button>`;
+    aria-label="${esc(t('placement.title'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>`;
 }
 
 function showPlacementInfo() {
