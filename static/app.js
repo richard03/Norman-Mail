@@ -911,16 +911,16 @@ function renderReader() {
   const role = folderRole(accountId, data.folder);
   const folderNote = role && role !== 'inbox'
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
-  const placementNote = placementTag(data.placement, data.todo);
 
   // záhlaví je společné pro obsah, akce i kontext
   $('#messageHead').hidden = false;
   $('#messageHead').innerHTML = `
+      ${placementButton(data.placement, data.todo)}
       <h2>${esc(shownSubject(data.subject))}</h2>
       <div class="meta">
         ${line(t('message.from'), data.from)}${line(t('message.to'), data.to)}${line(t('message.cc'), data.cc)}
         <div><span class="muted">${fmtFull(data.date)}</span>
-          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${placementNote}</div>
+          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote}</div>
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
       ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
@@ -973,6 +973,7 @@ $('#messageHead').addEventListener('click', async e => {
     return renderReader();
   }
   if (e.target.closest('[data-act="unsnooze"]') && state.current?.data) return unsnooze(state.current);
+  if (e.target.closest('[data-act="why"]') && state.current?.data) return showPlacementInfo();
   if (e.target.closest('[data-act="suggest"]') && state.current?.data?.suggestion) {
     const sg = state.current.data.suggestion;
     return moveItems([itemOf(state.current)], sg.type === 'ufolder' ? { type: 'ufolder', id: sg.id }
@@ -1297,18 +1298,37 @@ function className(cls) {
   return CATEGORIES[cls]?.title || cls;
 }
 
-/** Štítek „proč je zpráva tady“ v záhlaví: ručně přesunutá, pravidlo, nebo pole Komu / kopie. */
-function placementTag(p, todo) {
-  if (!p || todo) return '';
-  const text = p.layer === 'manual' ? t('placement.manual')
-    : p.layer === 'bayes' ? t('placement.bayes', { target: className(p.cls), score: Math.round(p.score * 100) })
-    : p.layer === 'rule' && p.rules.length ? t('placement.rule', { rule: ruleText(p.rules[0]) })
-    : p.layer === 'default' ? t(`placement.default.${p.target}`) : '';
-  if (!text) return '';
-  let title = p.layer === 'rule' ? p.rules.map(ruleText).join('; ') : t(`placement.${p.layer}Note`);
-  if (p.layer === 'bayes' && p.tokens?.length)
-    title += '\n' + t('placement.bayesTokens', { tokens: p.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') });
-  return `<span class="tag placement ${p.cls === 'spam' ? 'spam' : ''}" title="${esc(title)}">${esc(text)}</span>`;
+/** Vysvětlení, proč je zpráva tady (jen to, co se týká jejího místa): [{text, list?}] nebo null. */
+function placementInfo(p, todo) {
+  if (!p || todo) return null;
+  if (p.layer === 'manual') return [{ text: t('placement.manualInfo') }];
+  if (p.layer === 'rule' && p.rules.length)
+    return [{ text: tn('placement.ruleInfo', p.rules.length), list: p.rules.map(ruleText) }];
+  if (p.layer === 'bayes') {
+    const out = [{ text: t('placement.bayesInfo', { target: className(p.cls), score: Math.round(p.score * 100) }) }];
+    if (p.tokens?.length) out.push({ text: t('placement.bayesTokensInfo'),
+      list: p.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`) });
+    return out;
+  }
+  if (p.layer === 'default') return [{ text: t(`placement.defaultInfo.${p.target}`) }];
+  return null;
+}
+
+/** Ikona „info“ vpravo nahoře v záhlaví zprávy: tooltip s vysvětlením, kliknutím okno. */
+function placementButton(p, todo) {
+  const info = placementInfo(p, todo);
+  if (!info) return '';
+  const title = info.map(x => [x.text, ...(x.list || [])].join('\n')).join('\n');
+  return `<button type="button" class="icon-btn why-btn" data-act="why" title="${esc(title)}"
+    aria-label="${esc(t('placement.title'))}">ⓘ</button>`;
+}
+
+function showPlacementInfo() {
+  const info = placementInfo(state.current?.data?.placement, state.current?.data?.todo);
+  if (!info) return;
+  $('#whyBody').innerHTML = info.map(x => `<p>${esc(x.text)}</p>`
+    + (x.list ? `<ul>${x.list.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '')).join('');
+  $('#whyDialog').showModal();
 }
 
 /** Popis pravidla z náhledu přesunu: „Notifikace: odesílatel x@y.cz, předmět obsahuje „faktura““. */

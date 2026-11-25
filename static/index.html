@@ -187,6 +187,17 @@
 </dialog>
 
 <!-- Upozornění / potvrzení (přesun, který by zprávy hned smazal; definitivní smazání) -->
+<dialog id="whyDialog" class="confirm">
+  <form method="dialog">
+    <h2 data-i18n="placement.title"></h2>
+    <div id="whyBody" class="why-body"></div>
+    <div class="dialog-actions">
+      <span class="spacer"></span>
+      <button value="ok" class="btn primary" data-i18n="common.close"></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="confirmDialog" class="confirm">
   <form method="dialog">
     <h2 id="confirmTitle" data-i18n="confirm.warning"></h2>
@@ -387,29 +398,6 @@
           </div>
         </section>
         <section class="app-sub">
-          <h3 class="sub-head" data-i18n="settings.bayes.title"></h3>
-          <div class="app-sub-body">
-            <div>
-              <p class="note" data-i18n="settings.bayes.intro"></p>
-              <p class="note" data-i18n="settings.bayes.order"></p>
-              <div class="options">
-                <label class="option"><input type="checkbox" data-setting="bayes_enabled">
-                  <span data-i18n="settings.bayes.enabled"></span></label>
-                <label class="option select-option"><span data-i18n="settings.spam.sensitivity"></span>
-                  <select id="bayesSensitivity">
-                    <option value="high" data-i18n="settings.spam.sensitivityHigh"></option>
-                    <option value="medium" data-i18n="settings.spam.sensitivityMedium"></option>
-                    <option value="low" data-i18n="settings.spam.sensitivityLow"></option>
-                  </select></label>
-              </div>
-              <p id="bayesStatus" class="note"></p>
-            </div>
-            <div class="app-sub-buttons">
-              <button type="button" class="btn" id="bayesReset" data-i18n="settings.spam.bayesReset"></button>
-            </div>
-          </div>
-        </section>
-        <section class="app-sub">
           <h3 class="sub-head" data-i18n="settings.update.title"></h3>
           <div class="app-sub-body">
             <div>
@@ -451,6 +439,29 @@
             <div class="app-sub-buttons">
               <button type="button" class="btn" data-shortcut="programs" data-i18n="settings.shortcut.addStart"></button>
               <button type="button" class="btn" data-shortcut="desktop" data-i18n="settings.shortcut.addDesktop"></button>
+            </div>
+          </div>
+        </section>
+        <section class="app-sub">
+          <h3 class="sub-head" data-i18n="settings.bayes.title"></h3>
+          <div class="app-sub-body">
+            <div>
+              <p class="note" data-i18n="settings.bayes.intro"></p>
+              <p class="note" data-i18n="settings.bayes.order"></p>
+              <div class="options">
+                <label class="option"><input type="checkbox" data-setting="bayes_enabled">
+                  <span data-i18n="settings.bayes.enabled"></span></label>
+                <label class="option select-option"><span data-i18n="settings.spam.sensitivity"></span>
+                  <select id="bayesSensitivity">
+                    <option value="high" data-i18n="settings.spam.sensitivityHigh"></option>
+                    <option value="medium" data-i18n="settings.spam.sensitivityMedium"></option>
+                    <option value="low" data-i18n="settings.spam.sensitivityLow"></option>
+                  </select></label>
+              </div>
+              <p id="bayesStatus" class="note"></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" id="bayesReset" data-i18n="settings.spam.bayesReset"></button>
             </div>
           </div>
         </section>
