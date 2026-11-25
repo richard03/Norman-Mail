@@ -738,7 +738,7 @@ placement.manualInfo: "You moved this message here by hand. Rules and the Bayesi
 placement.ruleInfo:
   one: "A rule filed the message here:"
   other: "These rules file the message here:"
-placement.bayesInfo: "The Bayesian filter filed the message here ({target}) with {score} % certainty, based on similarity to your earlier decisions. If you move it by hand, the filter learns from it."
+placement.bayesInfo: "The Bayesian filter filed the message into \"{target}\" folder with {score} % certainty, based on similarity to your earlier decisions. If you move it by hand, the filter learns from it."
 placement.bayesTokensInfo: "Strongest signs:"
-placement.defaultInfo.important: "No rule applies – messages where you are in To go to Important."
-placement.defaultInfo.fyi: "No rule applies – messages where you are only in Cc go to For your information."
+placement.defaultInfo.important: "No rule applies – messages where you are in \"To:\" go to \"Important\" folder."
+placement.defaultInfo.fyi: "No rule applies – messages where you are only in \"Cc:\" go to \"For your information\" folder."
