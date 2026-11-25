@@ -650,13 +650,6 @@ def message_unsnooze(acc_id, uid):
     return jsonify(ok=True)
 
 
-def _unmark_others(rec, category):
-    """Zruší označení zprávy jinou kategorií nebo jako důležitá (to by mělo před pravidlem přednost)."""
-    for mark in db.MARKS:
-        if mark != category:
-            database.unmark_message(rec, mark)
-
-
 def _message_record(acc, acc_id, folder, uid):
     """Záznam zprávy z databáze, jinak hlavičky ze serveru."""
     rec = database.message(acc_id, folder, uid)
@@ -672,13 +665,16 @@ def _message_record(acc, acc_id, folder, uid):
 
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/important")
 def message_important(acc_id, uid):
-    """Tlačítko Důležité (ve Vzít na vědomí, Nedůležitých a Notifikacích): zpráva přestane patřit do kategorií
-    (zruší se i pravidla, která jí odpovídají – jako dřív „Není nedůležité“) a je označená jako důležitá."""
+    """Tlačítko Důležité (ve Vzít na vědomí, Nedůležitých a Notifikacích): zpráva je ručně umístěná do
+    Důležitých (pravidla ji už nepřesunou). scope=release navíc zruší pravidla, která ji řadí jinam."""
     acc = account_or_404(acc_id)
-    folder = folder_arg(request.get_json(force=True))
+    data = request.get_json(force=True)
+    folder = folder_arg(data)
+    if (data.get("scope") or "message") not in ("message", "release"):
+        abort(400, tr("err.unknownCategory"))
     rec = _message_record(acc, acc_id, folder, uid)
-    for cat in db.CATEGORIES:
-        database.uncategorize(rec, cat)
+    if data.get("scope") == "release":
+        database.delete_rules(database.matching_rules(rec))
     database.mark_message(rec, "important")
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
@@ -703,17 +699,16 @@ def message_categorize(acc_id, uid):
     subject = rec.get("base_subject") or ""
     if not data.get("value", True):
         database.uncategorize(rec, category)
-    elif scope == "message":
-        database.mark_message(rec, category)
-    elif scope == "custom":
-        _unmark_others(rec, category)  # označení zprávy by mělo před pravidlem přednost
-        database.add_category_rule(category, **rule)
     else:
-        value = sender if scope == "sender" else subject
-        if not value:
-            raise mail.MailError(tr("err.noSender") if scope == "sender" else tr("err.noSubject"))
-        _unmark_others(rec, category)  # označení zprávy by mělo před pravidlem přednost
-        database.add_category_rule(category, **{scope: value})
+        if scope == "custom":
+            database.add_category_rule(category, **rule)
+        elif scope != "message":
+            value = sender if scope == "sender" else subject
+            if not value:
+                raise mail.MailError(tr("err.noSender") if scope == "sender" else tr("err.noSubject"))
+            database.replace_simple_rules(scope, value, ("category", category))
+            database.add_category_rule(category, **{scope: value})
+        database.mark_message(rec, category)  # ruční umístění: zprávu už automatika nepřesune
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
     return jsonify(ok=True, sender=sender, subject=subject, view=view)
@@ -881,6 +876,8 @@ def message_to_folder(acc_id, uid):
     if not data.get("value"):  # původní chování: pravidlo podle odesílatele zprávy
         data = {**data, "kind": "sender", "value": row["from"][0]["addr"] if row and row["from"] else ""}
     kind, value = _rule_arg(data)
+    if kind in ("sender", "subject"):
+        database.replace_simple_rules(kind, value, ("folder", target["id"]))
     rule_id = database.add_folder_rule(target["id"], kind, value, bool(data.get("after_read")))
     in_target = target["account_id"] == acc_id and target["imap_name"] == folder
     if row and not in_target and db.rule_matches({"kind": kind, "value": value}, row):
@@ -901,6 +898,23 @@ def message_to_folder(acc_id, uid):
 MAX_BULK = 5000
 INBOX_VIEWS = ("important", "fyi", "unimportant", "notifications", "all")
 CATEGORY_SETTING = {"notifications": "notify", "unimportant": "unimp"}  # předpona klíčů nastavení
+
+
+# Rozsah ručního přesunu podle cíle: jen tyto zprávy, pravidlo (odesílatel / předmět / vlastní),
+# nebo zrušit pravidla, která zprávy řadí jinam (cíle bez vlastních pravidel: Důležité, Vzít na vědomí, doručená).
+MOVE_SCOPES = {"category": ("message", "sender", "subject", "custom"), "inbox": ("message", "release"),
+               "ufolder": ("message", "sender", "subject"), "spam": ("message", "sender"), "trash": ("message",)}
+
+
+def _scope_kind(target):
+    if target["type"] == "inbox":
+        return "category" if target["view"] in db.CATEGORIES else "inbox"
+    return target["type"]
+
+
+def _common_subject(items):
+    subjects = {(i["rec"] or {}).get("base_subject") or "" for i in items}
+    return subjects.pop() if len(subjects) == 1 and "" not in subjects else ""
 
 
 def _parse_move(data):
@@ -958,6 +972,21 @@ def _parse_move(data):
     return items, target
 
 
+def _move_rules(items, target):
+    """Pravidla, která přesouvané zprávy řadí jinam než do cíle (pro dialog: co se nahradí / dá zrušit)."""
+    if target["type"] == "trash":
+        return []
+    here = {"inbox": target.get("view"), "spam": "spam", "ufolder": (target.get("folder") or {}).get("id")}
+    seen, out = set(), []
+    for i in items:
+        for r in database.matching_rules(i["rec"]) if i["rec"] else []:
+            if (r["type"], r["id"]) in seen or r["target"] == here[target["type"]]:
+                continue
+            seen.add((r["type"], r["id"]))
+            out.append(r)
+    return out
+
+
 def _move_warnings(items, target):
     """Co by se se zprávami stalo hned po přesunu (smazání, spam, přesun pravidlem) – pro varování v UI."""
     warnings = []
@@ -979,7 +1008,6 @@ def _move_warnings(items, target):
     view = target["view"]
     senders = {i["sender"] for i in items if i["sender"]}
     new_senders = senders - database.category_senders(view) if view in db.CATEGORIES else set()
-    category_of = database.categorizer()
 
     def category_after(i):
         """Kategorie zprávy po přesunu (přesun do pohledu Notifikace / Nedůležité / Důležité ji mění)."""
@@ -987,19 +1015,9 @@ def _move_warnings(items, target):
             return view
         if view in ("important", "fyi"):
             return None
-        return category_of(i["rec"]) if i["rec"] else None
-    arriving = [i for i in items if not i["stays"]]
-    rules = sorted(database.folder_rules_active(), key=lambda r: db.RULE_KINDS.index(r["kind"]))
-    by_folder, moved_away = {}, set()
-    for i in arriving:
-        if i["rec"] is None or (i["account_id"], i["folder"], i["uid"]) in moved_away:
-            continue
-        rule = next((r for r in rules if (not r["after_read"] or i["seen"]) and db.rule_matches(r, i["rec"])), None)
-        if rule:
-            by_folder[rule["name"]] = by_folder.get(rule["name"], 0) + 1
-            moved_away.add((i["account_id"], i["folder"], i["uid"]))
-    for name, n in by_folder.items():
-        warnings.append(tr("warn.folderRule", count=n, folder=name))
+        return database.natural_view(i["rec"], i["dst"][0]) if i["rec"] else None
+    # zprávy přesunuté do doručené pošty jsou ručně umístěné – pravidla složek je už nepřesunou
+    moved_away = set()
     now = time.time()
 
     def doomed(cat, seen, date, snoozed):
@@ -1029,40 +1047,63 @@ def _move_warnings(items, target):
 
 @app.post("/api/messages/move/preview")
 def messages_move_preview():
+    """Co by se se zprávami stalo (varování) a podklady pro dialog rozsahu přesunu."""
     items, target = _parse_move(request.get_json(force=True))
-    return jsonify(warnings=_move_warnings(items, target), count=len(items))
+    own = {a["email"].lower() for a in store.list_public()}
+    senders = sorted({i["sender"] for i in items if i["sender"]} - own)
+    return jsonify(warnings=_move_warnings(items, target), count=len(items), senders=senders,
+                   subject=_common_subject(items), rules=_move_rules(items, target),
+                   scopes=MOVE_SCOPES[_scope_kind(target)])
 
 
 @app.post("/api/messages/move")
 def messages_move():
     """Přesun / smazání více zpráv. Databáze (a tím UI) hned, server na pozadí."""
-    items, target = _parse_move(request.get_json(force=True))
-    senders = {i["sender"] for i in items if i["sender"]}
+    data = request.get_json(force=True)
+    items, target = _parse_move(data)
+    scope = data.get("scope") or "message"
+    if scope not in MOVE_SCOPES[_scope_kind(target)]:
+        abort(400, tr("err.unknownTarget"))
     own = {a["email"].lower() for a in store.list_public()}
-    if target["type"] == "inbox" and target["view"] in db.CATEGORIES:
-        for s in senders - own:
-            database.add_category_rule(target["view"], sender=s)
-        for i in items:  # jiné označení zprávy (druhá kategorie, důležitá) by mělo před pravidlem přednost
-            if i["rec"]:
-                _unmark_others(i["rec"], target["view"])
-    elif target["type"] == "inbox" and target["view"] in ("important", "fyi"):
+    senders = sorted({i["sender"] for i in items if i["sender"]} - own)  # z vlastní adresy pravidlo neděláme
+    subject = _common_subject(items)
+    if scope == "sender" and not senders:
+        raise mail.MailError(tr("err.noSender"))
+    if scope == "subject" and not subject:
+        raise mail.MailError(tr("err.noSubject"))
+    view = target.get("view")
+    # 1) pravidla podle zvoleného rozsahu
+    if target["type"] == "inbox" and view in db.CATEGORIES:
+        keep = ("category", view)
+        if scope == "custom":
+            database.add_category_rule(view, **_category_rule_fields(data.get("rule") or {}))
+        elif scope in ("sender", "subject"):
+            for value in senders if scope == "sender" else [subject]:
+                database.replace_simple_rules(scope, value, keep)
+                database.add_category_rule(view, **{scope: value})
+    elif target["type"] == "inbox" and scope == "release":
         for i in items:
-            for cat in db.CATEGORIES:
-                if i["rec"]:
-                    database.uncategorize(i["rec"], cat)
-                elif i["sender"]:
+            if i["rec"]:
+                database.delete_rules(database.matching_rules(i["rec"]))
+            elif i["sender"]:
+                for cat in db.CATEGORIES:
                     database.remove_category_sender(cat, i["sender"])
-            if i["rec"] and target["view"] == "important":  # i kopie (jinak by zůstala ve Vzít na vědomí)
-                database.mark_message(i["rec"], "important")
-            elif i["rec"]:
-                database.unmark_message(i["rec"], "important")
-    if target["type"] == "spam":
-        for s in senders - own:
+                database.remove_spam_senders({i["sender"]})
+    elif target["type"] == "ufolder" and scope in ("sender", "subject"):
+        fid = target["folder"]["id"]
+        for value in senders if scope == "sender" else [subject]:
+            database.replace_simple_rules(scope, value, ("folder", fid))
+            database.add_folder_rule(fid, scope, value)
+    elif target["type"] == "spam" and scope == "sender":
+        for s in senders:
+            database.replace_simple_rules("sender", s, ("spam", None))
             database.add_spam_rule(s)
-    elif target["type"] == "inbox":  # „Není spam“ / přetažení do doručené pošty – jinak by se zprávy hned vrátily
-        database.remove_spam_senders(senders)
-    else:
-        database.remove_spam_senders({i["sender"] for i in items if i["from_spam"]})
+    # 2) zprávy v doručené poště jsou ručně umístěné – pravidla ani filtr je už nepřesunou
+    if target["type"] == "inbox":
+        for i in items:
+            if i["rec"]:
+                database.mark_message(i["rec"], view if view in db.MARKS else
+                                      database.natural_view(i["rec"], i["dst"][0]))
     groups = {}
     for i in items:
         if not i["stays"] or target["type"] == "trash":  # ze Smazaných se maže natrvalo
@@ -1333,7 +1374,9 @@ def sync_now():
 def message_spam(acc_id, uid):
     """Přesun do spamu: z UI hned, na serveru na pozadí; pak hromadný přesun starších zpráv odesílatele."""
     acc = account_or_404(acc_id)
-    folder = folder_arg(request.get_json(force=True))
+    data = request.get_json(force=True)
+    folder = folder_arg(data)
+    with_rule = (data.get("scope") or "sender") == "sender"  # message = jen tato zpráva, bez pravidla
     row = database.message(acc_id, folder, uid)
     if row is None:  # zpráva není v databázi (např. výsledek hledání) – odesílatele zjistíme na serveru
         with pool.get(acc) as M:
@@ -1346,7 +1389,8 @@ def message_spam(acc_id, uid):
     ts = row["date"]
     own = {a["email"].lower() for a in store.list_public()}
     job_id = None
-    if sender and sender not in own:  # z vlastní adresy pravidlo ani hromadný přesun neděláme
+    if with_rule and sender and sender not in own:  # z vlastní adresy pravidlo ani hromadný přesun neděláme
+        database.replace_simple_rules("sender", sender, ("spam", None))
         database.add_spam_rule(sender)
         database.add_rule_hits(sender)
         job_id = uuid.uuid4().hex[:12]

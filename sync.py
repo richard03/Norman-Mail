@@ -251,12 +251,18 @@ class SyncManager:
                 with self.pool.get(acc) as M:  # zámek spojení se uvolňuje mezi dávkami
                     mail._select(M, folder, readonly=True)
                     records = mail.fetch_header_records(M, chunk)
+                held = []
+                if folder == "INBOX":  # ručně umístěné zprávy (např. vrácené ze složky) automatika nepřesouvá
+                    locked = self.db.locked_keys(records)
+                    held = [r for r in records if db_module.message_key(r) in locked]
+                    records = [r for r in records if db_module.message_key(r) not in locked]
                 if rules:
-                    records = self._apply_spam_rules(acc, folder, records, rules)
+                    records = self._apply_spam_rules(acc, folder, records, rules, frules)
                 if bayes_on:
                     records = self._apply_bayes(acc, records)
                 if frules:
                     records = self._apply_folder_rules_new(acc, records, frules)
+                records = held + records
                 self.db.insert_messages(acc_id, folder, records)
                 changed = True
                 if n == 0 and folder == "INBOX":
@@ -315,12 +321,16 @@ class SyncManager:
         self.db.bump()
         return n
 
-    def _apply_spam_rules(self, acc, folder, records, rules):
+    def _apply_spam_rules(self, acc, folder, records, rules, frules=()):
         """Nové zprávy od odesílatelů z pravidel přesune do spamu (dřív, než se ukážou v seznamu).
-        Vrací zbylé záznamy."""
+        Zprávy, které řadí jiné explicitní pravidlo (kategorie, složka), mají přednost – Spam je
+        nejméně důležitý cíl. Vrací zbylé záznamy."""
         hits = {}
+        category_of = self.db.categorizer(marks=False)
         for r in records:
             sender = next((a["addr"].lower() for a in r["from"] if a["addr"].lower() in rules), None)
+            if sender and (category_of(r) or any(db_module.rule_matches(x, r) for x in frules)):
+                continue
             if sender and not r.get("deleted"):
                 hits.setdefault(sender, []).append(r["uid"])
         if not hits:
@@ -354,8 +364,9 @@ class SyncManager:
         # schránky (DMARC/DKIM). Poskytovatel, který ověření nezapisuje, nedává jak rozlišit – tam jako dřív.
         verified = (lambda r: r.get("auth_ok") and r.get("auth_id") == trusted) if trusted else (lambda r: True)
         frules = self.db.folder_rules_active()
+        category_of = self.db.categorizer(marks=False)  # explicitní pravidla mají přednost před filtrem
         cands = [r for r in fresh if not (sender(r) in safe and verified(r))
-                 and not any(db_module.rule_matches(x, r) for x in frules)]
+                 and not any(db_module.rule_matches(x, r) for x in frules) and not category_of(r)]
         if not cands:
             return records
         try:

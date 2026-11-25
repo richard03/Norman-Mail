@@ -72,9 +72,12 @@ CREATE TABLE IF NOT EXISTS contacts(
 # Pravidlo má až tři podmínky (odesílatel, příjemce v Komu / Kopii, část předmětu); zpráva musí splnit všechny
 # vyplněné. (Dřívější tabulky notify_rules / unimportant_rules se jednou převedly do category_rules.)
 CATEGORIES = ("notifications", "unimportant")
-# Označení jedné zprávy (message_marks): kategorie, nebo „důležitá“ – ta zprávu přesune ze Vzít na vědomí
-# (i z kategorie) do Důležitých; stejně jako ostatní označení má přednost před pravidly.
-MARKS = CATEGORIES + ("important",)
+# Když zprávě odpovídají pravidla obou kategorií, vyhrává důležitější (Důležité > Nedůležité > Notifikace > Spam).
+CATEGORY_PRIORITY = ("unimportant", "notifications")
+# Ruční umístění zprávy (message_marks): kategorie, „důležitá“ (Důležité i z kopie) nebo „fyi“ (Vzít na
+# vědomí). Má přednost před pravidly a zprávu zamyká: automatické řazení (pravidla kategorií, složek a spamu,
+# bayesovský filtr) už se jí netýká.
+MARKS = CATEGORIES + ("important", "fyi")
 CATEGORY_RULE_FIELDS = ("sender", "recipient", "subject")
 CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || ',') > 0)"
                        " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
@@ -126,11 +129,14 @@ def category_rule_matches(rule, rec) -> bool:
     return not rule["subject"] or rule["subject"] in (rec.get("base_subject") or "")
 
 
-# Kategorie zprávy (jediný výraz, vyhodnotí se jednou): označení jedné zprávy má přednost před pravidly;
-# když zprávě odpovídají pravidla obou kategorií, vyhrávají Notifikace. NULL = žádná kategorie.
+# Kategorie zprávy (jediný výraz, vyhodnotí se jednou): ruční umístění má přednost před pravidly;
+# když zprávě odpovídají pravidla obou kategorií, vyhrává důležitější cíl (Nedůležité před Notifikacemi).
+# NULL = žádná kategorie.
 CATEGORY = (f"COALESCE((SELECT k.category FROM message_marks k WHERE k.key={MSG_KEY}), "
-            f"CASE WHEN {_category_rule('notifications')} THEN 'notifications' "
-            f"WHEN {_category_rule('unimportant')} THEN 'unimportant' END)")
+            f"CASE WHEN {_category_rule('unimportant')} THEN 'unimportant' "
+            f"WHEN {_category_rule('notifications')} THEN 'notifications' END)")
+# Zpráva ručně umístěná uživatelem – automatické řazení ji nepřesouvá.
+IS_LOCKED = f"EXISTS (SELECT 1 FROM message_marks k WHERE k.key={MSG_KEY})"
 IS_NOTIFICATION = f"({CATEGORY}) IS 'notifications'"
 IS_UNIMPORTANT = f"({CATEGORY}) IS 'unimportant'"
 CATEGORY_FILTERS = {"notifications": IS_NOTIFICATION, "unimportant": IS_UNIMPORTANT}
@@ -147,7 +153,8 @@ VIEW_FILTERS = {
     "todo": IS_TODO,
     # Důležité: přímo pro mě, nebo zpráva ručně označená jako důležitá (tlačítko Důležité)
     "important": f"NOT {IS_TODO} AND (({CATEGORY}) IS 'important' OR (({CATEGORY}) IS NULL AND {IS_DIRECT}))",
-    "fyi": f"NOT {IS_TODO} AND ({CATEGORY}) IS NULL AND NOT {IS_DIRECT}",  # Vzít na vědomí: kopie / skrytá kopie
+    # Vzít na vědomí: kopie / skrytá kopie, nebo zpráva sem ručně přesunutá
+    "fyi": f"NOT {IS_TODO} AND (({CATEGORY}) IS 'fyi' OR (({CATEGORY}) IS NULL AND NOT {IS_DIRECT}))",
     "unimportant": f"NOT {IS_TODO} AND {IS_UNIMPORTANT}",
     "notifications": f"NOT {IS_TODO} AND {IS_NOTIFICATION}",
     "all": "1",
@@ -437,6 +444,7 @@ class Database:
                  WHEN m.folder='INBOX' THEN CASE {CATEGORY} WHEN 'notifications' THEN '@view.notifications'
                                                  WHEN 'unimportant' THEN '@view.unimportant'
                                                  WHEN 'important' THEN '@view.important'
+                                                 WHEN 'fyi' THEN '@view.fyi'
                                                  ELSE CASE WHEN {IS_DIRECT} THEN '@view.important' ELSE '@view.fyi' END END
                  WHEN f.role='trash' THEN '@view.trash' WHEN f.role='junk' THEN '@view.spam'
                  ELSE COALESCE(f.display, m.folder) END AS folder_label,
@@ -868,11 +876,11 @@ class Database:
 
     def folder_rule_matches(self, folder_id) -> dict:
         """{account_id: {uid: id pravidla}} zpráv v doručené poště, které pravidla složky přesouvají
-        (pravidla „až po přečtení“ jen přečtené; odložené se vynechávají)."""
+        (pravidla „až po přečtení“ jen přečtené; odložené a ručně umístěné se vynechávají)."""
         sql = f"""SELECT m.account_id, m.uid, r.id FROM messages m
                   JOIN user_folder_rules r ON r.folder_id=? AND {RULE_MATCH} AND (r.after_read=0 OR m.seen=1)
                   LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
-                  WHERE m.folder='INBOX' AND s.uid IS NULL"""
+                  WHERE m.folder='INBOX' AND s.uid IS NULL AND NOT {IS_LOCKED}"""
         out = {}
         for acc_id, uid, rule_id in self._q(sql, (folder_id,)):
             out.setdefault(acc_id, {}).setdefault(uid, rule_id)
@@ -1072,18 +1080,81 @@ class Database:
         if ids:
             self._q(f"DELETE FROM category_rules WHERE id IN ({','.join('?' * len(ids))})", ids)
 
-    def categorizer(self):
-        """Funkce zpráva → "notifications" / "unimportant" / None (stejná logika jako IS_NOTIFICATION
-        a IS_UNIMPORTANT v SQL) – pro zprávy, které nejsou v databázi."""
-        marks = dict(self._q("SELECT key, category FROM message_marks"))
+    def categorizer(self, marks=True):
+        """Funkce zpráva → kategorie / ruční značka / None (stejná logika jako CATEGORY v SQL) – pro zprávy,
+        které nejsou v databázi. marks=False: jen podle pravidel (kam by zprávu zařadila automatika)."""
+        marks = dict(self._q("SELECT key, category FROM message_marks")) if marks else {}
         rules = {cat: self._q("SELECT * FROM category_rules WHERE category=?", (cat,)) for cat in CATEGORIES}
 
         def category(rec):
             mark = marks.get(message_key(rec))
             if mark:
                 return mark
-            return next((cat for cat in CATEGORIES if any(category_rule_matches(r, rec) for r in rules[cat])), None)
+            return next((cat for cat in CATEGORY_PRIORITY if any(category_rule_matches(r, rec) for r in rules[cat])),
+                        None)
         return category
+
+    def locked_keys(self, recs) -> set:
+        """Klíče zpráv (z recs), které uživatel ručně umístil – automatické řazení je nepřesouvá."""
+        keys = sorted({message_key(r) for r in recs})
+        out = set()
+        for i in range(0, len(keys), 500):
+            part = keys[i:i + 500]
+            out |= {r[0] for r in self._q(
+                f"SELECT key FROM message_marks WHERE key IN ({','.join('?' * len(part))})", part)}
+        return out
+
+    def is_direct(self, rec, acc_id) -> bool:
+        """Je některá z mých adres účtu v poli Komu? (stejně jako IS_DIRECT)"""
+        mine = {r[0] for r in self._q("SELECT email FROM my_addresses WHERE account_id=?", (acc_id,))}
+        return any((a.get("addr") or "").lower() in mine for a in rec.get("to") or [])
+
+    def natural_view(self, rec, acc_id) -> str:
+        """Pohled doručené pošty, kam by zprávu zařadila pravidla kategorií (bez ručních značek), jinak
+        Důležité / Vzít na vědomí podle pole Komu."""
+        return self.categorizer(marks=False)(rec) or ("important" if self.is_direct(rec, acc_id) else "fyi")
+
+    def matching_rules(self, rec) -> list:
+        """Všechna explicitní pravidla, která zprávě odpovídají: kategorie, spam a složky aplikace.
+        [{type: category|spam|folder, id, target (kategorie / id složky), sender, recipient, subject, folder}]"""
+        out = []
+        for r in self._q("SELECT * FROM category_rules"):
+            if category_rule_matches(r, rec):
+                out.append({"type": "category", "id": r["id"], "target": r["category"], "sender": r["sender"],
+                            "recipient": r["recipient"], "subject": r["subject"]})
+        senders = {(a.get("addr") or "").lower() for a in rec.get("from") or []}
+        for r in self._q("SELECT * FROM spam_rules WHERE kind='sender'"):
+            if r["value"] in senders:
+                out.append({"type": "spam", "id": r["id"], "target": "spam", "sender": r["value"],
+                            "recipient": "", "subject": ""})
+        for r in self._q("SELECT r.*, f.name FROM user_folder_rules r JOIN user_folders f ON f.id=r.folder_id"):
+            if rule_matches(r, rec):
+                out.append({"type": "folder", "id": r["id"], "target": r["folder_id"], "folder": r["name"],
+                            "sender": r["value"] if r["kind"] == "sender" else "",
+                            "recipient": r["value"] if r["kind"] == "recipient" else "",
+                            "subject": r["value"] if r["kind"] == "subject" else ""})
+        return out
+
+    def delete_rules(self, rules):
+        """Smaže pravidla ve tvaru z matching_rules."""
+        tables = {"category": "category_rules", "spam": "spam_rules", "folder": "user_folder_rules"}
+        for r in rules:
+            self._q(f"DELETE FROM {tables[r['type']]} WHERE id=?", (r["id"],))
+
+    def replace_simple_rules(self, kind, value, keep):
+        """Před založením pravidla „všechny od odesílatele / s předmětem“ smaže jednoduchá pravidla se stejnou
+        podmínkou, která zprávy posílají jinam (jinak by o zprávách rozhodovala dvě pravidla).
+        kind: sender / subject; keep: ("category", kat.) / ("spam", None) / ("folder", id složky)."""
+        if kind not in ("sender", "subject"):
+            raise ValueError("Invalid parameter.")
+        value = value.lower()
+        other = "subject" if kind == "sender" else "sender"
+        self._q(f"""DELETE FROM category_rules WHERE {kind}=? AND {other}='' AND recipient=''
+                    AND category IS NOT ?""", (value, keep[1] if keep[0] == "category" else None))
+        if kind == "sender" and keep[0] != "spam":
+            self._q("DELETE FROM spam_rules WHERE kind='sender' AND value=?", (value,))
+        self._q("DELETE FROM user_folder_rules WHERE kind=? AND value=? AND folder_id IS NOT ?",
+                (kind, " ".join(value.split()), keep[1] if keep[0] == "folder" else None))
 
     # ------------------------------------------------------------------ kontext
 

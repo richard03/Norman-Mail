@@ -1105,10 +1105,15 @@ async function toggleTodo(cur, btn) {
 /** Důležité: zpráva přestane patřit do kategorií (zruší se i pravidla, která jí odpovídají) a je označená
  *  jako důležitá – i když je jen v kopii. */
 async function markImportant(cur, btn) {
+  const target = { type: 'inbox', view: 'important' };
+  const preview = await movePreview([itemOf(cur)], target);
+  if (!preview || state.current !== cur) return;
+  const scope = await askMoveScope([itemOf(cur)], target, preview);
+  if (!scope || state.current !== cur) return;
   btn.classList.add('busy');
   try {
     const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/important`,
-      { method: 'POST', body: { folder: cur.folder } });
+      { method: 'POST', body: { folder: cur.folder, scope } });
     if (cur.folder === 'INBOX') cur.view = res.view || 'important';
     toast(t('action.markedImportant'));
     if (leavesUnified(cur, cur.view)) leaveListKeepOpen(cur);
@@ -1155,6 +1160,13 @@ async function doAction(act, btn) {
   if (act === 'todo') return toggleTodo(cur, btn);
   if (act === 'snoozeDay' || act === 'snoozeWeek') return snooze(cur, act === 'snoozeDay' ? 1 : 7, btn);
   if (!MOVE_DONE[act]) return;
+  let scope;
+  if (act === 'spam') {
+    const preview = await movePreview([itemOf(cur)], { type: 'spam' });
+    if (!preview || state.current !== cur) return;
+    scope = await askMoveScope([itemOf(cur)], { type: 'spam' }, preview);
+    if (!scope || state.current !== cur) return;
+  }
 
   // Změna se v UI projeví okamžitě; server ji dostane na pozadí (při selhání přijde hlášení
   // a synchronizace zprávu vrátí do seznamu).
@@ -1162,7 +1174,7 @@ async function doAction(act, btn) {
   toast(t(MOVE_DONE[act]));
   try {
     const res = await api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/${act}`,
-      { method: 'POST', body: { folder: cur.folder } });
+      { method: 'POST', body: { folder: cur.folder, scope } });
     if (act === 'spam' && res.job_id) watchSpamJob(res.job_id, res.sender);
   } catch (err) {
     toast(err.message, true);
@@ -1246,23 +1258,78 @@ function baseSubject(s) {
   return s.split(/\s+/).filter(Boolean).join(' ');
 }
 
-/** Dialog „Jen tento email / Vše od tohoto odesílatele / Vše s tímto subjektem“; vrací volbu nebo null. */
-function askCategoryScope(cur, cat) {
-  const m = cur.data || cur.item || {};
-  const sender = m.from?.[0]?.addr || '';
-  const subject = realSubject(m.subject) ? baseSubject(m.subject) : '';
-  $('#categoryTitle').textContent = CATEGORIES[cat].title;
-  $('#categoryMessage').textContent = [sender, subject].filter(Boolean).join(' – ');
-  $('#categorySender').disabled = !sender;
-  $('#categorySenderNote').textContent = sender ? t('category.scopeSender', { sender }) : t('category.noSender');
-  $('#categorySubject').disabled = !subject;
-  $('#categorySubjectNote').textContent = subject ? t('category.scopeSubject', { subject }) : t('category.noSubject');
+/** Zpráva otevřená ve čtení jako položka pro přesun / náhled přesunu. */
+const itemOf = cur => cur.item || { account_id: cur.accountId, folder: cur.folder, uid: cur.uid,
+  from: cur.data?.from, subject: cur.data?.subject, date: cur.data?.date, seen: true };
+
+function moveBody(items, target, extra = {}) {
+  return { target, ...extra, items: items.map(m => ({ account_id: m.account_id, folder: m.folder, uid: m.uid,
+    sender: m.from?.[0]?.addr || '', date: m.date || null, seen: !!m.seen })) };
+}
+
+/** Název cíle přesunu (pro nadpis dialogu). */
+function targetName(target) {
+  if (target.type === 'trash') return t('view.trash');
+  if (target.type === 'spam') return t('view.spam');
+  if (target.type === 'ufolder') return state.userFolders.find(f => f.id === target.id)?.name || '';
+  if (target.account_id) { const a = accById(target.account_id); return a?.name || a?.email || ''; }
+  return target.view && target.view !== 'all' ? t(`view.${target.view}`) : t('folder.inbox');
+}
+
+/** Popis pravidla z náhledu přesunu: „Notifikace: odesílatel x@y.cz, předmět obsahuje „faktura““. */
+function ruleText(r) {
+  const where = r.type === 'folder' ? r.folder : r.type === 'spam' ? t('view.spam') : CATEGORIES[r.target]?.title || r.target;
+  const conds = ['sender', 'recipient', 'subject'].filter(k => r[k]).map(k => t(`scope.cond.${k}`, { value: r[k] }));
+  return `${where}: ${conds.join(', ')}`;
+}
+
+/** Dialog při ručním přesunu: jen tyto zprávy / pravidlo (odesílatel, předmět, vlastní) / zrušit pravidla,
+ *  která zprávy řadí jinam. Ukazuje i varování z náhledu. Vrací zvolený rozsah, nebo null (zrušeno).
+ *  Když není z čeho vybírat a nic nehrozí, rovnou vrátí 'message'. */
+function askMoveScope(items, target, preview) {
+  const { scopes, senders, subject, rules, warnings } = preview;
+  const n = items.length;
+  const simple = (r, field) => ['sender', 'recipient', 'subject'].every(k => k === field ? r[k] : !r[k]);
+  const replaces = list => list.length ? ' ' + t('scope.replaces', { rules: list.map(ruleText).join('; ') }) : '';
+  const choices = [{ value: 'message', label: n === 1 ? t('scope.onlyThis') : tn('scope.onlyThese', n),
+    note: target.type === 'inbox' ? t('scope.onlyNoteLock') : t('scope.onlyNote') }];
+  if (scopes.includes('sender') && senders.length) {
+    choices.push({ value: 'sender',
+      label: senders.length === 1 ? t('scope.allFrom', { sender: senders[0] }) : t('scope.allFromSenders', { count: senders.length }),
+      note: (senders.length > 1 ? senders.join(', ') + ' – ' : '') + t('scope.ruleNote')
+        + replaces(rules.filter(r => simple(r, 'sender') && senders.includes(r.sender))) });
+  }
+  if (scopes.includes('subject') && subject) {
+    choices.push({ value: 'subject', label: t('scope.allWithSubject', { subject }),
+      note: t('scope.ruleNote') + replaces(rules.filter(r => simple(r, 'subject') && r.subject === subject)) });
+  }
+  if (scopes.includes('custom') && n === 1)
+    choices.push({ value: 'custom', label: t('category.customRule'), note: t('category.customRuleNote') });
+  if (scopes.includes('release') && rules.length)
+    choices.push({ value: 'release', label: t('scope.release'), note: rules.map(ruleText).join('; ') });
+  if (choices.length === 1 && !warnings.length) return Promise.resolve('message');
+
+  const m = items[0];
+  $('#categoryTitle').textContent = t('scope.title', { target: targetName(target) });
+  $('#categoryMessage').textContent = n === 1
+    ? [m.from?.[0]?.addr, realSubject(m.subject) ? shownSubject(m.subject) : ''].filter(Boolean).join(' – ')
+    : zprav(n);
+  $('#categoryWarnings').innerHTML = warnings.map(w => `<li>${esc(w)}</li>`).join('');
+  $('#categoryChoices').innerHTML = choices.map(c => `<button value="${c.value}" class="btn"><span>${esc(c.label)}</span>
+    <span class="muted small wrap">${esc(c.note)}</span></button>`).join('');
   const dlg = $('#categoryDialog');
   dlg.returnValue = '';
   dlg.showModal();
   dlg.querySelector('button[value="message"]').focus();
+  const allowed = choices.map(c => c.value);
   return new Promise(resolve => dlg.addEventListener('close', () =>
-    resolve(['message', 'sender', 'subject', 'custom'].includes(dlg.returnValue) ? dlg.returnValue : null), { once: true }));
+    resolve(allowed.includes(dlg.returnValue) ? dlg.returnValue : null), { once: true }));
+}
+
+/** Náhled přesunu ze serveru (varování a podklady pro dialog rozsahu); při chybě toast a null. */
+async function movePreview(items, target) {
+  try { return await api('/api/messages/move/preview', { method: 'POST', body: moveBody(items, target) }); }
+  catch (err) { toast(err.message, true); return null; }
 }
 
 /** Vlastní pravidlo: okno úpravy pravidla předvyplněné ze zprávy. submit(rule) uloží pravidlo (chyba zůstane
@@ -1293,7 +1360,9 @@ function askCustomCategoryRule(cur, cat, submit) {
  *  Důležité nebo druhá kategorie. */
 async function categorize(cur, cat, btn) {
   const value = true;
-  const scope = await askCategoryScope(cur, cat);
+  const preview = await movePreview([itemOf(cur)], { type: 'inbox', view: cat });
+  if (!preview || state.current !== cur) return;
+  const scope = await askMoveScope([itemOf(cur)], { type: 'inbox', view: cat }, preview);
   if (!scope || state.current !== cur) return;
   const send = rule => api(`/api/accounts/${cur.accountId}/messages/${cur.uid}/categorize`,
     { method: 'POST', body: { folder: cur.folder, category: cat, scope, value, rule } });
@@ -1430,26 +1499,33 @@ function targetLabel(target) {
  *  notifikací, spam, pravidla složek, definitivní smazání), a případně zobrazí upozornění. */
 async function moveItems(items, target) {
   if (!items.length) return;
-  const body = { target, items: items.map(m => ({ account_id: m.account_id, folder: m.folder, uid: m.uid,
-    sender: m.from?.[0]?.addr || '', date: m.date || null, seen: !!m.seen })) };
-  let preview;
-  try { preview = await api('/api/messages/move/preview', { method: 'POST', body }); }
-  catch (err) { return toast(err.message, true); }
-  if (preview.warnings.length) {
-    const permanent = target.type === 'trash';
-    const ok = await confirmDialog({
-      title: permanent ? t('move.permanentTitle') : t('confirm.warning'),
-      lines: preview.warnings,
-      question: permanent ? t('move.permanentQuestion') : tn('move.anywayQuestion', items.length),
-      ok: permanent ? t('move.permanentOk') : t('move.anywayOk'),
-    });
-    if (!ok) return;
+  const preview = await movePreview(items, target);
+  if (!preview) return;
+  let scope = 'message';
+  if (target.type === 'trash') {
+    if (preview.warnings.length && !await confirmDialog({
+      title: t('move.permanentTitle'), lines: preview.warnings,
+      question: t('move.permanentQuestion'), ok: t('move.permanentOk'),
+    })) return;
+  } else {
+    // ruční přesun: jen tyto zprávy, nebo pravidlo (zprávy se pak už automaticky nepřesouvají)
+    scope = await askMoveScope(items, target, preview);
+    if (!scope) return;
   }
-  removeItems(items.filter(m => leavesView(m, target)));
-  toast(t('move.result', { action: targetLabel(target), messages: zprav(items.length) }));
-  try {
-    await api('/api/messages/move', { method: 'POST', body });
-  } catch (err) { toast(err.message, true); }
+  const body = moveBody(items, target, { scope });
+  if (scope === 'custom') {  // vlastní pravidlo: chyby (neplatná adresa…) ukazuje okno pravidla
+    const sent = await askCustomCategoryRule({ item: items[0], accountId: items[0].account_id }, target.view,
+      async rule => { await api('/api/messages/move', { method: 'POST', body: { ...body, rule } }); return true; });
+    if (!sent) return;
+    removeItems(items.filter(m => leavesView(m, target)));
+    toast(t('move.result', { action: targetLabel(target), messages: zprav(items.length) }));
+  } else {
+    removeItems(items.filter(m => leavesView(m, target)));
+    toast(t('move.result', { action: targetLabel(target), messages: zprav(items.length) }));
+    try {
+      await api('/api/messages/move', { method: 'POST', body });
+    } catch (err) { toast(err.message, true); }
+  }
   loadList({ quiet: true, keepLoaded: true });
   if (target.type === 'ufolder') loadUserFolders();
   pollSync();

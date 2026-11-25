@@ -134,18 +134,10 @@
 <!-- Nedůležité / Notifikace: jen tato zpráva, nebo pravidlo podle odesílatele / předmětu -->
 <dialog id="categoryDialog" class="confirm category-dialog">
   <form method="dialog">
-    <h2 id="categoryTitle" data-i18n="view.unimportantLabel"></h2>
+    <h2 id="categoryTitle"></h2>
     <p id="categoryMessage" class="note"></p>
-    <div class="category-choices">
-      <button value="message" class="btn"><span data-i18n="category.onlyThisMessage"></span>
-        <span class="muted small" data-i18n="category.onlyThisMessageNote"></span></button>
-      <button value="sender" class="btn" id="categorySender"><span data-i18n="category.allFromSender"></span>
-        <span class="muted small" id="categorySenderNote"></span></button>
-      <button value="subject" class="btn" id="categorySubject"><span data-i18n="category.allWithSubject"></span>
-        <span class="muted small" id="categorySubjectNote"></span></button>
-      <button value="custom" class="btn"><span data-i18n="category.customRule"></span>
-        <span class="muted small" data-i18n="category.customRuleNote"></span></button>
-    </div>
+    <ul id="categoryWarnings" class="warn-lines"></ul>
+    <div class="category-choices" id="categoryChoices"></div>
     <div class="dialog-actions">
       <span class="spacer"></span>
       <button value="cancel" class="btn" data-i18n="common.cancel"></button>
