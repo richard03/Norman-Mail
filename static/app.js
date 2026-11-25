@@ -911,8 +911,6 @@ function renderReader() {
   const role = folderRole(accountId, data.folder);
   const folderNote = role && role !== 'inbox'
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
-  const bayesNote = data.bayes ? `<span class="tag folder spam" title="${esc(t('message.bayesTokens', { tokens:
-      data.bayes.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') }))}">${esc(t('message.bayesScore', { score: Math.round(data.bayes.score * 100) }))}</span>` : '';
   const placementNote = placementTag(data.placement, data.todo);
 
   // záhlaví je společné pro obsah, akce i kontext
@@ -922,7 +920,7 @@ function renderReader() {
       <div class="meta">
         ${line(t('message.from'), data.from)}${line(t('message.to'), data.to)}${line(t('message.cc'), data.cc)}
         <div><span class="muted">${fmtFull(data.date)}</span>
-          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${bayesNote} ${placementNote}</div>
+          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${placementNote}</div>
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
       ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
@@ -1291,16 +1289,26 @@ function suggestionBanner(sg) {
     <button class="link" data-act="suggest">${esc(t('suggest.move'))}</button></div>`;
 }
 
+/** Název třídy bayesovského filtru (spam, inbox, kategorie, folder:<id>). */
+function className(cls) {
+  if (cls === 'spam') return t('view.spam');
+  if (cls === 'inbox') return t('folder.inbox');
+  if (cls?.startsWith('folder:')) return state.userFolders.find(f => f.id === +cls.slice(7))?.name || t('bayes.deletedFolder');
+  return CATEGORIES[cls]?.title || cls;
+}
+
 /** Štítek „proč je zpráva tady“ v záhlaví: ručně přesunutá, pravidlo, nebo pole Komu / kopie. */
 function placementTag(p, todo) {
   if (!p || todo) return '';
   const text = p.layer === 'manual' ? t('placement.manual')
-    : p.layer === 'bayes' ? t('placement.bayes', { score: Math.round(p.score * 100) })
+    : p.layer === 'bayes' ? t('placement.bayes', { target: className(p.cls), score: Math.round(p.score * 100) })
     : p.layer === 'rule' && p.rules.length ? t('placement.rule', { rule: ruleText(p.rules[0]) })
     : p.layer === 'default' ? t(`placement.default.${p.target}`) : '';
   if (!text) return '';
-  const title = p.layer === 'rule' ? p.rules.map(ruleText).join('; ') : t(`placement.${p.layer}Note`);
-  return `<span class="tag placement" title="${esc(title)}">${esc(text)}</span>`;
+  let title = p.layer === 'rule' ? p.rules.map(ruleText).join('; ') : t(`placement.${p.layer}Note`);
+  if (p.layer === 'bayes' && p.tokens?.length)
+    title += '\n' + t('placement.bayesTokens', { tokens: p.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') });
+  return `<span class="tag placement ${p.cls === 'spam' ? 'spam' : ''}" title="${esc(title)}">${esc(text)}</span>`;
 }
 
 /** Popis pravidla z náhledu přesunu: „Notifikace: odesílatel x@y.cz, předmět obsahuje „faktura““. */
@@ -2967,7 +2975,7 @@ $('#bayesSensitivity').addEventListener('change', async e => {
   renderSettingOptions();
 });
 
-// --- bayesovský filtr: stav učení (v Nastavení → Spam)
+// --- bayesovský filtr: stav učení (v Nastavení → O aplikaci)
 let bayesTimer = null;
 async function renderBayesStatus() {
   clearTimeout(bayesTimer);
@@ -2976,10 +2984,13 @@ async function renderBayesStatus() {
   try { st = await api('/api/bayes'); } catch (e) { el.className = 'note bad'; el.textContent = e.message; return; }
   const b = st.bootstrap;
   let text;
+  const list = obj => Object.entries(obj).sort((a, b) => b[1] - a[1])
+    .map(([cls, n]) => `${className(cls)} ${n}`).join(', ');
   if (b.status === 'running') text = t('bayes.learning', { done: b.done, total: b.total || '?' });
-  else if (!st.ready) text = t('bayes.notReady', { spam: st.spam, ham: st.ham, min_spam: st.min_spam, min_ham: st.min_ham });
-  else text = t('bayes.ready', { spam: st.spam, ham: st.ham, tokens: st.tokens }) + ' '
-    + tn('bayes.movedWeek', st.moved_week);
+  else if (!st.ready) text = t('bayes.notReady', { min: st.min_class })
+    + (Object.keys(st.classes).length ? ' ' + t('bayes.learned', { list: list(st.classes) }) : '');
+  else text = t('bayes.learned', { list: list(st.classes) }) + ' ' + t('bayes.words', { count: st.tokens })
+    + (Object.keys(st.moved_week).length ? ' ' + t('bayes.movedWeek', { list: list(st.moved_week) }) : '');
   el.className = 'note' + (st.ready ? ' ok' : '');
   el.textContent = text;
   if (b.status === 'running' && $('#settingsDialog').open) bayesTimer = setTimeout(renderBayesStatus, 1500);

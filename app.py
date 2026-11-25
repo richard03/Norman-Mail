@@ -22,7 +22,6 @@ import google_oauth
 import i18n
 from i18n import t as tr
 import mail
-import sorter
 import sync
 import taskbar
 import updater
@@ -511,17 +510,17 @@ def _mark_seen_in_background(acc, folder, uid):
                    lambda M: mail.set_flag(M, folder, uid, "\\Seen", True))
 
 
-def _sorter_suggestion(row, placement):
-    """Návrh filtru podobnosti pro zprávu v doručené poště: kam podobné zprávy dáváte (složka / kategorie).
+def _bayes_suggestion(row, placement, tokens):
+    """Návrh bayesovského filtru pro zprávu v doručené poště: kam podobné zprávy dáváte (složka / kategorie).
     U ručně umístěných zpráv, zpráv podle pravidla a v ToDo se nenavrhuje nic."""
-    if row["todo"] or (placement and placement["layer"] in ("manual", "rule")):
+    if row["todo"] or (placement and placement["layer"] in ("manual", "rule")) or not tokens:
         return None
     try:
-        guess = syncer.sorter.predict(row)
+        guess = syncer.bayes.suggest(tokens)
     except Exception:
-        log.exception("Filtr podobnosti selhal")
+        log.exception("Bayes: návrh selhal")
         return None
-    if not guess or guess[1] < sorter.SUGGEST_THRESHOLD:
+    if not guess:
         return None
     cls, score = guess
     if cls in db.CATEGORIES:
@@ -565,14 +564,14 @@ def message(acc_id, uid):
         cat = database.categorizer()({**data, "account_id": acc_id,
                                       "base_subject": mail.base_subject(data["subject"]).lower()})
         data["notification"], data["unimportant"] = cat == "notifications", cat == "unimportant"
-    data["bayes"] = None
-    if row and database.spam_folders().get(acc_id) == folder:  # proč to filtr dal do spamu
-        v = syncer.bayes.verdict(bayes.record_key(row))
-        if v and v["moved"]:
-            data["bayes"] = {"score": v["score"], "tokens": syncer.bayes.explain(v["tokens"])}
-    # proč je zpráva tady (ruční umístění / pravidlo / pole Komu); u spamu od filtru stačí jeho štítek
-    data["placement"] = database.placement(row, acc_id, folder) if row and not data["bayes"] else None
-    data["suggestion"] = _sorter_suggestion(row, data["placement"]) if row and folder == "INBOX" else None
+    # proč je zpráva tady (ruční umístění / pravidlo / bayesovský filtr / pole Komu) a návrh filtru
+    data["placement"] = database.placement(row, acc_id, folder) if row else None
+    tokens = None
+    if row:
+        tokens = syncer.bayes.stored_tokens(db.message_key(row)) or bayes.raw_tokens(raw)
+    if data["placement"] and data["placement"]["layer"] == "bayes" and tokens:
+        data["placement"]["tokens"] = syncer.bayes.explain(tokens, data["placement"]["cls"])
+    data["suggestion"] = _bayes_suggestion(row, data["placement"], tokens) if row and folder == "INBOX" else None
     return jsonify(data)
 
 
@@ -703,6 +702,7 @@ def message_important(acc_id, uid):
     if data.get("scope") == "release":
         database.delete_rules(database.matching_rules(rec))
     database.mark_message(rec, "important")
+    syncer.bayes_learn_async(acc, folder, {uid: bayes.INBOX})
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
     return jsonify(ok=True, view=view)
@@ -736,6 +736,7 @@ def message_categorize(acc_id, uid):
             database.replace_simple_rules(scope, value, ("category", category))
             database.add_category_rule(category, **{scope: value})
         database.mark_message(rec, category)  # ruční umístění: zprávu už automatika nepřesune
+        syncer.bayes_learn_async(acc, folder, {uid: category})
     database.bump()
     view = database.view_of(acc_id, folder, uid) if folder == "INBOX" and database.message(acc_id, folder, uid) else None
     return jsonify(ok=True, sender=sender, subject=subject, view=view)
@@ -817,6 +818,7 @@ def user_folder_delete(folder_id):
     if on_server and acc is None:
         raise ValidationError(tr("err.folderNoAccountDelete"))
     database.delete_user_folder(folder_id)
+    syncer.bayes.forget_class(f"folder:{folder_id}")
     if on_server:
         database.clear_folder(acc["id"], f["imap_name"])  # z UI hned
         threading.Thread(target=syncer.delete_server_folder, args=(acc, f["imap_name"], f["name"]),
@@ -912,7 +914,8 @@ def message_to_folder(acc_id, uid):
         database.add_folder_rule_hits(rule_id, 1)
     if not in_target:
         syncer.enqueue(acc, folder, uid, tr("op.moveToFolder", folder=target["name"]),
-                       lambda: syncer.move_messages(acc, folder, [uid], target), remove=True, use_conn=False)
+                       lambda: syncer.move_messages(acc, folder, [uid], target, learn={uid: f"folder:{target['id']}"}),
+                       remove=True, use_conn=False)
         database.remove_message(acc_id, folder, uid)
     database.bump()
     syncer.trigger()  # další zprávy podle pravidla
@@ -1127,11 +1130,25 @@ def messages_move():
             database.replace_simple_rules("sender", s, ("spam", None))
             database.add_spam_rule(s)
     # 2) zprávy v doručené poště jsou ručně umístěné – pravidla ani filtr je už nepřesunou
-    if target["type"] == "inbox":
-        for i in items:
-            if i["rec"]:
-                database.mark_message(i["rec"], view if view in db.MARKS else
-                                      database.natural_view(i["rec"], i["dst"][0]))
+    learn = {}  # (účet, složka, uid) -> třída filtru, kterou se zpráva naučí
+    for i in items:
+        cls = None
+        if target["type"] == "inbox" and i["rec"]:
+            mark = view if view in db.MARKS else database.natural_view(i["rec"], i["dst"][0])
+            database.mark_message(i["rec"], mark)
+            cls = mark if mark in db.CATEGORIES else bayes.INBOX
+        elif target["type"] == "inbox":
+            cls = view if view in db.CATEGORIES else bayes.INBOX
+        elif target["type"] == "ufolder":
+            cls = f"folder:{target['folder']['id']}"
+        if cls:
+            learn[(i["account_id"], i["folder"], i["uid"])] = cls
+    stays = {}
+    for i in items:
+        if i["stays"] and (i["account_id"], i["folder"], i["uid"]) in learn:
+            stays.setdefault((i["account_id"], i["folder"]), {})[i["uid"]] = learn[(i["account_id"], i["folder"], i["uid"])]
+    for (acc_id, folder), classes in stays.items():
+        syncer.bayes_learn_async(store.get(acc_id), folder, classes)
     groups = {}
     for i in items:
         if not i["stays"] or target["type"] == "trash":  # ze Smazaných se maže natrvalo
@@ -1152,9 +1169,9 @@ def messages_move():
             else:
                 dest = {"account_id": target["account_id"] or acc_id, "imap_name": "INBOX", "mark_read": False,
                         "name": tr("folder.inbox")}
-            ham = database.spam_folders().get(acc_id) == folder  # ze spamu ven = „Není spam“ (učení)
+            classes = {u: learn.get((acc_id, folder, u)) for u in uids}
             syncer.enqueue(acc, folder, uids, tr("op.moveToFolder", folder=dest["name"]),
-                           lambda a=acc, f=folder, u=uids, d=dest, h=ham: syncer.move_messages(a, f, u, d, learn_ham=h),
+                           lambda a=acc, f=folder, u=uids, d=dest, c=classes: syncer.move_messages(a, f, u, d, learn=c),
                            remove=True, use_conn=False)
         database.delete_uids(acc_id, folder, uids)
     database.bump()
@@ -1302,11 +1319,6 @@ def bayes_status():
     return jsonify(syncer.bayes.status())
 
 
-@app.get("/api/sorter")
-def sorter_status():
-    return jsonify(syncer.sorter.status())
-
-
 @app.post("/api/bayes/reset")
 def bayes_reset():
     """Zapomenout naučené a naučit se znovu z existujících zpráv (spam z pravidel, přečtená doručená pošta)."""
@@ -1432,7 +1444,7 @@ def message_spam(acc_id, uid):
             jobs[job_id] = {"status": "running", "moved": 0, "errors": [], "sender": sender}
 
     def op(M):
-        syncer.bayes_learn(M, acc, folder, [uid], True)
+        syncer.bayes_learn(M, acc, folder, {uid: bayes.SPAM})
         mail.spam_message(M, folder, uid)
         if job_id:
             threading.Thread(target=_spam_sender_job, args=(job_id, sender, ts), daemon=True).start()

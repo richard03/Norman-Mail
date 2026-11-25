@@ -307,8 +307,8 @@
         <h3 data-i18n="view.unimportantLabel"></h3>
         <p class="note" data-i18n="settings.unimportant.intro"></p>
         <div class="options">
-          <label class="option"><input type="checkbox" data-setting="sorter_unimportant">
-            <span data-i18n="settings.sorter.unimportant"></span></label>
+          <label class="option"><input type="checkbox" data-setting="bayes_auto_unimportant">
+            <span data-i18n="settings.bayes.autoCategory"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_mark_read_on_leave">
             <span data-i18n="settings.unimportant.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="unimp_delete_read_after_week">
@@ -321,7 +321,7 @@
             <span data-i18n="settings.unimportant.deleteUnreadMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.unimportant.deleteNote"></p>
-        <p class="note" data-i18n="settings.sorter.note"></p>
+        <p class="note" data-i18n="settings.bayes.categoryNote"></p>
       </div>
       <div data-panel="spam">
         <h3 data-i18n="view.spamLabel"></h3>
@@ -334,28 +334,14 @@
             <span data-i18n="settings.spam.deleteMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.spam.deleteNote"></p>
-        <h3 class="sub-head" data-i18n="settings.spam.bayesTitle"></h3>
-        <p class="note" data-i18n="settings.spam.bayesIntro"></p>
-        <p class="note" data-i18n="settings.spam.bayesNever"></p>
-        <div class="options">
-          <label class="option"><input type="checkbox" data-setting="bayes_enabled">
-            <span data-i18n="settings.spam.bayesEnabled"></span></label>
-          <label class="option select-option"><span data-i18n="settings.spam.sensitivity"></span>
-            <select id="bayesSensitivity">
-              <option value="high" data-i18n="settings.spam.sensitivityHigh"></option>
-              <option value="medium" data-i18n="settings.spam.sensitivityMedium"></option>
-              <option value="low" data-i18n="settings.spam.sensitivityLow"></option>
-            </select></label>
-        </div>
-        <p id="bayesStatus" class="note"></p>
-        <div class="bayes-actions"><button type="button" class="btn" id="bayesReset" data-i18n="settings.spam.bayesReset"></button></div>
+        <p class="note" data-i18n="settings.bayes.spamNote"></p>
       </div>
       <div data-panel="notifications">
         <h3 data-i18n="view.notificationsLabel"></h3>
         <p class="note" data-i18n="settings.notifications.intro"></p>
         <div class="options">
-          <label class="option"><input type="checkbox" data-setting="sorter_notifications">
-            <span data-i18n="settings.sorter.notifications"></span></label>
+          <label class="option"><input type="checkbox" data-setting="bayes_auto_notifications">
+            <span data-i18n="settings.bayes.autoCategory"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_mark_read_on_leave">
             <span data-i18n="settings.notifications.markReadOnLeave"></span></label>
           <label class="option"><input type="checkbox" data-setting="notify_delete_read_after_week">
@@ -368,7 +354,7 @@
             <span data-i18n="settings.notifications.deleteUnreadMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.notifications.deleteNote"></p>
-        <p class="note" data-i18n="settings.sorter.note"></p>
+        <p class="note" data-i18n="settings.bayes.categoryNote"></p>
       </div>
       <div data-panel="trash">
         <h3 data-i18n="view.trashLabel"></h3>
@@ -397,6 +383,29 @@
             </div>
             <div class="app-sub-buttons">
               <button type="button" class="btn" id="languageFolder" data-i18n="settings.language.openFolder"></button>
+            </div>
+          </div>
+        </section>
+        <section class="app-sub">
+          <h3 class="sub-head" data-i18n="settings.bayes.title"></h3>
+          <div class="app-sub-body">
+            <div>
+              <p class="note" data-i18n="settings.bayes.intro"></p>
+              <p class="note" data-i18n="settings.bayes.order"></p>
+              <div class="options">
+                <label class="option"><input type="checkbox" data-setting="bayes_enabled">
+                  <span data-i18n="settings.bayes.enabled"></span></label>
+                <label class="option select-option"><span data-i18n="settings.spam.sensitivity"></span>
+                  <select id="bayesSensitivity">
+                    <option value="high" data-i18n="settings.spam.sensitivityHigh"></option>
+                    <option value="medium" data-i18n="settings.spam.sensitivityMedium"></option>
+                    <option value="low" data-i18n="settings.spam.sensitivityLow"></option>
+                  </select></label>
+              </div>
+              <p id="bayesStatus" class="note"></p>
+            </div>
+            <div class="app-sub-buttons">
+              <button type="button" class="btn" id="bayesReset" data-i18n="settings.spam.bayesReset"></button>
             </div>
           </div>
         </section>

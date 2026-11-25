@@ -1,15 +1,25 @@
-"""Bayesovský filtr spamu.
+"""Bayesovský filtr: jeden model pro spam, doručenou poštu, Nedůležité, Notifikace a složky aplikace.
 
-Učí se z toho, co uživatel sám označí: tlačítko Spam / přetažení do Spamu = spam, „Není spam“ = dobrá zpráva.
-Dobré zprávy přibývají i samy: zpráva, kterou filtr posoudil, nechal v doručené poště a uživatel ji
-přečetl a do 3 dnů neoznačil jako spam, se naučí jako dobrá. Napoprvé se filtr naučí z existujících zpráv
-(spam = zprávy ve spamu od odesílatelů z pravidel, tj. dřív ručně označené; dobré = přečtené v doručené poště).
+Třídy (cíle): "spam", "inbox" (zpráva zůstává v Důležitých / Vzít na vědomí), "unimportant", "notifications"
+a "folder:<id>" pro každou složku aplikace.
 
-Výpočet je Robinsonova/Fisherova metoda (jako SpamBayes): pravděpodobnost každého slova (tokenu) se
-vyhladí podle počtu výskytů a nejvýraznější slova se zkombinují chí-kvadrát testem. Výsledek je 0–1.
+Učí se jen z rozhodnutí uživatele a jeho pravidel, nikdy ze svých vlastních:
+- ruční akce: Spam, Není spam, ruční přesun do kategorie / pohledu / složky (jen zpráva i s pravidlem);
+- potvrzené zprávy: posouzená zpráva, která po 3 dnech leží tam, kam ji dal uživatel nebo jeho pravidlo
+  (přečtená v doručené poště = inbox, s kategorií z ručního umístění / pravidla = ta kategorie, ve složce
+  aplikace = ta složka). Zprávy, které zařadil sám filtr (tabulka bf_auto), se nepočítají, dokud je uživatel
+  ručně nepotvrdí;
+- napoprvé z existujících zpráv (spam od odesílatelů z pravidel, přečtená doručená pošta, kategorie, složky).
+
+Slova jsou z hlaviček i textu (prvních 32 kB zprávy). U nových zpráv v doručené poště se stáhnou jednou
+a slouží učení i posuzování.
+
+Výpočet: každá třída se posoudí Robinsonovou/Fisherovou metodou „tato třída proti ostatním“ (jako SpamBayes):
+pravděpodobnost slov se vyhladí podle počtu výskytů a nejvýraznější slova se zkombinují chí-kvadrát testem.
+Výsledek 0–1; u nejistých zpráv vychází kolem 0,5 a filtr nic nedělá. Když je jistých víc tříd, vyhrává
+důležitější cíl: doručená pošta > složka > Nedůležité > Notifikace > Spam.
 """
 import email
-import hashlib
 import json
 import logging
 import math
@@ -18,29 +28,42 @@ import threading
 import time
 from email import policy
 
+import db as db_module
 import mail
 
 log = logging.getLogger("mailer.bayes")
 
 FETCH_BYTES = 32768          # z každé zprávy stačí začátek (hlavičky + text)
-MIN_SPAM = 10                # dokud se filtr nenaučí aspoň tolik spamu a dobrých zpráv, nic nepřesouvá
-MIN_HAM = 10
+MIN_CLASS = 10               # třída s menším počtem naučených zpráv se neposuzuje (doručená pošta taky)
 MAX_TOKENS = 150             # kolik nejvýraznějších slov se kombinuje
 UNKNOWN_STRENGTH = 0.45      # síla předpokladu pro málo známá slova (SpamBayes s)
 UNKNOWN_PROB = 0.5           # předpoklad pro neznámé slovo (SpamBayes x)
 MIN_DIST = 0.1               # slova blízko 0,5 nic neříkají
-HAM_AFTER = 3 * 86400        # přečtená zpráva ponechaná v doručené poště 3 dny = dobrá
-FORGET_AFTER = 30 * 86400    # posudky nepřečtených zpráv se zapomenou
+CONFIRM_AFTER = 3 * 86400    # posouzená zpráva, která 3 dny leží na svém místě, se naučí jako potvrzená
+FORGET_AFTER = 30 * 86400    # slova posouzených zpráv se zapomenou
 RECENT = 3 * 86400           # posuzují se jen čerstvé zprávy (ne historie při první synchronizaci)
-BOOTSTRAP_LIMIT = 300        # kolik zpráv každého druhu se napoprvé naučí
+BOOTSTRAP_LIMIT = 300        # kolik zpráv každé třídy se napoprvé naučí
 THRESHOLDS = {"high": 0.80, "medium": 0.90, "low": 0.97}  # citlivost → hranice pro přesun do spamu
+AUTO_THRESHOLD = 0.95        # jistota pro automatické zařazení do kategorie / složky
+SUGGEST_THRESHOLD = 0.80     # jistota pro návrh u zprávy
+SPAM, INBOX = "spam", "inbox"
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS bayes_tokens(token TEXT PRIMARY KEY, spam INTEGER DEFAULT 0, ham INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS bayes_trained(key TEXT PRIMARY KEY, is_spam INTEGER, tokens TEXT, created REAL);
-CREATE TABLE IF NOT EXISTS bayes_messages(
-    key TEXT PRIMARY KEY, account_id TEXT, message_id TEXT, tokens TEXT, score REAL, moved INTEGER, created REAL);
+CREATE TABLE IF NOT EXISTS bf_tokens(token TEXT, cls TEXT, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(token, cls));
+CREATE TABLE IF NOT EXISTS bf_trained(key TEXT PRIMARY KEY, cls TEXT NOT NULL, tokens TEXT, created REAL);
+CREATE INDEX IF NOT EXISTS ix_bf_trained_cls ON bf_trained(cls);
+CREATE TABLE IF NOT EXISTS bf_seen(key TEXT PRIMARY KEY, account_id TEXT, tokens TEXT, created REAL);
 """
+
+
+def priority(cls):
+    """Pořadí důležitosti cílů (menší = důležitější) pro spor uvnitř filtru."""
+    if cls == INBOX:
+        return 0
+    if cls.startswith("folder:"):
+        return 1
+    return {"unimportant": 2, "notifications": 3, SPAM: 4}.get(cls, 5)
+
 
 WORD_RE = re.compile(r"[^\W_][\w'’$€%-]*", re.UNICODE)
 URL_RE = re.compile(r"https?://([^/\s\"'<>?#:]+)", re.I)
@@ -153,19 +176,6 @@ def message_tokens(raw: bytes) -> set:
     return tokens
 
 
-def message_key(message_id, sender, date, subject):
-    """Totožnost zprávy napříč složkami a účty (Message-ID, jinak otisk odesílatele, data a předmětu)."""
-    mid = (message_id or "").strip()
-    if mid:
-        return mid
-    return "h:" + hashlib.sha1(f"{sender}|{date}|{subject}".encode("utf-8", "replace")).hexdigest()
-
-
-def record_key(rec):
-    sender = rec["from"][0]["addr"].lower() if rec.get("from") else ""
-    return message_key(rec.get("message_id"), sender, rec.get("date"), rec.get("subject"))
-
-
 def fetch_tokens(M, uids) -> dict:
     """{uid: tokeny} – ze začátku zpráv ve vybrané složce (bez označení jako přečtené)."""
     out = {}
@@ -207,13 +217,22 @@ def combine(probs):
     return (s - h + 1.0) / 2.0
 
 
-def token_prob(spam, ham, nspam, nham):
-    """Vyhlazená pravděpodobnost, že zpráva s tímto slovem je spam."""
-    sr, hr = spam / nspam, ham / nham
-    p = sr / (sr + hr) if sr + hr else UNKNOWN_PROB
-    n = spam + ham
+def token_prob(n_in, n_out, total_in, total_out):
+    """Vyhlazená pravděpodobnost, že zpráva s tímto slovem patří do třídy (proti ostatním)."""
+    ir, orr = n_in / total_in, n_out / total_out
+    p = ir / (ir + orr) if ir + orr else UNKNOWN_PROB
+    n = n_in + n_out
     f = (UNKNOWN_STRENGTH * UNKNOWN_PROB + n * p) / (UNKNOWN_STRENGTH + n)
     return min(0.99, max(0.01, f))
+
+
+def raw_tokens(raw: bytes):
+    """Slova z (začátku) uložené zprávy; None, když ji nejde rozložit."""
+    try:
+        return message_tokens(raw[:FETCH_BYTES])
+    except Exception:
+        log.exception("Zprávu nejde rozložit na slova")
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -225,17 +244,48 @@ class BayesFilter:
         self.db = db
         with db._lock:
             db._conn.executescript(SCHEMA)
+        self._migrate()
         self.bootstrap_state = {"status": "idle", "done": 0, "total": 0}
         self._bootstrap_lock = threading.Lock()
 
+    def _migrate(self):
+        """Dřívější filtr jen spam / ne-spam: naučené zprávy → třídy spam / inbox, přesuny do spamu → bf_auto."""
+        c = self.db._conn
+        with self.db._lock:
+            if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bayes_trained'").fetchone():
+                return
+            rows = c.execute("SELECT key, is_spam, tokens, created FROM bayes_trained").fetchall()
+            counts = {}
+            for key, is_spam, tokens, created in rows:
+                cls = SPAM if is_spam else INBOX
+                c.execute("INSERT OR IGNORE INTO bf_trained VALUES(?, ?, ?, ?)", (key, cls, tokens, created))
+                for t in json.loads(tokens or "[]"):
+                    counts[(t, cls)] = counts.get((t, cls), 0) + 1
+            c.executemany("INSERT OR REPLACE INTO bf_tokens VALUES(?, ?, ?)",
+                          [(t, cls, n) for (t, cls), n in counts.items()])
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bayes_messages'").fetchone():
+                for key, acc_id, tokens, score, moved, created in c.execute(
+                        "SELECT key, account_id, tokens, score, moved, created FROM bayes_messages").fetchall():
+                    c.execute("INSERT OR IGNORE INTO bf_seen VALUES(?, ?, ?, ?)", (key, acc_id, tokens, created))
+                    if moved:
+                        c.execute("INSERT OR IGNORE INTO bf_auto VALUES(?, ?, ?, ?)", (key, SPAM, score, created))
+            for t in ("bayes_tokens", "bayes_trained", "bayes_messages"):
+                c.execute(f"DROP TABLE IF EXISTS {t}")
+        log.info("Bayes: převedeno %d naučených zpráv na třídy", len(rows))
+
     # ---- stav
-    def counts(self):
-        rows = dict(self.db._q("SELECT is_spam, COUNT(*) FROM bayes_trained GROUP BY is_spam"))
-        return rows.get(1, 0), rows.get(0, 0)
+    def counts(self) -> dict:
+        """Počet naučených zpráv po třídách."""
+        return dict(self.db._q("SELECT cls, COUNT(*) FROM bf_trained GROUP BY cls"))
+
+    def eligible(self, counts=None) -> dict:
+        """Třídy, které má smysl posuzovat (dost naučených zpráv); bez doručené pošty žádné."""
+        counts = self.counts() if counts is None else counts
+        out = {c: n for c, n in counts.items() if n >= MIN_CLASS}
+        return out if INBOX in out and len(out) >= 2 else {}
 
     def ready(self):
-        ns, nh = self.counts()
-        return ns >= MIN_SPAM and nh >= MIN_HAM
+        return bool(self.eligible())
 
     def threshold(self):
         return THRESHOLDS.get(self.db.settings().get("bayes_sensitivity"), THRESHOLDS["medium"])
@@ -244,172 +294,286 @@ class BayesFilter:
         return bool(self.db.settings().get("bayes_enabled")) and self.ready()
 
     def status(self):
-        ns, nh = self.counts()
-        moved = self.db._q("SELECT COUNT(*) FROM bayes_messages WHERE moved=1 AND created>?",
-                           (time.time() - 7 * 86400,))[0][0]
-        return {"spam": ns, "ham": nh, "min_spam": MIN_SPAM, "min_ham": MIN_HAM, "ready": ns >= MIN_SPAM and nh >= MIN_HAM,
-                "tokens": self.db._q("SELECT COUNT(*) FROM bayes_tokens")[0][0], "moved_week": moved,
+        counts = self.counts()
+        moved = dict(self.db._q("SELECT target, COUNT(*) FROM bf_auto WHERE created>? GROUP BY target",
+                                (time.time() - 7 * 86400,)))
+        return {"classes": counts, "eligible": sorted(self.eligible(counts)), "min_class": MIN_CLASS,
+                "ready": bool(self.eligible(counts)), "moved_week": moved,
+                "tokens": self.db._q("SELECT COUNT(DISTINCT token) FROM bf_tokens")[0][0],
                 "bootstrap": dict(self.bootstrap_state)}
 
     # ---- učení
-    def train(self, key, tokens, is_spam) -> bool:
-        """Naučí zprávu jako spam / dobrou. Pokud už byla naučená opačně, posudek se přehodí."""
-        is_spam = int(bool(is_spam))
+    def train(self, key, tokens, cls) -> bool:
+        """Naučí zprávu jako třídu. Pokud už byla naučená jako jiná třída, posudek se přehodí."""
         tokens = sorted(tokens)
 
         def tx(c):
-            row = c.execute("SELECT is_spam, tokens FROM bayes_trained WHERE key=?", (key,)).fetchone()
-            if row and row[0] == is_spam:
+            row = c.execute("SELECT cls, tokens FROM bf_trained WHERE key=?", (key,)).fetchone()
+            if row and row[0] == cls:
                 return False
             if row:
-                old = "spam" if row[0] else "ham"
-                c.executemany(f"UPDATE bayes_tokens SET {old}=MAX({old}-1, 0) WHERE token=?",
-                              [(t,) for t in json.loads(row[1])])
-            col = (1, 0) if is_spam else (0, 1)
-            c.executemany("""INSERT INTO bayes_tokens(token, spam, ham) VALUES(?, ?, ?)
-                             ON CONFLICT(token) DO UPDATE SET spam=spam+excluded.spam, ham=ham+excluded.ham""",
-                          [(t, *col) for t in tokens])
-            c.execute("INSERT OR REPLACE INTO bayes_trained VALUES(?, ?, ?, ?)",
-                      (key, is_spam, json.dumps(tokens, ensure_ascii=False), time.time()))
-            c.execute("DELETE FROM bayes_messages WHERE key=?", (key,))
+                c.executemany("UPDATE bf_tokens SET n=MAX(n-1, 0) WHERE token=? AND cls=?",
+                              [(t, row[0]) for t in json.loads(row[1] or "[]")])
+            c.executemany("""INSERT INTO bf_tokens(token, cls, n) VALUES(?, ?, 1)
+                             ON CONFLICT(token, cls) DO UPDATE SET n=n+1""", [(t, cls) for t in tokens])
+            c.execute("INSERT OR REPLACE INTO bf_trained VALUES(?, ?, ?, ?)",
+                      (key, cls, json.dumps(tokens, ensure_ascii=False), time.time()))
             return True
         return self.db._tx(tx)
 
     def reset(self):
         def tx(c):
-            for t in ("bayes_tokens", "bayes_trained", "bayes_messages"):
+            for t in ("bf_tokens", "bf_trained", "bf_seen"):
                 c.execute(f"DELETE FROM {t}")
-            c.execute("DELETE FROM meta WHERE key='bayes_bootstrapped'")
+            c.execute("DELETE FROM meta WHERE key IN ('bayes_bootstrapped', 'bf_boot_folders')")
         self.db._tx(tx)
 
+    def forget_class(self, cls):
+        """Zapomene třídu (smazaná složka aplikace)."""
+        def tx(c):
+            c.execute("DELETE FROM bf_tokens WHERE cls=?", (cls,))
+            c.execute("DELETE FROM bf_trained WHERE cls=?", (cls,))
+            c.execute("DELETE FROM bf_auto WHERE target=?", (cls,))
+        self.db._tx(tx)
+
+    def see(self, key, acc_id, tokens):
+        """Zapamatuje si slova nové zprávy (pro pozdější potvrzení, ruční učení a vysvětlení)."""
+        self.db._q("INSERT OR REPLACE INTO bf_seen VALUES(?, ?, ?, ?)",
+                   (key, acc_id, json.dumps(sorted(tokens), ensure_ascii=False), time.time()))
+
     def stored_tokens(self, key):
-        """Slova zprávy, kterou filtr už posuzoval (ať se nemusí stahovat znovu)."""
-        rows = self.db._q("SELECT tokens FROM bayes_messages WHERE key=?", (key,)) or \
-            self.db._q("SELECT tokens FROM bayes_trained WHERE key=?", (key,))
+        """Slova zprávy, kterou filtr už viděl nebo se ji naučil (ať se nemusí stahovat znovu)."""
+        rows = self.db._q("SELECT tokens FROM bf_seen WHERE key=?", (key,)) or \
+            self.db._q("SELECT tokens FROM bf_trained WHERE key=?", (key,))
         return set(json.loads(rows[0][0])) if rows else None
 
-    def learn(self, M, acc_id, folder, uids, is_spam) -> int:
-        """Naučí zprávy (podle UID ve složce) – slova z dřívějšího posudku, jinak ze serveru. Vrací počet."""
+    def tokens_for(self, row):
+        """Slova zprávy z databáze bez stahování: dřív viděná, nebo z uloženého těla. Jinak None."""
+        key = db_module.message_key(row)
+        tokens = self.stored_tokens(key)
+        if tokens is None:
+            raw = self.db.get_body(row["account_id"], row["folder"], row["uid"])
+            tokens = raw_tokens(raw) if raw else None
+        return tokens
+
+    def learn(self, M, acc_id, folder, uids, cls) -> int:
+        """Naučí zprávy (podle UID ve složce) jako třídu – slova bez stahování, když to jde. Vrací počet."""
         keys, missing = {}, []
         for uid in uids:
             row = self.db.message(acc_id, folder, uid)
-            key = record_key(row) if row else None
-            tokens = self.stored_tokens(key) if key else None
+            tokens = self.tokens_for(row) if row else None
             if tokens is not None:
-                keys[uid] = (key, tokens)
+                keys[uid] = (db_module.message_key(row), tokens)
             else:
                 missing.append(uid)
-        if missing:
+        if missing and M is not None:
             mail._select(M, folder, readonly=True)
             fetched = fetch_tokens(M, missing)
             recs = {r["uid"]: r for r in mail.fetch_header_records(M, missing)}
             for uid, tokens in fetched.items():
                 if uid in recs:
-                    keys[uid] = (record_key(recs[uid]), tokens)
-        n = sum(self.train(key, tokens, is_spam) for key, tokens in keys.values())
+                    keys[uid] = (db_module.message_key(recs[uid]), tokens)
+        n = sum(self.train(key, tokens, cls) for key, tokens in keys.values())
         if n:
-            log.info("Bayes: naučeno %d zpráv jako %s", n, "spam" if is_spam else "dobré")
+            log.info("Bayes: naučeno %d zpráv jako %s", n, cls)
         return n
 
     # ---- posuzování
-    def score(self, tokens):
-        ns, nh = self.counts()
-        if ns < MIN_SPAM or nh < MIN_HAM or not tokens:
-            return None
-        counts = {}
+    def scores(self, tokens, counts=None) -> dict:
+        """Jistota každé posuzované třídy (0–1, „tato třída proti ostatním“). Prázdné = filtr není připravený."""
+        classes = self.eligible(counts)
+        if not classes or not tokens:
+            return {}
+        per = {}  # slovo -> {třída: počet}
         toks = list(tokens)
         for i in range(0, len(toks), 500):
             chunk = toks[i:i + 500]
-            for t, s, h in self.db._q(f"SELECT token, spam, ham FROM bayes_tokens WHERE token IN "
-                                      f"({','.join('?' * len(chunk))})", chunk):
-                counts[t] = (s, h)
-        probs = [token_prob(s, h, ns, nh) for s, h in counts.values() if s + h]
-        probs = sorted((p for p in probs if abs(p - 0.5) >= MIN_DIST), key=lambda p: -abs(p - 0.5))[:MAX_TOKENS]
-        return combine(probs)
+            for t, cls, n in self.db._q(f"SELECT token, cls, n FROM bf_tokens WHERE n>0 AND token IN "
+                                        f"({','.join('?' * len(chunk))})", chunk):
+                if cls in classes:
+                    per.setdefault(t, {})[cls] = n
+        total = sum(classes.values())
+        out = {}
+        for cls, n_cls in classes.items():
+            probs = []
+            for c in per.values():
+                n_in = c.get(cls, 0)
+                n_out = sum(c.values()) - n_in
+                if n_in + n_out:
+                    probs.append(token_prob(n_in, n_out, n_cls, total - n_cls))
+            probs = sorted((p for p in probs if abs(p - 0.5) >= MIN_DIST),
+                           key=lambda p: -abs(p - 0.5))[:MAX_TOKENS]
+            out[cls] = combine(probs)
+        return out
 
-    def explain(self, tokens, n=8):
-        """Nejvýraznější slova pro i proti spamu (pro zobrazení u zprávy)."""
-        ns, nh = self.counts()
-        if not ns or not nh:
+    def classify(self, tokens, spam_allowed=True):
+        """(vítězná třída nebo None, jistoty tříd). Třída vyhraje, když je si jí filtr jistý (spam podle
+        citlivosti, ostatní AUTO_THRESHOLD); při více jistých třídách důležitější cíl. Jistá doručená pošta
+        = nic nepřesouvat."""
+        scores = self.scores(tokens)
+        if not scores or scores.get(INBOX, 0) >= AUTO_THRESHOLD:
+            return None, scores
+        spam_thr = self.threshold()
+        cands = [c for c, s in scores.items() if c != INBOX
+                 and s >= (spam_thr if c == SPAM else AUTO_THRESHOLD) and (c != SPAM or spam_allowed)]
+        if not cands:
+            return None, scores
+        return min(cands, key=lambda c: (priority(c), -scores[c])), scores
+
+    def suggest(self, tokens):
+        """(třída, jistota) pro návrh u zprávy v doručené poště – kategorie nebo složka, ne spam."""
+        scores = self.scores(tokens)
+        if not scores or scores.get(INBOX, 0) >= AUTO_THRESHOLD:
+            return None
+        best = max((c for c in scores if c not in (INBOX, SPAM)), key=lambda c: scores[c], default=None)
+        return (best, scores[best]) if best and scores[best] >= SUGGEST_THRESHOLD else None
+
+    def explain(self, tokens, cls, n=8):
+        """Nejvýraznější slova pro i proti třídě (pro zobrazení u zprávy)."""
+        counts = self.counts()
+        n_cls, total = counts.get(cls, 0), sum(counts.values())
+        if not n_cls or not total - n_cls or not tokens:
             return []
         toks = list(tokens)[:2000]
-        rows = self.db._q(f"SELECT token, spam, ham FROM bayes_tokens WHERE token IN ({','.join('?' * len(toks))})", toks) if toks else []
-        scored = sorted(((token_prob(s, h, ns, nh), t) for t, s, h in rows if s + h), key=lambda x: -abs(x[0] - 0.5))
+        per = {}
+        for t, c, k in self.db._q(f"SELECT token, cls, n FROM bf_tokens WHERE token IN ({','.join('?' * len(toks))})",
+                                  toks):
+            per.setdefault(t, {})[c] = k
+        scored = []
+        for t, c in per.items():
+            n_in, n_out = c.get(cls, 0), sum(c.values()) - c.get(cls, 0)
+            if n_in + n_out:
+                scored.append((token_prob(n_in, n_out, n_cls, total - n_cls), t))
+        scored.sort(key=lambda x: -abs(x[0] - 0.5))
         return [{"token": t, "p": round(p, 3)} for p, t in scored[:n]]
 
-    def remember(self, key, acc_id, message_id, tokens, score, moved):
-        self.db._q("INSERT OR REPLACE INTO bayes_messages VALUES(?, ?, ?, ?, ?, ?, ?)",
-                   (key, acc_id, message_id or "", json.dumps(sorted(tokens), ensure_ascii=False),
-                    score, int(moved), time.time()))
+    # ---- zprávy zařazené filtrem (do učení se nepočítají, dokud je uživatel nepotvrdí)
+    def remember_auto(self, key, target, score):
+        self.db._q("INSERT OR REPLACE INTO bf_auto VALUES(?, ?, ?, ?)", (key, target, score, time.time()))
 
-    def verdict(self, message_id_key):
-        rows = self.db._q("SELECT score, moved, tokens FROM bayes_messages WHERE key=?", (message_id_key,))
+    # ---- potvrzené zprávy
+    def _confirmed_class(self, key, auto):
+        """Kam zprávu dal uživatel / jeho pravidlo (třída), nebo None (neví se, nebo rozhodl sám filtr)."""
+        if key.startswith("h:"):
+            rows = self.db._q(f"""SELECT m.*, ({db_module.CATEGORY_EXPLICIT}) AS cat, {db_module.IS_TODO} AS todo,
+                                  {db_module.IS_LOCKED} AS locked FROM messages m WHERE {db_module.MSG_KEY}=?""",
+                              (key,))
+        else:
+            rows = self.db._q(f"""SELECT m.*, ({db_module.CATEGORY_EXPLICIT}) AS cat, {db_module.IS_TODO} AS todo,
+                                  {db_module.IS_LOCKED} AS locked FROM messages m WHERE m.message_id=?""", (key,))
         if not rows:
-            return None
-        return {"score": rows[0][0], "moved": bool(rows[0][1]), "tokens": json.loads(rows[0][2])}
+            return None, True  # zpráva už není (smazaná, archivovaná) – zapomenout
+        folders = {(f["account_id"], f["imap_name"]): f["id"] for f in self.db.user_folders() if f["account_id"]}
+        for r in rows:
+            if (r["account_id"], r["folder"]) in folders:
+                cls = f"folder:{folders[(r['account_id'], r['folder'])]}"
+                return (None if auto == cls and not r["locked"] else cls), True
+        for r in rows:
+            if r["folder"] != "INBOX" or r["todo"]:
+                continue
+            if r["cat"] in db_module.CATEGORIES:
+                return r["cat"], True
+            if r["cat"] in ("important", "fyi"):
+                return INBOX, True
+            if auto in db_module.CATEGORIES:
+                return None, True  # kategorii dal filtr a uživatel ji nepotvrdil
+            if r["seen"]:
+                return INBOX, True
+            return None, False  # nepřečtená – počkat
+        return None, True
 
-    # ---- dobré zprávy přibývají samy
-    def mature(self, now=None):
-        """Přečtené zprávy, které po posouzení zůstaly 3 dny v doručené poště, se naučí jako dobré."""
+    def confirm(self, now=None):
+        """Posouzené zprávy, které po CONFIRM_AFTER leží tam, kam je dal uživatel nebo jeho pravidlo, se naučí."""
         now = now or time.time()
-        rows = self.db._q("SELECT key, account_id, message_id, tokens FROM bayes_messages WHERE moved=0 AND created<?",
-                          (now - HAM_AFTER,))
+        rows = self.db._q("""SELECT s.key, s.tokens, a.target FROM bf_seen s LEFT JOIN bf_auto a ON a.key=s.key
+                             WHERE s.created<? AND s.key NOT IN (SELECT key FROM bf_trained)""",
+                          (now - CONFIRM_AFTER,))
         learned = 0
-        for key, acc_id, mid, tokens in rows:
-            seen = self.db._q("SELECT seen FROM messages WHERE account_id=? AND folder='INBOX' AND message_id=?",
-                              (acc_id, mid)) if mid else []
-            if seen and seen[0][0]:
-                learned += self.train(key, json.loads(tokens), False)
-            elif not seen:  # zpráva už v doručené poště není (smazaná, přesunutá) – nic se neučí
-                self.db._q("DELETE FROM bayes_messages WHERE key=?", (key,))
-        self.db._q("DELETE FROM bayes_messages WHERE created<?", (now - FORGET_AFTER,))
+        for key, tokens, auto in rows:
+            cls, done = self._confirmed_class(key, auto)
+            if cls:
+                learned += self.train(key, json.loads(tokens), cls)
+            if done and not cls:
+                self.db._q("DELETE FROM bf_seen WHERE key=? AND key NOT IN (SELECT key FROM bf_auto)", (key,))
+        self.db._q("DELETE FROM bf_seen WHERE created<?", (now - FORGET_AFTER,))
+        self.db._q("DELETE FROM bf_auto WHERE created<?", (now - 3 * FORGET_AFTER,))
         return learned
 
     # ---- první naučení z existujících zpráv
     def needs_bootstrap(self):
-        return not self.db._q("SELECT 1 FROM meta WHERE key='bayes_bootstrapped'")
+        if not self.db._q("SELECT 1 FROM meta WHERE key='bayes_bootstrapped'"):
+            return True
+        done = set(self.db.meta_get("bf_boot_folders") or [])
+        return any(f["id"] not in done for f in self.db.user_folders() if f["account_id"])
+
+    def bootstrap_work(self, accounts):
+        """(třída, účet, složka, uid) – zprávy k naučení, nejvýš BOOTSTRAP_LIMIT na třídu (bez už naučených)."""
+        trained = {r[0] for r in self.db._q("SELECT key FROM bf_trained")}
+        counts = self.counts()
+        acc_ids = list(accounts)
+        marks = ",".join("?" * len(acc_ids)) or "''"
+        work = []
+
+        def take(cls, rows):
+            room = BOOTSTRAP_LIMIT - counts.get(cls, 0)
+            for r in rows:
+                if room <= 0:
+                    break
+                if r["mkey"] not in trained:
+                    work.append((cls, r["account_id"], r["folder"], r["uid"]))
+                    trained.add(r["mkey"])
+                    room -= 1
+        sel = f"SELECT m.account_id, m.folder, m.uid, m.from_addrs, {db_module.MSG_KEY} AS mkey"
+        spam_senders = self.db.spam_senders()
+        for acc_id, folder in self.db.spam_folders().items():
+            if acc_id in accounts and spam_senders:
+                take(SPAM, [r for r in self.db._q(f"{sel} FROM messages m WHERE m.account_id=? AND m.folder=? "
+                                                   "ORDER BY m.date DESC LIMIT 2000", (acc_id, folder))
+                            if any(f",{s}," in (r["from_addrs"] or "") for s in spam_senders)])
+        inbox = self.db._q(f"""{sel}, ({db_module.CATEGORY_EXPLICIT}) AS cat, m.seen FROM messages m
+                               WHERE m.folder='INBOX' AND m.account_id IN ({marks}) AND NOT {db_module.IS_TODO}
+                               ORDER BY m.date DESC LIMIT 5000""", acc_ids)
+        for cat in db_module.CATEGORIES:
+            take(cat, [r for r in inbox if r["cat"] == cat])
+        take(INBOX, [r for r in inbox if r["cat"] in ("important", "fyi")
+                     or (r["cat"] is None and r["seen"]
+                         and not any(f",{s}," in (r["from_addrs"] or "") for s in spam_senders))])
+        for f in self.db.user_folders():
+            if f["account_id"] in accounts:
+                take(f"folder:{f['id']}", self.db._q(f"{sel} FROM messages m WHERE m.account_id=? AND m.folder=? "
+                                                      "ORDER BY m.date DESC LIMIT ?",
+                                                      (f["account_id"], f["imap_name"], BOOTSTRAP_LIMIT)))
+        return work
 
     def bootstrap(self, store, pool):
-        """Napoprvé: spam = zprávy ve spamu od odesílatelů z pravidel (dřív ručně označené),
-        dobré = přečtené zprávy v doručené poště. Běží na pozadí."""
+        """Napoprvé (a pro nové složky): naučí se z existujících zpráv. Běží na pozadí."""
         if not self._bootstrap_lock.acquire(blocking=False):
             return
         try:
-            spam_senders = self.db.spam_senders()
-            junk = self.db.spam_folders()
             accounts = {a["id"]: a for a in store.all()}
-            work = []  # (účet, složka, uid, je_spam)
-            spam_rows = []
-            for acc_id, folder in junk.items():
-                if acc_id in accounts and spam_senders:
-                    spam_rows += [(r[2], acc_id, folder, r[0]) for r in self.db._q(
-                        "SELECT uid, from_addrs, date FROM messages WHERE account_id=? AND folder=?", (acc_id, folder))
-                        if any(f",{s}," in (r[1] or "") for s in spam_senders)]
-            spam_rows.sort(key=lambda x: -(x[0] or 0))
-            work += [(a, f, u, True) for _, a, f, u in spam_rows[:BOOTSTRAP_LIMIT]]
-            marks = ",".join("?" * len(accounts)) or "''"
-            ham_rows = self.db._q(f"""SELECT account_id, uid, from_addrs FROM messages WHERE folder='INBOX' AND seen=1
-                                      AND account_id IN ({marks}) ORDER BY date DESC LIMIT ?""",
-                                  (*accounts, BOOTSTRAP_LIMIT * 2))
-            ham = [(a, "INBOX", u, False) for a, u, fa in ham_rows
-                   if not any(f",{s}," in (fa or "") for s in spam_senders)][:BOOTSTRAP_LIMIT]
-            work += ham
+            folder_ids = [f["id"] for f in self.db.user_folders() if f["account_id"] in accounts]
+            work = self.bootstrap_work(accounts)
             self.bootstrap_state = {"status": "running", "done": 0, "total": len(work)}
             groups = {}
-            for acc_id, folder, uid, is_spam in work:
-                groups.setdefault((acc_id, folder, is_spam), []).append(uid)
-            for (acc_id, folder, is_spam), uids in groups.items():
+            for cls, acc_id, folder, uid in work:
+                groups.setdefault((acc_id, folder, cls), []).append(uid)
+            for (acc_id, folder, cls), uids in groups.items():
                 for i in range(0, len(uids), 25):
                     chunk = uids[i:i + 25]
                     try:
-                        with pool.get(accounts[acc_id]) as M:
-                            self.learn(M, acc_id, folder, chunk, is_spam)
+                        local = [u for u in chunk if (r := self.db.message(acc_id, folder, u))
+                                 and self.tokens_for(r) is not None]
+                        self.learn(None, acc_id, folder, local, cls)  # bez stahování
+                        rest = [u for u in chunk if u not in local]
+                        if rest:
+                            with pool.get(accounts[acc_id]) as M:
+                                self.learn(M, acc_id, folder, rest, cls)
                     except Exception as e:
                         log.warning("Bayes: první učení (%s): %s", acc_id, e)
                     self.bootstrap_state["done"] += len(chunk)
             self.db._q("INSERT OR REPLACE INTO meta VALUES('bayes_bootstrapped', ?)", (str(time.time()),))
-            ns, nh = self.counts()
-            log.info("Bayes: první učení hotovo – %d spam, %d dobrých", ns, nh)
+            self.db.meta_set("bf_boot_folders", sorted(set(self.db.meta_get("bf_boot_folders") or []) | set(folder_ids)))
+            log.info("Bayes: učení z existujících zpráv hotovo – %s", self.counts())
         finally:
             self.bootstrap_state["status"] = "done"
             self._bootstrap_lock.release()

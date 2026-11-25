@@ -29,6 +29,7 @@ class MoveScopeTest(unittest.TestCase):
             mock.patch.object(app_module.store, "list_public", lambda: [ACC]),
             mock.patch.object(app_module.syncer, "enqueue", lambda *a, **k: None),
             mock.patch.object(app_module.syncer, "trigger", lambda: None),
+            mock.patch.object(app_module.syncer, "bayes_learn_async", lambda *a, **k: None),
         ]
         for p in self.patches:
             p.start()
