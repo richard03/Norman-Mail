@@ -913,6 +913,7 @@ function renderReader() {
     ? `<span class="tag folder ${role === 'junk' ? 'spam' : ''}">${esc((state.folders[accountId] || []).find(f => f.name === data.folder)?.display || data.folder)}</span>` : '';
   const bayesNote = data.bayes ? `<span class="tag folder spam" title="${esc(t('message.bayesTokens', { tokens:
       data.bayes.tokens.map(tok => `${tok.token} (${Math.round(tok.p * 100)} %)`).join(', ') }))}">${esc(t('message.bayesScore', { score: Math.round(data.bayes.score * 100) }))}</span>` : '';
+  const placementNote = placementTag(data.placement, data.todo);
 
   // záhlaví je společné pro obsah, akce i kontext
   $('#messageHead').hidden = false;
@@ -921,7 +922,7 @@ function renderReader() {
       <div class="meta">
         ${line(t('message.from'), data.from)}${line(t('message.to'), data.to)}${line(t('message.cc'), data.cc)}
         <div><span class="muted">${fmtFull(data.date)}</span>
-          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${bayesNote}</div>
+          <span class="acc-tag" style="--c:${accColor(accountId)}">${esc(acc?.name || '')}</span> ${folderNote} ${bayesNote} ${placementNote}</div>
       </div>
       ${atts ? `<div class="chips">${atts}</div>` : ''}
       ${data.truncated ? `<div class="banner">${esc(data.truncated)}</div>` : ''}
@@ -1274,6 +1275,17 @@ function targetName(target) {
   if (target.type === 'ufolder') return state.userFolders.find(f => f.id === target.id)?.name || '';
   if (target.account_id) { const a = accById(target.account_id); return a?.name || a?.email || ''; }
   return target.view && target.view !== 'all' ? t(`view.${target.view}`) : t('folder.inbox');
+}
+
+/** Štítek „proč je zpráva tady“ v záhlaví: ručně přesunutá, pravidlo, nebo pole Komu / kopie. */
+function placementTag(p, todo) {
+  if (!p || todo) return '';
+  const text = p.layer === 'manual' ? t('placement.manual')
+    : p.layer === 'rule' && p.rules.length ? t('placement.rule', { rule: ruleText(p.rules[0]) })
+    : p.layer === 'default' ? t(`placement.default.${p.target}`) : '';
+  if (!text) return '';
+  const title = p.layer === 'rule' ? p.rules.map(ruleText).join('; ') : t(`placement.${p.layer}Note`);
+  return `<span class="tag placement" title="${esc(title)}">${esc(text)}</span>`;
 }
 
 /** Popis pravidla z náhledu přesunu: „Notifikace: odesílatel x@y.cz, předmět obsahuje „faktura““. */

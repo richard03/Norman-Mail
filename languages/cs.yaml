@@ -752,3 +752,11 @@ scope.release: "Zrušit i pravidla, která ji řadí jinam"
 scope.cond.sender: "odesílatel {value}"
 scope.cond.recipient: "příjemce {value}"
 scope.cond.subject: "předmět obsahuje „{value}“"
+
+# Proč je zpráva tady
+placement.manual: "Přesunuto ručně"
+placement.manualNote: "Tuto zprávu jste sem dali sami – pravidla ani filtr spamu ji už nepřesunou."
+placement.rule: "Pravidlo: {rule}"
+placement.default.important: "Jste v poli Komu"
+placement.default.fyi: "Jste v kopii"
+placement.defaultNote: "Žádné pravidlo neplatí – zprávy pro vás jsou v Důležitých, kopie ve Vzít na vědomí."

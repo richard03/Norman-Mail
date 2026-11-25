@@ -722,3 +722,11 @@ scope.release: "Also cancel the rules that file it elsewhere"
 scope.cond.sender: "sender {value}"
 scope.cond.recipient: "recipient {value}"
 scope.cond.subject: "subject contains “{value}”"
+
+# Proč je zpráva tady
+placement.manual: "Moved here manually"
+placement.manualNote: "You placed this message here yourself – rules and the spam filter no longer move it."
+placement.rule: "Rule: {rule}"
+placement.default.important: "You are in To"
+placement.default.fyi: "You are in Cc"
+placement.defaultNote: "No rule applies – messages addressed to you go to Important, copies to For your information."

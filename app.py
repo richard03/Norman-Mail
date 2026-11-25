@@ -546,6 +546,8 @@ def message(acc_id, uid):
         v = syncer.bayes.verdict(bayes.record_key(row))
         if v and v["moved"]:
             data["bayes"] = {"score": v["score"], "tokens": syncer.bayes.explain(v["tokens"])}
+    # proč je zpráva tady (ruční umístění / pravidlo / pole Komu); u spamu od filtru stačí jeho štítek
+    data["placement"] = database.placement(row, acc_id, folder) if row and not data["bayes"] else None
     return jsonify(data)
 
 

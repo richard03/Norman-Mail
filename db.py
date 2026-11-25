@@ -1135,6 +1135,29 @@ class Database:
                             "subject": r["value"] if r["kind"] == "subject" else ""})
         return out
 
+    def placement(self, rec, acc_id, folder):
+        """Proč je zpráva tam, kde je (pro „Proč tady?“ v záhlaví): ruční umístění, explicitní pravidlo,
+        nebo výchozí řazení podle pole Komu. {layer: manual|rule|default, target, rules}; None mimo
+        doručenou poštu, složky aplikace a spam (bayesovský filtr ukazuje vlastní štítek)."""
+        rules = self.matching_rules(rec)
+        user_folder = self._q("SELECT id FROM user_folders WHERE account_id=? AND imap_name=?", (acc_id, folder))
+        if folder == "INBOX":
+            mark = self._q("SELECT category FROM message_marks WHERE key=?", (message_key(rec),))
+            if mark:
+                return {"layer": "manual", "target": mark[0][0], "rules": []}
+            cat = self.categorizer(marks=False)(rec)
+            if cat:
+                return {"layer": "rule", "target": cat,
+                        "rules": [r for r in rules if r["type"] == "category" and r["target"] == cat]}
+            return {"layer": "default", "target": "important" if self.is_direct(rec, acc_id) else "fyi", "rules": []}
+        if user_folder:
+            here = [r for r in rules if r["type"] == "folder" and r["target"] == user_folder[0][0]]
+            return {"layer": "rule" if here else "manual", "target": "folder", "rules": here}
+        if self.spam_folders().get(acc_id) == folder:
+            here = [r for r in rules if r["type"] == "spam"]
+            return {"layer": "rule" if here else "manual", "target": "spam", "rules": here}
+        return None
+
     def delete_rules(self, rules):
         """Smaže pravidla ve tvaru z matching_rules."""
         tables = {"category": "category_rules", "spam": "spam_rules", "folder": "user_folder_rules"}

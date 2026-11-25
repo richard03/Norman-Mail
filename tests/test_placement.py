@@ -80,6 +80,22 @@ class PlacementTest(unittest.TestCase):
         self.d.replace_simple_rules("sender", "eva@example.com", ("category", "unimportant"))
         self.assertEqual(len(self.d.matching_rules(self.msg(2))), 2)
 
+    def test_placement_explains_why(self):
+        p = lambda uid: self.d.placement(self.msg(uid), "a", "INBOX")
+        self.assertEqual((p(1)["layer"], p(1)["target"]), ("default", "important"))
+        self.assertEqual((p(2)["layer"], p(2)["target"]), ("default", "fyi"))
+        self.d.add_category_rule("notifications", sender="eva@example.com")
+        self.assertEqual((p(1)["layer"], p(1)["target"]), ("rule", "notifications"))
+        self.assertEqual(p(1)["rules"][0]["sender"], "eva@example.com")
+        self.d.mark_message(self.msg(1), "important")
+        self.assertEqual((p(1)["layer"], p(1)["target"]), ("manual", "important"))
+        fid = self.d.create_user_folder("Faktury", "a", "Faktury", False, False)
+        self.d.insert_messages("a", "Faktury", [rec(5, subject="Faktura")])
+        in_folder = self.d.message("a", "Faktury", 5)
+        self.assertEqual(self.d.placement(in_folder, "a", "Faktury")["layer"], "manual")
+        self.d.add_folder_rule(fid, "subject", "faktura")
+        self.assertEqual(self.d.placement(in_folder, "a", "Faktury")["layer"], "rule")
+
     def test_natural_view(self):
         self.assertEqual(self.d.natural_view(self.msg(1), "a"), "important")
         self.assertEqual(self.d.natural_view(self.msg(2), "a"), "fyi")

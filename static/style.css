@@ -621,3 +621,4 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }  /* místo
 .settings-main #accountForm { padding: 0; }
 .settings-main #accountForm h2 { font-size: 15px; }
 .settings-main #accountForm #accountCancel { display: none; }
+.tag.placement { background: transparent; border: 1px solid var(--border); cursor: help; }
