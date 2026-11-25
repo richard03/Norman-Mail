@@ -656,7 +656,18 @@ def set_flag(M, folder, uid, flag, value):
 # --------------------------------------------------------------------------
 
 LIST_FIELDS = {"uid", "subject", "from", "to", "date", "seen", "flagged", "has_attachments", "size"}
-HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID CONTENT-TYPE AUTHENTICATION-RESULTS"
+HEADER_FIELDS = "FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES CONTENT-TYPE AUTHENTICATION-RESULTS"
+MID_RE = re.compile(r"<[^<>\s,]+>")
+
+
+def thread_refs(h) -> list:
+    """Message-ID, na které zpráva odpovídá (In-Reply-To a References), bez duplicit."""
+    out = []
+    for name in ("In-Reply-To", "References"):
+        for mid in MID_RE.findall(str(h.get(name) or "")):
+            if mid not in out:
+                out.append(mid)
+    return out
 
 AUTH_PASS = {"pass", "bestguesspass"}  # bestguesspass: Gmail u domén bez DMARC, SPF/DKIM zarovnané s Od
 
@@ -746,6 +757,7 @@ def header_record(uid, flags, size, h) -> dict:
         "size": size,
         "auth_id": auth_id,   # kdo odesílatele ověřoval (authserv-id nejvyšší Authentication-Results)
         "auth_ok": auth_ok,   # DMARC / DKIM pro doménu z Od prošel
+        "refs": thread_refs(h),  # Message-ID předchozích zpráv vlákna
     }
 
 
@@ -1096,8 +1108,9 @@ def base_subject(subject: str) -> str:
     return " ".join(s.split())
 
 
-def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: False, limit=100):
-    """Zprávy související s aktuální: od odesílatele, ode mě pro něj, s ním v kopii, nebo se stejným předmětem."""
+def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: False, limit=100, refs=()):
+    """Zprávy související s aktuální: z vlákna (refs = Message-ID z In-Reply-To / References), od odesílatele,
+    ode mě pro něj, s ním v kopii, nebo se stejným předmětem. Limit platí pro každý druh hledání zvlášť."""
     me, counterpart = me.lower(), (counterpart or "").lower()
     base = base_subject(subject)
     base_cmp = base.lower() if len(base) >= 3 else ""
@@ -1116,7 +1129,16 @@ def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: Fals
             _select(M, f["name"], readonly=True)
         except MailError:
             continue
-        uids = set()
+        uids, thread_uids = set(), set()
+        for mid in [m for m in [*refs, exclude_mid] if m and m.isascii()][-30:]:
+            crits = [("HEADER", "References", q(mid))]
+            if mid != exclude_mid:
+                crits.append(("HEADER", "Message-ID", q(mid)))
+            for crit in crits:
+                typ, data = M.uid("SEARCH", *crit)
+                if typ == "OK" and data and data[0]:
+                    thread_uids.update(data[0].split())
+        thread_uids = {int(u) for u in thread_uids}
         if counterpart and counterpart.isascii() and me.isascii():
             cp, my = q(counterpart), q(me)
             typ, data = M.uid("SEARCH", f"OR OR FROM {cp} CC {cp} (FROM {my} TO {cp})")
@@ -1133,13 +1155,13 @@ def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: Fals
                     uids.update(data[0].split())
             except imaplib.IMAP4.error:  # server nepodporuje UTF-8 hledání
                 M.literal = None
-        uids = sorted({int(u) for u in uids}, reverse=True)[:limit]
-        for uid, flags, h in _fetch_headers(M, uids):
+        uids = sorted({int(u) for u in uids}, reverse=True)[:2 * limit] + sorted(thread_uids, reverse=True)[:limit]
+        for uid, flags, h in _fetch_headers(M, sorted(set(uids))):
             if "\\Deleted" in flags:
                 continue
             frm, to, cc = addr_set(h, "From"), addr_set(h, "To"), addr_set(h, "Cc")
             subj = get_header(h, "Subject")
-            reasons = []
+            reasons = ["thread"] if uid in thread_uids else []
             if counterpart and counterpart in frm:
                 reasons.append("sender")
             if counterpart and me in frm and counterpart in to:
@@ -1161,7 +1183,7 @@ def find_related(M, me, counterpart, subject, exclude_mid, is_stale=lambda: Fals
                 "date": parse_date(get_header(h, "Date")), "seen": "\\Seen" in flags, "reasons": reasons,
             })
     found.sort(key=lambda m: m["date"] or 0, reverse=True)
-    return found[:limit]
+    return found
 
 
 # --------------------------------------------------------------------------

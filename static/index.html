@@ -91,7 +91,14 @@
   </section>
 
   <aside id="context">
-    <div class="col-title"><span data-i18n="context.title"></span> <span id="contextCount" class="muted"></span></div>
+    <div class="col-title context-head"><span data-i18n="context.title"></span> <span id="contextCount" class="muted"></span>
+      <span class="spacer"></span>
+      <select id="contextFilter" data-i18n-aria-label="context.filter.label">
+        <option value="all" data-i18n="context.filter.all"></option>
+        <option value="thread" data-i18n="context.filter.thread"></option>
+        <option value="sender" data-i18n="context.filter.sender"></option>
+        <option value="subject" data-i18n="context.filter.subject"></option>
+      </select></div>
     <div id="contextBody"><div class="empty small" data-i18n="common.selectMessage"></div></div>
   </aside>
 </div>

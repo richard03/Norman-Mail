@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS messages(
     from_json TEXT, to_json TEXT, cc_json TEXT,
     from_addrs TEXT, to_addrs TEXT, cc_addrs TEXT,   -- ",a@b.cz,c@d.cz," pro rychlé hledání
     date REAL, seen INTEGER, flagged INTEGER, has_attachments INTEGER, size INTEGER,
+    refs TEXT,                                        -- ",<id1>,<id2>," (In-Reply-To + References); NULL = nestaženo
     PRIMARY KEY(account_id, folder, uid));
 CREATE INDEX IF NOT EXISTS ix_messages_date ON messages(account_id, folder, date);
 CREATE INDEX IF NOT EXISTS ix_messages_subject ON messages(account_id, base_subject);
@@ -242,6 +243,11 @@ def _addrs(lst) -> str:
     return "," + ",".join(a["addr"].lower() for a in lst if a.get("addr")) + ","
 
 
+def _refs(mids) -> str:
+    """Message-ID vlákna pro hledání přes LIKE: ",<a>,<b>," (bez odkazů jen "," = staženo, nic)."""
+    return "," + "".join(f"{m}," for m in mids or [])
+
+
 class Database:
     def __init__(self, path=DB_FILE):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +263,8 @@ class Database:
         if "account_id" not in cols:
             self._conn.execute("ALTER TABLE user_folders ADD COLUMN account_id TEXT")
         # migrace: „ihned / až po přečtení“ má každé pravidlo zvlášť (dřív celá složka) – převzít nastavení složky
+        if "refs" not in {r[1] for r in self._conn.execute("PRAGMA table_info(messages)")}:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN refs TEXT")  # migrace: hlavičky vlákna
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folders)")}
         if "auto_sort" not in cols:  # migrace: filtr podobnosti smí do složky řadit sám
             self._conn.execute("ALTER TABLE user_folders ADD COLUMN auto_sort INTEGER DEFAULT 0")
@@ -383,11 +391,12 @@ class Database:
         rows = [(acc_id, folder, r["uid"], r["message_id"], r["subject"], r["base_subject"],
                  json.dumps(r["from"], ensure_ascii=False), json.dumps(r["to"], ensure_ascii=False),
                  json.dumps(r["cc"], ensure_ascii=False), _addrs(r["from"]), _addrs(r["to"]), _addrs(r["cc"]),
-                 r["date"], int(r["seen"]), int(r["flagged"]), int(r["has_attachments"]), r["size"])
+                 r["date"], int(r["seen"]), int(r["flagged"]), int(r["has_attachments"]), r["size"],
+                 _refs(r["refs"]) if "refs" in r else None)
                 for r in records if not r.get("deleted")]
         def run(c):
             new = self._new_records(c, acc_id, folder, records)
-            c.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            c.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
             if new and self._contacts_built(c):
                 self._learn_contacts(c, acc_id, folder, new)
         self._tx(run)
@@ -1202,33 +1211,67 @@ class Database:
 
     # ------------------------------------------------------------------ kontext
 
-    def related(self, acc_id, folders, me, counterpart, base, exclude_mid, limit=100) -> list:
-        """Související zprávy čistě z databáze (stejná pravidla jako mail.find_related)."""
+    def related(self, acc_id, folders, me, counterpart, base, exclude_mid, refs=None, limit=100) -> list:
+        """Související zprávy čistě z databáze (stejná pravidla jako mail.find_related). Důvody (reasons):
+        thread = diskusní vlákno podle In-Reply-To / References (u zpráv s ještě nestaženými hlavičkami
+        stejný předmět a protistrana), sender / mine / cc = protistrana, subject = stejný předmět.
+        limit platí pro každý druh hledání zvlášť, ať častý odesílatel nevytlačí zprávy z vlákna."""
         me, cp = me.lower(), (counterpart or "").lower()
         roles = {f["name"]: f for f in folders}
-        marks = ",".join("?" * len(roles))
-        conds, params = [], []
-        if cp:
-            conds += ["m.from_addrs LIKE ?", "m.cc_addrs LIKE ?", "(m.from_addrs LIKE ? AND m.to_addrs LIKE ?)"]
-            params += [f"%,{cp},%", f"%,{cp},%", f"%,{me},%", f"%,{cp},%"]
-        if len(base) >= 3:
-            conds.append("m.base_subject = ?")
-            params.append(base)
-        if not conds or not roles:
+        if not roles:
             return []
-        rows = self._q(f"""{self._SELECT} WHERE m.account_id=? AND m.folder IN ({marks}) AND ({' OR '.join(conds)})
-                           ORDER BY m.date DESC LIMIT ?""", (acc_id, *roles, *params, limit * 3))
+        marks = ",".join("?" * len(roles))
+        rows = {}
+
+        def fetch(cond, params, n=limit):
+            got = self._q(f"""{self._SELECT} WHERE m.account_id=? AND m.folder IN ({marks}) AND ({cond})
+                              ORDER BY m.date DESC LIMIT ?""", (acc_id, *roles, *params, n))
+            for r in got:
+                rows[(r["folder"], r["uid"])] = r
+            return got
+
+        # vlákno: zprávy, na které otevřená odpovídá, a zprávy, které odpovídají na ni či na ně (2 kola)
+        thread, ids, known = set(), {m for m in (refs or []) if m}, set()
+        if exclude_mid:
+            ids.add(exclude_mid)
+        for _ in range(2):
+            new = sorted(ids - known)[:50]
+            if not new:
+                break
+            known |= set(new)
+            got = fetch(f"m.message_id IN ({','.join('?' * len(new))}) OR "
+                        + " OR ".join(["m.refs LIKE ?"] * len(new)),
+                        (*new, *(f"%,{m},%" for m in new)), 3 * limit)
+            for r in got:
+                thread.add((r["folder"], r["uid"]))
+                if r["message_id"]:
+                    ids.add(r["message_id"])
+                ids.update(m for m in (r["refs"] or "").split(",") if m)
+        if cp:
+            fetch("m.from_addrs LIKE ? OR m.cc_addrs LIKE ? OR (m.from_addrs LIKE ? AND m.to_addrs LIKE ?)",
+                  (f"%,{cp},%", f"%,{cp},%", f"%,{me},%", f"%,{cp},%"))
+        if len(base) >= 3:
+            fetch("m.base_subject = ?", (base,))
+            if cp:  # náhrada vlákna u zpráv, které ještě nemají stažené hlavičky odpovědí
+                fetch("m.base_subject = ? AND m.refs IS NULL AND "
+                      "(m.from_addrs LIKE ? OR m.cc_addrs LIKE ? OR m.to_addrs LIKE ?)", (base, *[f"%,{cp},%"] * 3))
+
         found, by_mid = [], {}
-        for r in rows:
+        for key, r in sorted(rows.items(), key=lambda kv: kv[1]["date"] or 0, reverse=True):
             m = self._to_dict(r)
+            frm, to, cc = r["from_addrs"], r["to_addrs"], r["cc_addrs"]
+            same_subject = len(base) >= 3 and r["base_subject"] == base
             reasons = []
-            if cp and f",{cp}," in r["from_addrs"]:
+            if key in thread or (same_subject and cp and r["refs"] is None
+                                 and any(f",{cp}," in a for a in (frm, to, cc))):
+                reasons.append("thread")
+            if cp and f",{cp}," in frm:
                 reasons.append("sender")
-            if cp and f",{me}," in r["from_addrs"] and f",{cp}," in r["to_addrs"]:
+            if cp and f",{me}," in frm and f",{cp}," in to:
                 reasons.append("mine")
-            if cp and f",{cp}," in r["cc_addrs"]:
+            if cp and f",{cp}," in cc:
                 reasons.append("cc")
-            if len(base) >= 3 and r["base_subject"] == base:
+            if same_subject:
                 reasons.append("subject")
             mid = m["message_id"]
             if not reasons or (mid and mid == exclude_mid):
@@ -1244,4 +1287,21 @@ class Database:
             if mid:
                 by_mid[mid] = m
             found.append(m)
-        return found[:limit]
+        return found
+
+    def refs_of(self, acc_id, folder, uid):
+        """Message-ID předchozích zpráv vlákna, nebo None, pokud hlavičky ještě nejsou stažené."""
+        rows = self._q("SELECT refs FROM messages WHERE account_id=? AND folder=? AND uid=?", (acc_id, folder, uid))
+        if not rows or rows[0][0] is None:
+            return None
+        return [m for m in rows[0][0].split(",") if m]
+
+    def missing_refs(self, acc_id, folder, limit) -> list:
+        """UID zpráv, u kterých ještě nejsou stažené hlavičky vlákna (nejnovější první)."""
+        return [r[0] for r in self._q("""SELECT uid FROM messages WHERE account_id=? AND folder=? AND refs IS NULL
+                                         ORDER BY uid DESC LIMIT ?""", (acc_id, folder, limit))]
+
+    def set_refs(self, acc_id, folder, refs):
+        """refs: {uid: [Message-ID]}"""
+        self._tx(lambda c: c.executemany("UPDATE messages SET refs=? WHERE account_id=? AND folder=? AND uid=?",
+                                         [(_refs(v), acc_id, folder, u) for u, v in refs.items()]))

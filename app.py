@@ -1659,7 +1659,7 @@ def message_context(acc_id, uid):
             counterpart = next((a["addr"] for a in row["to"] if a["addr"].lower() != me), "")
         related = database.related(acc_id, sync.context_folders(database.folders(acc_id), database.user_folder_names(acc_id)),
                                    me, counterpart,
-                                   row["base_subject"], row["message_id"])
+                                   row["base_subject"], row["message_id"], database.refs_of(acc_id, folder, uid))
         return jsonify(messages=related, counterpart=counterpart, cached=True)
 
     with jobs_lock:
@@ -1669,7 +1669,7 @@ def message_context(acc_id, uid):
         if is_stale():
             return jsonify(stale=True, messages=[])
         mail._select(M, folder, readonly=True)
-        headers = mail._fetch_headers(M, [uid])
+        headers = mail._fetch_headers(M, [uid], "FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES")
         if not headers:
             raise mail.MailError(tr("err.messageNotFound"))
         _, _, h = headers[0]
@@ -1679,7 +1679,7 @@ def message_context(acc_id, uid):
         if counterpart.lower() == me:  # moje odeslaná zpráva – protistranou je adresát
             counterpart = next((a["addr"] for a in to if a["addr"].lower() != me), "")
         related = mail.find_related(M, me, counterpart, mail.get_header(h, "Subject"),
-                                    mail.get_header(h, "Message-ID").strip(), is_stale)
+                                    mail.get_header(h, "Message-ID").strip(), is_stale, refs=mail.thread_refs(h))
     if related is None:
         return jsonify(stale=True, messages=[])
     for m in related:

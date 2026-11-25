@@ -742,3 +742,8 @@ placement.bayesInfo: "The Bayesian filter filed the message into \"{target}\" fo
 placement.bayesTokensInfo: "Strongest signs:"
 placement.defaultInfo.important: "No rule applies – messages where you are in \"To:\" go to \"Important\" folder."
 placement.defaultInfo.fyi: "No rule applies – messages where you are only in \"Cc:\" go to \"For your information\" folder."
+context.filter.label: "Which related messages to show"
+context.filter.all: "Everything"
+context.filter.thread: "Conversation thread"
+context.filter.sender: "Same sender"
+context.filter.subject: "Same subject"

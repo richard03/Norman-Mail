@@ -772,3 +772,8 @@ placement.bayesInfo: "Zprávu do složky „{target}“ zařadil bayesovský fil
 placement.bayesTokensInfo: "Nejvýraznější znaky:"
 placement.defaultInfo.important: "Žádné pravidlo neplatí – zprávy, ve kterých jste v poli „Komu:“, jdou do složky „Důležité“."
 placement.defaultInfo.fyi: "Žádné pravidlo neplatí – zprávy, ve kterých jste jen v poli „Kopie:“, jdou do složky „Vzít na vědomí“."
+context.filter.label: "Které související zprávy zobrazit"
+context.filter.all: "Všechno"
+context.filter.thread: "Diskusní vlákno"
+context.filter.sender: "Stejný odesílatel"
+context.filter.subject: "Stejný předmět"

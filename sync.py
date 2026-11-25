@@ -21,6 +21,7 @@ AUTH_RECHECK = 7 * 86400
 
 BATCH = 200                 # hlaviček na jeden FETCH
 BACKFILL_BATCHES = 10       # max. dávek historie na složku v jednom cyklu (ať doručená pošta nečeká)
+REFS_BATCHES = 10           # max. dávek dodatečně stahovaných hlaviček vlákna na složku v jednom cyklu
 FULL_FLAGS_LIMIT = 5000     # do této velikosti složky kontrolujeme příznaky všech zpráv
 RECENT_FLAGS = 1000         # u větších složek jen posledních N
 INTERVAL = 30               # s mezi kontrolami doručené pošty
@@ -168,10 +169,11 @@ class SyncManager:
                 if full:
                     for acc in accounts:
                         for f in folder_sets.get(acc["id"], []):
-                            if f["name"] == "INBOX":
-                                continue
                             try:
-                                busy |= not self.sync_folder(acc, f["name"], max_batches=BACKFILL_BATCHES)
+                                if f["name"] != "INBOX":
+                                    busy |= not self.sync_folder(acc, f["name"], max_batches=BACKFILL_BATCHES)
+                                if f["role"] != "trash":
+                                    busy |= not self.backfill_refs(acc, f["name"])
                             except Exception as e:
                                 self._error(acc, e)
                                 break
@@ -276,6 +278,21 @@ class SyncManager:
         if folder == self.db.trash_folders().get(acc_id):
             self._mark_folder_read(acc, folder)
         return complete
+
+    def backfill_refs(self, acc, folder, batches=REFS_BATCHES) -> bool:
+        """Hlavičky vlákna (In-Reply-To, References) u zpráv stažených dřív, než se ukládaly – po dávkách.
+        Vrací True, když už nic nechybí."""
+        for _ in range(batches):
+            uids = self.db.missing_refs(acc["id"], folder, BATCH)
+            if not uids:
+                return True
+            with self.pool.get(acc) as M:
+                mail._select(M, folder, readonly=True)
+                got = {uid: mail.thread_refs(h) for uid, _, h in
+                       mail._fetch_headers(M, uids, "IN-REPLY-TO REFERENCES")}
+            # zprávy, které server už nevrátil (smazané mezitím), dostanou prázdné odkazy – jinak by se stahovaly stále
+            self.db.set_refs(acc["id"], folder, {u: got.get(u, []) for u in uids})
+        return not self.db.missing_refs(acc["id"], folder, 1)
 
     # ------------------------------------------------------------------ koš („Smazané“)
 

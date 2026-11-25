@@ -1700,6 +1700,7 @@ let ctxToken = 0;
 function clearContext(text = t('common.selectMessage')) {
   ctxToken++;
   state.context = [];
+  contextFilterLabels(null);
   $('#contextCount').textContent = '';
   $('#contextBody').innerHTML = text ? `<div class="empty small">${esc(text)}</div>` : '';
 }
@@ -1718,14 +1719,41 @@ async function loadContext() {
   }
 }
 
+// Filtr v záhlaví Kontextu: které důvody (reasons ze serveru) do které volby patří
+const CONTEXT_FILTERS = {
+  all: () => true,
+  thread: m => m.reasons.includes('thread'),
+  sender: m => m.reasons.some(r => ['sender', 'mine', 'cc'].includes(r)),
+  subject: m => m.reasons.includes('subject'),
+};
+const CONTEXT_FILTER_KEY = 'mailer.contextFilter';
+try {
+  const saved = localStorage.getItem(CONTEXT_FILTER_KEY);
+  if (CONTEXT_FILTERS[saved]) $('#contextFilter').value = saved;
+} catch { /* úložiště nedostupné */ }
+$('#contextFilter').addEventListener('change', e => {
+  try { localStorage.setItem(CONTEXT_FILTER_KEY, e.target.value); } catch { /* úložiště nedostupné */ }
+  renderContext();
+});
+
+/** Popisky voleb filtru, s počty zpráv, když je otevřená zpráva s kontextem. */
+function contextFilterLabels(items) {
+  for (const opt of $('#contextFilter').options) {
+    const label = t(`context.filter.${opt.value}`);
+    opt.textContent = items ? `${label} (${items.filter(CONTEXT_FILTERS[opt.value]).length})` : label;
+  }
+}
+
 function renderContext() {
-  const items = state.context;
+  const all = state.context;
+  contextFilterLabels(all);
+  const items = all.map((m, i) => ({ m, i })).filter(({ m }) => CONTEXT_FILTERS[$('#contextFilter').value](m));
   $('#contextCount').textContent = items.length ? `(${items.length})` : '';
   if (!items.length) {
     $('#contextBody').innerHTML = `<div class="empty small">${esc(t('context.none'))}</div>`;
     return;
   }
-  $('#contextBody').innerHTML = items.map((m, i) => {
+  $('#contextBody').innerHTML = items.map(({ m, i }) => {
     const me = (accById(m.account_id)?.email || '').toLowerCase();
     const fromMe = m.from[0]?.addr.toLowerCase() === me;
     const who = fromMe ? t('context.meTo', { to: shortAddr(m.to) }) : shortAddr(m.from);
