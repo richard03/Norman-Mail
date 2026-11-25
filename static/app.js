@@ -3437,3 +3437,33 @@ loadColumnWidths();
   // seznam složek (a případné chyby připojení) občas obnovíme ze serveru
   setInterval(() => { if (!document.hidden) state.accounts.forEach(a => loadFolders(a.id)); }, 300000);
 })();
+
+// --- textový filtr nad seznamy pravidel v Nastavení (filtruje i po každém novém vykreslení seznamu)
+function filterRules(list) {
+  const input = document.querySelector(`.rule-filter[data-filter="${list.id}"]`);
+  const rules = [...list.querySelectorAll(':scope > li.rule')];
+  input.hidden = rules.length < 2 && !input.value;
+  const q = foldText(input.value.trim());
+  let shown = 0;
+  for (const li of rules) {
+    li.hidden = !!q && !foldText(li.textContent).includes(q);
+    if (!li.hidden) shown++;
+  }
+  let none = list.querySelector(':scope > li.no-match');
+  if (q && rules.length && !shown) {
+    if (!none) {
+      none = document.createElement('li');
+      none.className = 'empty-rules no-match';
+      none.textContent = t('list.nothingFound');
+      list.append(none);
+    }
+  } else none?.remove();
+}
+document.querySelectorAll('.rule-filter').forEach(input => {
+  const list = document.getElementById(input.dataset.filter);
+  input.addEventListener('input', () => filterRules(list));
+  new MutationObserver(muts => {
+    if (muts.some(m => [...m.addedNodes].some(n => n.classList?.contains('rule')))) filterRules(list);
+  }).observe(list, { childList: true });
+  filterRules(list);
+});

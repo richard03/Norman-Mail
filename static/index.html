@@ -504,14 +504,17 @@
     <aside class="settings-rules">
       <div data-panel="unimportant">
         <h3><span data-i18n="common.rules"></span> <span id="unimportantRulesCount" class="muted"></span></h3>
+        <input type="search" class="rule-filter" data-filter="unimportantRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="unimportantRules" class="rules"></ul>
       </div>
       <div data-panel="spam">
         <h3><span data-i18n="common.rules"></span> <span id="spamRulesCount" class="muted"></span></h3>
+        <input type="search" class="rule-filter" data-filter="spamRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="spamRules" class="rules"></ul>
       </div>
       <div data-panel="notifications">
         <h3><span data-i18n="common.rules"></span> <span id="notificationsRulesCount" class="muted"></span></h3>
+        <input type="search" class="rule-filter" data-filter="notificationsRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="notificationsRules" class="rules"></ul>
       </div>
       <div data-panel="folder" id="folderRulesSection">
@@ -530,6 +533,7 @@
           <input id="folderRuleInput" data-i18n-placeholder="common.senderPlaceholder" autocomplete="off">
           <button type="button" id="folderRuleAdd" class="btn" data-i18n="common.add"></button>
         </div>
+        <input type="search" class="rule-filter" data-filter="folderRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="folderRules" class="rules"></ul>
       </div>
     </aside>
