@@ -21,6 +21,7 @@ import db
 import google_oauth
 import i18n
 from i18n import t as tr
+import layout
 import mail
 import sync
 import taskbar
@@ -588,6 +589,35 @@ def attachment(acc_id, uid, index):
     # Vždy jako stažení – HTML příloha se nesmí vykreslit v kontextu aplikace.
     return send_file(io.BytesIO(data), mimetype="application/octet-stream",
                      as_attachment=True, download_name=filename)
+
+
+def message_raw(acc_id, folder, uid) -> bytes:
+    """Celá zpráva: z cache, jinak ze serveru."""
+    acc = account_or_404(acc_id)
+    raw = database.get_body(acc_id, folder, uid)
+    if raw is None:
+        with pool.get(acc) as M:
+            raw = mail.get_raw(M, folder, uid)
+    return raw
+
+
+def export_message(acc_id, folder, uid, fmt):
+    """Zpráva k uložení: (název souboru, data). fmt = eml (původní zpráva) | txt (prostý text)."""
+    if fmt not in ("eml", "txt"):
+        abort(400, tr("err.invalidRequest"))
+    raw = message_raw(acc_id, folder, uid)
+    subject = mail.get_header(mail.email.message_from_bytes(raw, policy=mail.policy.default), "Subject")
+    name = mail.clean_filename(subject, tr("message.fileName"))
+    if fmt == "eml":
+        return f"{name}.eml", raw
+    return f"{name}.txt", ("\ufeff" + mail.message_as_text(raw)).encode("utf-8")  # BOM: Poznámkový blok pozná UTF-8
+
+
+@app.get("/api/accounts/<acc_id>/messages/<int:uid>/export")
+def message_export(acc_id, uid):
+    """Uložení zprávy jako .eml / .txt (vývojový server; desktop ukládá přes dialog v main.py)."""
+    filename, data = export_message(acc_id, folder_arg(), uid, request.args.get("format", "eml"))
+    return send_file(io.BytesIO(data), mimetype="application/octet-stream", as_attachment=True, download_name=filename)
 
 
 @app.post("/api/accounts/<acc_id>/messages/<int:uid>/flags")
@@ -1238,13 +1268,19 @@ def spam_list():
     return _role_list(database.spam_folders())
 
 
-def _role_list(by_acc):
+@app.get("/api/archive")
+def archive_list():
+    """Složka Archiv: archivované zprávy všech účtů dohromady (z databáze)."""
+    return _role_list(database.archive_folders(), archived=True)
+
+
+def _role_list(by_acc, archived=False):
     locations = {a["id"]: by_acc[a["id"]] for a in store.all() if a["id"] in by_acc}
     page = max(0, request.args.get("page", 0, type=int))
     offset, limit = list_window(UNIFIED_PAGE_SIZE)
     version = database.version
     res = database.list_messages([], locations, page, limit, offset=offset, unread=unread_arg(),
-                                 search=query_arg())
+                                 search=query_arg(), archived=archived)
     return jsonify(messages=res["messages"], has_more=res["has_more"], total=res["total"], errors=[], version=version)
 
 
@@ -1281,6 +1317,28 @@ def settings_put():
     i18n.set_language(result["language"])
     syncer.trigger()  # případný úklid podle nového nastavení hned
     return jsonify(result)
+
+
+UI_COLUMNS = ("sidebar", "list", "context")
+
+
+@app.get("/api/ui")
+def ui_get():
+    """Rozvržení okna pro rozhraní: šířky sloupců (z window.json, viz layout.py)."""
+    cols = layout.load().get("columns")
+    return jsonify({"columns": cols} if isinstance(cols, dict) else {})
+
+
+@app.put("/api/ui")
+def ui_put():
+    """Uloží šířky sloupců {columns: {sidebar|list|context: px}}; neplatné hodnoty se vynechají.
+    Rozvržení je ve window.json (k počítači), ne v databázi (k poště)."""
+    cols = (request.get_json(force=True) or {}).get("columns")
+    if isinstance(cols, dict):
+        clean = {k: round(v) for k, v in cols.items()
+                 if k in UI_COLUMNS and isinstance(v, (int, float)) and 100 <= v <= 2000}
+        layout.update(columns=clean)
+    return ui_get()
 
 
 @app.get("/api/i18n")
@@ -1512,6 +1570,12 @@ def message_locate(acc_id, uid):
         if by_acc.get(acc_id) == folder:
             locations = {a: by_acc[a] for a in accounts if a in by_acc}
             return jsonify(view={"type": kind}, position=pos(locations))
+    by_acc = database.archive_folders()
+    if by_acc.get(acc_id) == folder:
+        locations = {a: by_acc[a] for a in accounts if a in by_acc}
+        position = database.list_position(accounts, locations, "all", acc_id, folder, uid, archived=True)
+        if position is not None:  # Gmail: zpráva ze „Všech zpráv“, která je i jinde, v Archivu není
+            return jsonify(view={"type": "archive"}, position=position)
     title = (database.folder(acc_id, folder) or {}).get("display") or mail.decode_utf7(folder)
     return jsonify(view={"type": "folder", "accountId": acc_id, "folder": folder, "title": title},
                    position=database.list_position([acc_id], folder, "all", acc_id, folder, uid))
@@ -1562,9 +1626,9 @@ def _search_locations():
     if scope == "ufolder":
         f = _folder_or_404(request.args.get("id", type=int) or 0)
         return ({f["account_id"]: [f["imap_name"]]} if f["account_id"] and store.get(f["account_id"]) else {}), None
-    if scope in ("spam", "trash", "sent"):
+    if scope in ("spam", "trash", "sent", "archive"):
         by_acc = {"spam": database.spam_folders, "trash": database.trash_folders,
-                  "sent": database.sent_folders}[scope]()
+                  "sent": database.sent_folders, "archive": database.archive_folders}[scope]()
         return {a["id"]: [by_acc[a["id"]]] for a in accounts if a["id"] in by_acc}, None
     if scope == "folder":
         acc = account_or_404(request.args.get("account"))

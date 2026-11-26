@@ -627,6 +627,38 @@ def get_attachments(M, folder, uid, indexes) -> list:
     return attachments_from_raw(raw, indexes)
 
 
+def get_raw(M, folder, uid) -> bytes:
+    """Celá zpráva ze serveru (pro uložení jako .eml); příliš velkou zprávu odmítne."""
+    _select(M, folder, readonly=True)
+    raw, _, size = _fetch_raw(M, uid)
+    if size > MAX_MESSAGE:
+        raise MessageTooLarge(too_large_text(size))
+    return raw
+
+
+def message_as_text(raw: bytes) -> str:
+    """Zpráva jako prostý text (pro uložení jako .txt): záhlaví, text (z HTML převedený) a seznam příloh."""
+    msg = email.message_from_bytes(raw, policy=policy.default)
+    data = parse_message(raw, 0, "", [])
+    addrs = lambda lst: ", ".join(f"{a['name']} <{a['addr']}>" if a["name"] else a["addr"] for a in lst)
+    lines = [f"{tr('message.from')}: {addrs(data['from'])}", f"{tr('message.to')}: {addrs(data['to'])}"]
+    if data["cc"]:
+        lines.append(f"{tr('message.cc')}: {addrs(data['cc'])}")
+    lines.append(f"{tr('message.date')}: {get_header(msg, 'Date').strip()}")
+    lines.append(f"{tr('message.subject')}: {data['subject']}")
+    if data["attachments"]:
+        lines.append(f"{tr('message.attachments')}: " + ", ".join(a["filename"] for a in data["attachments"]))
+    text = data["text"] if data["text"] else (html_to_text(data["html"]) if data["html"] else "")
+    crlf = "\r\n"
+    return crlf.join(lines) + crlf * 2 + crlf.join(text.splitlines())
+
+
+def all_attachments(raw: bytes) -> list:
+    """Všechny přílohy zprávy (tytéž, které ukazuje rozhraní): [(filename, content_type, data)]."""
+    indexes = [a["index"] for a in parse_message(raw, 0, "", [])["attachments"]]
+    return attachments_from_raw(raw, indexes) if indexes else []
+
+
 def attachments_from_raw(raw: bytes, indexes) -> list:
     leaves = _leaves(email.message_from_bytes(raw, policy=policy.default))
     out = []
@@ -923,10 +955,18 @@ def move_to_named_folder(M, folder, uids, imap_name, mark_read=False) -> int:
         return 0
     ensure_named_folder(M, imap_name)
     _select(M, folder, readonly=False)
+    ids = [str(u) for u in uids]
     if mark_read:
-        ids = [str(u) for u in uids]
         for i in range(0, len(ids), 500):
             M.uid("STORE", ",".join(ids[i:i + 500]), "+FLAGS", "(\\Seen)")
+    if find_role(M, "all") == folder:
+        # Gmail „Všechny zprávy“: zpráva v nich zůstává vždy, přesun = jen přidat štítek (COPY).
+        # Vyjmutí ze „Všech zpráv“ Gmail chápe jako smazání (zpráva by skončila v koši).
+        for i in range(0, len(ids), 500):
+            typ, _ = M.uid("COPY", ",".join(ids[i:i + 500]), q(imap_name))
+            if typ != "OK":
+                raise MailError(tr("err.moveFailed", folder=decode_utf7(imap_name)))
+        return len(uids)
     _move_uids(M, uids, imap_name)
     return len(uids)
 

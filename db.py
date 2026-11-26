@@ -156,6 +156,18 @@ IS_TODO = f"EXISTS (SELECT 1 FROM todos td WHERE td.key={MSG_KEY})"
 # Pohled ToDo ukazuje i zprávy označené k vyřízení ve složkách aplikace (zpráva zůstává i ve své složce).
 IN_TODO_FOLDERS = ("(m.folder=? OR m.folder IN (SELECT u.imap_name FROM user_folders u "
                    "WHERE u.account_id=m.account_id))")
+# Archiv: u Gmailu jsou archivem „Všechny zprávy“, kde je ale i doručená, odeslaná pošta, koncepty a zprávy
+# ve složkách aplikace (u Gmailu jsou to jen štítky). Zpráva ze „Všech zpráv“, která je (podle Message-ID)
+# zároveň v takové složce, archivovaná není – každá zpráva je vidět jen na jednom místě.
+# (Seznamy složek jsou nekorelované poddotazy – spočítají se jednou, ne pro každou zprávu.)
+NOT_ELSEWHERE = ("NOT ((m.account_id || ' ' || m.folder) IN "
+                 "(SELECT af.account_id || ' ' || af.name FROM folders af WHERE af.role='all') "
+                 "AND COALESCE(m.message_id, '')<>'' AND EXISTS (SELECT 1 FROM messages x LEFT JOIN folders xf "
+                 "ON xf.account_id=x.account_id AND xf.name=x.folder "
+                 "WHERE x.message_id=m.message_id AND x.account_id=m.account_id AND x.folder<>m.folder "
+                 "AND (x.folder='INBOX' OR xf.role IN ('sent', 'drafts', 'junk', 'trash') "
+                 "OR (x.account_id || ' ' || x.folder) IN "
+                 "(SELECT u.account_id || ' ' || u.imap_name FROM user_folders u WHERE u.account_id IS NOT NULL))))")
 VIEW_FILTERS = {
     "todo": IS_TODO,
     # Důležité: přímo pro mě, nebo zpráva ručně označená jako důležitá (tlačítko Důležité)
@@ -548,7 +560,7 @@ class Database:
         return tr(role) if role else (f.get("display") or folder)
 
     def list_messages(self, acc_ids, folder, page, page_size, view="all", offset=None, search=None,
-                      unread=None) -> dict:
+                      unread=None, archived=False) -> dict:
         """Stránka seznamu. offset (místo page) = počet už zobrazených zpráv – pak stránkování
         nic nepřeskočí, ani když mezitím nějaké zprávy zmizely. unread = (keep,) → jen nepřečtené;
         keep = (účet, složka, uid) zprávy, která v seznamu zůstane i přečtená (právě otevřená), nebo None."""
@@ -556,7 +568,7 @@ class Database:
             offset = page * page_size
         if isinstance(folder, dict) and not folder:
             return {"messages": [], "total": 0, "has_more": False}
-        where, params = self._list_where(acc_ids, folder, view)
+        where, params = self._list_where(acc_ids, folder, view, archived)
         if unread is not None:
             keep = unread[0]
             if keep:
@@ -568,14 +580,18 @@ class Database:
             where += " AND (m.subject LIKE ? OR m.from_json LIKE ? OR m.to_json LIKE ?)"
             params += [f"%{search}%"] * 3
         total = self._q(f"SELECT COUNT(*) FROM messages m {where}", params)[0][0]
-        rows = self._q(f"{self._SELECT} {where} ORDER BY m.date DESC, m.uid DESC LIMIT ? OFFSET ?",
+        # nejdřív stránka (jen řazení), drahé sloupce (zařazení podle pravidel) pak jen pro ni
+        order = "ORDER BY m.date DESC, m.uid DESC"
+        rows = self._q(f"""{self._SELECT} WHERE m.rowid IN
+                           (SELECT m.rowid FROM messages m {where} {order} LIMIT ? OFFSET ?) {order}""",
                        (*params, page_size, offset))
         return {"messages": [self._to_dict(r) for r in rows], "total": total,
                 "has_more": offset + page_size < total}
 
     @staticmethod
-    def _list_where(acc_ids, folder, view="all"):
-        """Podmínka seznamu: účty + složka, nebo {account_id: složka} (např. koše všech účtů)."""
+    def _list_where(acc_ids, folder, view="all", archived=False):
+        """Podmínka seznamu: účty + složka, nebo {account_id: složka} (např. koše všech účtů).
+        archived: jen archivované zprávy – ze „Všech zpráv“ (Gmail) bez těch, které jsou zároveň jinde."""
         if isinstance(folder, dict):
             where = "WHERE (" + " OR ".join(["(m.account_id=? AND m.folder=?)"] * len(folder)) + ")"
             params = [x for pair in folder.items() for x in pair]
@@ -583,13 +599,15 @@ class Database:
             in_folder = IN_TODO_FOLDERS if view == "todo" and folder == "INBOX" else "m.folder=?"
             where = f"WHERE m.account_id IN ({','.join('?' * len(acc_ids))}) AND {in_folder}"
             params = [*acc_ids, folder]
+        if archived:
+            where += f" AND {NOT_ELSEWHERE}"
         return where + f" AND {VIEW_FILTERS[view]}", params
 
-    def list_position(self, acc_ids, folder, view, acc_id, msg_folder, uid):
+    def list_position(self, acc_ids, folder, view, acc_id, msg_folder, uid, archived=False):
         """Pořadí zprávy (od 0) v seznamu se stejným řazením jako list_messages; None = v seznamu není."""
         if isinstance(folder, dict) and not folder:
             return None
-        where, params = self._list_where(acc_ids, folder, view)
+        where, params = self._list_where(acc_ids, folder, view, archived)
         rows = self._q(f"""SELECT pos FROM (
                 SELECT m.account_id, m.folder, m.uid,
                        ROW_NUMBER() OVER (ORDER BY m.date DESC, m.uid DESC) - 1 AS pos
@@ -656,6 +674,13 @@ class Database:
     def spam_folders(self) -> dict:
         """{account_id: název složky Spam}"""
         return self.role_folders("junk")
+
+    def archive_folders(self) -> dict:
+        """{account_id: archivní složka} – složka Archiv, u Gmailu (bez ní) „Všechny zprávy“.
+        Stejné pořadí jako při archivaci (mail.archive_message)."""
+        out = self.role_folders("all")
+        out.update(self.role_folders("archive"))
+        return out
 
     def role_uids_older(self, role, older_than) -> dict:
         """{account_id: (složka, [uid])} zpráv ve složkách dané role starších než older_than (unix ts)."""

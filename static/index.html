@@ -246,6 +246,20 @@
       </select>
     </label>
     <p id="presetNote" class="note"></p>
+    <!-- Nový účet Gmail: dvě rovnocenné cesty – přes Google, nebo heslem aplikace -->
+    <div id="gmailTabs" class="gmail-tabs" role="tablist" hidden>
+      <button type="button" role="tab" data-gmail-tab="google" data-i18n="account.tabGoogle"></button>
+      <button type="button" role="tab" data-gmail-tab="password" data-i18n="account.tabAppPassword"></button>
+    </div>
+    <div id="appPasswordHelp" class="app-password-help" hidden>
+      <ol>
+        <li data-i18n="account.appPasswordStep1"></li>
+        <li><span data-i18n="account.appPasswordStep2"></span>
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">myaccount.google.com/apppasswords</a> <span data-i18n="account.appPasswordStep2b"></span></li>
+        <li data-i18n="account.appPasswordStep3"></li>
+      </ol>
+      <p class="note small" data-i18n="account.appPasswordNote"></p>
+    </div>
     <div id="googleBox" class="google-box" hidden>
       <div class="google-row">
         <button type="button" id="googleLoginBtn" class="btn google">
@@ -263,13 +277,13 @@
       <p id="googlePrivacy" class="note small"><span data-i18n="account.googlePrivacy"></span>
         <a href="https://richard03.github.io/Norman-Mail/privacy.html" target="_blank" rel="noopener" data-i18n="site.privacy"></a></p>
       <p id="googleStatus" class="note"></p>
-      <p id="googleOrPassword" class="note" data-i18n="account.orPassword"></p>
     </div>
+    <p id="googleNameNote" class="note small" data-i18n="account.googleNameNote" hidden></p>
     <div class="grid2">
-      <label><span data-i18n="account.email"></span><input name="email" type="email" required autocomplete="off"></label>
+      <label class="pw-field"><span data-i18n="account.email"></span><input name="email" type="email" required autocomplete="off"></label>
       <label><span data-i18n="account.name"></span><input name="name" data-i18n-placeholder="account.namePlaceholder"></label>
       <label><span data-i18n="account.displayName"></span><input name="display_name"></label>
-      <label><span data-i18n="account.username"></span><input name="username" data-i18n-placeholder="account.usernamePlaceholder" autocomplete="off"></label>
+      <label class="pw-field"><span data-i18n="account.username"></span><input name="username" data-i18n-placeholder="account.usernamePlaceholder" autocomplete="off"></label>
     </div>
     <label id="passwordLabel"><span data-i18n="account.password"></span> <span id="pwHint" class="muted"></span><input name="password" type="password" autocomplete="new-password"></label>
     <fieldset>

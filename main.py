@@ -5,7 +5,6 @@ Neběží žádný síťový server: stránka se načítá ze složky static př
 ani jiný uživatel počítače se tak k aplikaci nepřipojí. Jen při přihlášení přes Google krátce běží
 server pro návrat z prohlížeče (app.OAuthListener)."""
 
-import json
 import os
 import sys
 import webbrowser
@@ -32,6 +31,7 @@ unblock_bundled_dlls()
 
 import i18n  # noqa: E402
 import instance  # noqa: E402
+import layout  # noqa: E402
 from store import DATA_DIR  # noqa: E402
 
 APP_NAME = "Norman Mail"
@@ -178,6 +178,16 @@ def mark_from_internet(path):
         pass
 
 
+def free_path(path: Path) -> Path:
+    """Cesta, která ještě neexistuje: „soubor.pdf“, jinak „soubor (2).pdf“, „soubor (3).pdf“…"""
+    n = 1
+    candidate = path
+    while candidate.exists():
+        n += 1
+        candidate = path.with_name(f"{path.stem} ({n}){path.suffix}")
+    return candidate
+
+
 class Api:
     """Funkce volatelné z JavaScriptu přes window.pywebview.api.*"""
 
@@ -210,6 +220,40 @@ class Api:
         except Exception as e:
             return {"error": mail.friendly_error(e)}
 
+    def save_message(self, acc_id, folder, uid, fmt):
+        """Uloží zprávu jako .eml (původní zpráva) nebo .txt (prostý text) přes dialog Uložit jako."""
+        try:
+            with server_app.app.app_context():
+                filename, data = server_app.export_message(acc_id, folder, int(uid), fmt)
+            path = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=filename)
+            if not path:
+                return {"ok": False}
+            path = path if isinstance(path, str) else path[0]
+            Path(path).write_bytes(data)
+            mark_from_internet(path)
+            return {"ok": True, "path": path}
+        except Exception as e:
+            return {"error": mail.friendly_error(e)}
+
+    def save_attachments(self, acc_id, folder, uid):
+        """Uloží všechny přílohy zprávy do vybrané složky (stejné názvy dostanou číslo)."""
+        try:
+            with server_app.app.app_context():
+                files = mail.all_attachments(server_app.message_raw(acc_id, folder, int(uid)))
+            if not files:
+                return {"error": i18n.t("menu.noAttachments")}
+            res = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+            if not res:
+                return {"ok": False}
+            target_dir = Path(res if isinstance(res, str) else res[0])
+            for name, _ctype, data in files:
+                path = free_path(target_dir / name)
+                path.write_bytes(data)
+                mark_from_internet(path)
+            return {"ok": True, "path": str(target_dir), "count": len(files)}
+        except Exception as e:
+            return {"error": mail.friendly_error(e)}
+
     def open_external(self, url):
         return open_external(url)
 
@@ -233,14 +277,16 @@ def pin_identity(window, icon):
         print("Identitu okna pro hlavní panel nelze nastavit:", e)
 
 
-WINDOW_FILE = DATA_DIR / "window.json"  # poloha a velikost okna z posledního zavření
+# poloha a velikost okna z posledního zavření jsou v window.json (layout.py) spolu se šířkami sloupců
 
 
 def restore_window(window):
     """Před zobrazením okna: poloha, velikost a maximalizace z minula (ve fyzických pixelech WinForms).
     Okno, které by po odpojení monitoru nebo změně rozlišení leželo mimo obrazovku, zůstane na výchozím místě."""
+    st = layout.load()
+    if "width" not in st:  # první spuštění (nebo jen šířky sloupců z vývojového serveru)
+        return
     try:
-        st = json.loads(WINDOW_FILE.read_text("utf-8"))
         from System.Drawing import Point, Rectangle, Size
         from System.Windows.Forms import FormStartPosition, FormWindowState, Screen
         form = window.native
@@ -254,8 +300,6 @@ def restore_window(window):
             form.Size = Size(rect.Width, rect.Height)
         if st.get("maximized"):
             form.WindowState = FormWindowState.Maximized
-    except FileNotFoundError:
-        pass
     except Exception as e:
         print("Polohu okna nelze obnovit:", e)
 
@@ -267,9 +311,9 @@ def save_window(window):
         form = window.native
         normal = form.WindowState == FormWindowState.Normal
         b = form.Bounds if normal else form.RestoreBounds
-        st = {"x": b.X, "y": b.Y, "width": b.Width, "height": b.Height,
-              "maximized": form.WindowState == FormWindowState.Maximized}
-        WINDOW_FILE.write_text(json.dumps(st), "utf-8")
+        # jen poloha a velikost – šířky sloupců v souboru zůstanou
+        layout.update(x=b.X, y=b.Y, width=b.Width, height=b.Height,
+                      maximized=form.WindowState == FormWindowState.Maximized)
     except Exception as e:
         print("Polohu okna nelze uložit:", e)
 
