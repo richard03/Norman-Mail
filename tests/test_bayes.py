@@ -105,8 +105,12 @@ class FilterTest(unittest.TestCase):
         self.assertEqual(self.d.view_of("a", "INBOX", 1), "notifications")
         p = self.d.placement(self.d.message("a", "INBOX", 1), "a", "INBOX")
         self.assertEqual((p["layer"], p["cls"]), ("bayes", "notifications"))
-        self.d.update_settings({"bayes_auto_notifications": False})  # vypnuto → zpráva zpátky
-        self.assertEqual(self.d.view_of("a", "INBOX", 1), "important")
+        # vypnutí filtru (i řazení do kategorie) už zařazenou zprávu nevrátí
+        self.d.update_settings({"bayes_auto_notifications": False, "bayes_enabled": False})
+        self.assertEqual(self.d.view_of("a", "INBOX", 1), "notifications")
+        # ani po čase: zapomínání starých záznamů se zařazení do kategorií netýká
+        self.f.confirm(now=time.time() + 400 * 86400)
+        self.assertEqual(self.d.view_of("a", "INBOX", 1), "notifications")
 
     def test_migration_from_spam_only_filter(self):
         path = Path(tempfile.mkdtemp()) / "old.db"

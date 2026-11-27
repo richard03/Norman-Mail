@@ -7,3 +7,5 @@ dist/
 !NormanMail.spec
 languages/_*
 google_client.json
+.coverage
+htmlcov/

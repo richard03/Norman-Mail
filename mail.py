@@ -1101,8 +1101,9 @@ def move_to_spam(M, folder, uids) -> int:
     return len(uids)
 
 
-def move_sender_to_spam(M, sender, before_ts) -> int:
-    """Přesune do spamu starší zprávy od odesílatele (Doručená pošta + archiv). Vrací počet."""
+def move_sender_to_spam(M, sender, before_ts, skip_ids=frozenset()) -> int:
+    """Přesune do spamu starší zprávy od odesílatele (Doručená pošta + archiv). Zprávy s Message-ID
+    ze skip_ids (zprávy v ToDo) vynechá. Vrací počet."""
     if not sender.isascii():
         return 0
     folders = list_folders(M, with_counts=False)
@@ -1114,7 +1115,9 @@ def move_sender_to_spam(M, sender, before_ts) -> int:
         typ, data = M.uid("SEARCH", "FROM", q(sender))
         uids = data[0].split() if typ == "OK" and data and data[0] else []
         matches = []
-        for uid, flags, h in _fetch_headers(M, [u.decode() for u in uids], "FROM DATE"):
+        for uid, flags, h in _fetch_headers(M, [u.decode() for u in uids], "FROM DATE MESSAGE-ID"):
+            if get_header(h, "Message-ID").strip() in skip_ids:
+                continue
             ts = parse_date(get_header(h, "Date"))
             # IMAP hledá podřetězec – ověříme přesnou shodu adresy; „starší“ = nejvýš stejné datum
             if sender in addr_set(h, "From") and "\\Deleted" not in flags and (ts is None or before_ts is None or ts <= before_ts):

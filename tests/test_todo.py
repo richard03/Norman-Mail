@@ -68,6 +68,16 @@ class TodoTest(unittest.TestCase):
         self.assertEqual(self.uids("todo"), [])
         self.assertIsNone(self.d.message("a", "Projekty", 7)["view"])
 
+    def test_folder_rules_skip_todo(self):
+        """Zprávu v ToDo pravidlo složky nepřesune; po Vyřešeno už ano."""
+        fid = self.d.create_user_folder("Projekty", "a", "Projekty", False, False)
+        self.d.add_folder_rule(fid, "sender", "eva@example.com")
+        self.d.set_todo(self.msg(1), True)
+        self.assertEqual(sorted(self.d.folder_rule_matches(fid)["a"]), [2, 3])
+        self.assertEqual(self.d.todo_keys(), {"<1@example.com>"})
+        self.d.set_todo(self.msg(1), False)
+        self.assertEqual(sorted(self.d.folder_rule_matches(fid)["a"]), [1, 2, 3])
+
     def test_without_message_id_survives_move(self):
         """Zpráva bez Message-ID: ToDo i ruční kategorie drží otisk (odesílatel, datum, předmět), ne umístění."""
         self.d.create_user_folder("Projekty", "a", "Projekty", False, False)

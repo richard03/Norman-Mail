@@ -358,15 +358,15 @@
       <div data-panel="spam">
         <h3 data-i18n="view.spamLabel"></h3>
         <p class="note" data-i18n="settings.spam.intro"></p>
-        <p class="note" data-i18n="settings.spam.rulesNote"></p>
         <div class="options">
           <label class="option"><input type="checkbox" data-setting="spam_delete_after_week">
             <span data-i18n="settings.spam.deleteWeek"></span></label>
           <label class="option"><input type="checkbox" data-setting="spam_delete_after_month">
             <span data-i18n="settings.spam.deleteMonth"></span></label>
+          <label class="option"><input type="checkbox" data-setting="spam_delete_after_year">
+            <span data-i18n="settings.spam.deleteYear"></span></label>
         </div>
         <p class="note" data-i18n="settings.spam.deleteNote"></p>
-        <p class="note" data-i18n="settings.bayes.spamNote"></p>
       </div>
       <div data-panel="notifications">
         <h3 data-i18n="view.notificationsLabel"></h3>
@@ -386,12 +386,19 @@
             <span data-i18n="settings.notifications.deleteUnreadMonth"></span></label>
         </div>
         <p class="note" data-i18n="settings.notifications.deleteNote"></p>
-        <p class="note" data-i18n="settings.bayes.categoryNote"></p>
       </div>
       <div data-panel="trash">
         <h3 data-i18n="view.trashLabel"></h3>
         <p class="note" data-i18n="settings.trash.intro"></p>
         <p class="note" data-i18n="settings.trash.emptyNote"></p>
+        <div class="options">
+          <label class="option"><input type="checkbox" data-setting="trash_delete_after_week">
+            <span data-i18n="settings.trash.deleteWeek"></span></label>
+          <label class="option"><input type="checkbox" data-setting="trash_delete_after_month">
+            <span data-i18n="settings.trash.deleteMonth"></span></label>
+          <label class="option"><input type="checkbox" data-setting="trash_delete_after_year">
+            <span data-i18n="settings.trash.deleteYear"></span></label>
+        </div>
       </div>
       <div data-panel="app">
         <div class="app-intro">
@@ -468,7 +475,6 @@
           <div class="app-sub-body">
             <div>
               <p class="note" data-i18n="settings.bayes.intro"></p>
-              <p class="note" data-i18n="settings.bayes.order"></p>
               <div class="options">
                 <label class="option"><input type="checkbox" data-setting="bayes_enabled">
                   <span data-i18n="settings.bayes.enabled"></span></label>

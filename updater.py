@@ -89,8 +89,25 @@ def _fetch(url, limit):
     return data
 
 
+LANG_FILE_MAX = 1024 * 1024  # stejně jako i18n.MAX_FILE
+
+
+def _languages(raw) -> dict:
+    """Oficiální překlady vydání z latest.json: {kód: {name, sha256, size}}; neplatné položky se vynechají
+    (vydání do 1.0.4 je nemají vůbec)."""
+    out = {}
+    for code, v in (raw.items() if isinstance(raw, dict) else ()):
+        if (isinstance(code, str) and re.fullmatch(r"[a-z]{2,3}(-[A-Za-z0-9]{2,8})*", code) and isinstance(v, dict)
+                and isinstance(v.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", v["sha256"])
+                and type(v.get("size")) is int and 0 < v["size"] <= LANG_FILE_MAX):
+            name = v.get("name")
+            out[code] = {"name": name if isinstance(name, str) and name else code,
+                         "sha256": v["sha256"], "size": v["size"]}
+    return out
+
+
 def verify_manifest(body: bytes, sig_text: bytes) -> dict:
-    """Ověří podpis a obsah latest.json. Vrací {version, sha256, size, notes}."""
+    """Ověří podpis a obsah latest.json. Vrací {version, sha256, size, notes, languages}."""
     try:
         sig = bytes.fromhex(sig_text.decode("ascii").strip())
     except (UnicodeDecodeError, ValueError):
@@ -107,11 +124,27 @@ def verify_manifest(body: bytes, sig_text: bytes) -> dict:
         raise UpdateError("err.update.badManifest")
     notes = m.get("notes")
     return {"version": m["version"], "sha256": m["sha256"], "size": m["size"],
-            "notes": notes if isinstance(notes, str) else ""}
+            "notes": notes if isinstance(notes, str) else "", "languages": _languages(m.get("languages"))}
 
 
 def fetch_manifest() -> dict:
     url, _ = _urls()
+    body = _fetch(url, MAX_MANIFEST)
+    return verify_manifest(body, _fetch(url + ".sig", 1024))
+
+
+def release_url(version, name) -> str:
+    """Adresa souboru konkrétního vydání (latest.json, překlad cs.yaml …). S NORMANMAIL_UPDATE_URL
+    podsložka v<verze> místní složky (zkoušení)."""
+    base = _urls()[0].rsplit("/", 1)[0]
+    if base.endswith("/releases/latest/download"):
+        return f"https://github.com/{REPO}/releases/download/v{version}/{name}"
+    return f"{base}/v{version}/{name}"
+
+
+def fetch_release_manifest(version) -> dict:
+    """Ověřený latest.json konkrétního vydání (každé vydání ho má mezi soubory)."""
+    url = release_url(version, MANIFEST)
     body = _fetch(url, MAX_MANIFEST)
     return verify_manifest(body, _fetch(url + ".sig", 1024))
 

@@ -496,7 +496,9 @@ class BayesFilter:
             if done and not cls:
                 self.db._q("DELETE FROM bf_seen WHERE key=? AND key NOT IN (SELECT key FROM bf_auto)", (key,))
         self.db._q("DELETE FROM bf_seen WHERE created<?", (now - FORGET_AFTER,))
-        self.db._q("DELETE FROM bf_auto WHERE created<?", (now - 3 * FORGET_AFTER,))
+        # zařazení do Nedůležitých / Notifikací se nezapomíná (zpráva by se jinak sama vrátila do Důležitých)
+        self.db._q("DELETE FROM bf_auto WHERE created<? AND target NOT IN ('unimportant', 'notifications')",
+                   (now - 3 * FORGET_AFTER,))
         return learned
 
     # ---- první naučení z existujících zpráv

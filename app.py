@@ -21,6 +21,7 @@ import db
 import google_oauth
 import i18n
 from i18n import t as tr
+import langupdate
 import layout
 import mail
 import sync
@@ -1051,18 +1052,24 @@ def _move_rules(items, target):
 def _move_warnings(items, target):
     """Co by se se zprávami stalo hned po přesunu (smazání, spam, přesun pravidlem) – pro varování v UI."""
     warnings = []
+    settings = database.settings()
+
+    def old_count(prefix, skip=()):
+        """(stáří, počet zpráv, které by úklid složky smazal hned) – stáří None = úklid je vypnutý."""
+        age = db.delete_age(settings, prefix)
+        return age, sum(1 for i in items if i not in skip and age and i["date"] and i["date"] < time.time() - age)
     if target["type"] == "trash":
         final = [i for i in items if i["dst"][1] is None or i["stays"]]
         if final:
             warnings.append(tr("warn.alreadyInTrash", count=len(final)))
+        age, n = old_count("trash", final)
+        if n:
+            warnings.append(tr(f"warn.trashOld.{db.AGE_NAMES[age]}", count=n))
         return warnings
-    settings = database.settings()
     if target["type"] == "spam":
-        age = db.delete_age(settings, "spam")
-        old = [i for i in items if age and i["date"] and i["date"] < time.time() - age]
-        if old:
-            key = "warn.spamOldWeek" if age == db.WEEK else "warn.spamOldMonth"
-            warnings.append(tr(key, count=len(old)))
+        age, n = old_count("spam")
+        if n:
+            warnings.append(tr(f"warn.spamOld.{db.AGE_NAMES[age]}", count=n))
         return warnings
     if target["type"] != "inbox":
         return warnings
@@ -1094,8 +1101,7 @@ def _move_warnings(items, target):
         if (i["account_id"], i["folder"], i["uid"]) not in moved_away and age:
             dragged[(cat, age)] = dragged.get((cat, age), 0) + 1
     for (cat, age), n in dragged.items():
-        period = "week" if age == db.WEEK else "month"
-        warnings.append(tr(f"warn.oldAs.{cat}.{period}", count=n))
+        warnings.append(tr(f"warn.oldAs.{cat}.{db.AGE_NAMES[age]}", count=n))
     if new_senders:
         keys = {(i["account_id"], i["folder"], i["uid"]) for i in items}
         others = {(r["account_id"], r["uid"]) for r in database.inbox_from_senders(new_senders)
@@ -1372,6 +1378,29 @@ def i18n_open_folder():
     return _open_folder(i18n.user_dir())
 
 
+@app.get("/api/i18n/official")
+def i18n_official():
+    """Oficiální překlady běžící verze ke stažení (z podepsaného latest.json na GitHubu): [{code, name}].
+    Bez internetu (nebo u verze, která na GitHubu není) prázdný seznam."""
+    try:
+        langs = langupdate.official()
+    except updater.UpdateError:
+        return jsonify([])
+    return jsonify([{"code": c, "name": v["name"]} for c, v in sorted(langs.items(), key=lambda kv: kv[1]["name"])])
+
+
+@app.post("/api/i18n/install")
+def i18n_install():
+    """Stáhne oficiální překlad do složky s jazyky (ověřený podpisem vydání)."""
+    code = str((request.get_json(force=True) or {}).get("code") or "")
+    try:
+        langupdate.install(code)
+    except updater.UpdateError as e:
+        return jsonify(error=tr("err.language.failed", error=tr(e.key, **e.params))), 502
+    i18n.set_language(database.settings()["language"])
+    return jsonify(languages=i18n.languages())
+
+
 @app.get("/api/bayes")
 def bayes_status():
     return jsonify(syncer.bayes.status())
@@ -1416,12 +1445,22 @@ def _category_rule_fields(data) -> dict:
     return {"sender": sender, "recipient": recipient, "subject": subject}
 
 
+@app.post("/api/categories/<category>/rules/preview")
+def category_rule_preview(category):
+    """Před uložením úpravy pravidla: kolik starších zpráv v doručené poště nové znění zařadí (UI se zeptá)."""
+    rule = _category_rule_fields(request.get_json(force=True))
+    return jsonify(count=database.category_rule_preview(_category_or_404(category), **rule))
+
+
 @app.put("/api/categories/<category>/rules/<int:rule_id>")
 def category_rule_update(category, rule_id):
-    """Úprava pravidla Nedůležitých / Notifikací: odesílatel, příjemce, část předmětu (vyplněné musí platit všechny)."""
+    """Úprava pravidla Nedůležitých / Notifikací: odesílatel, příjemce, část předmětu (vyplněné musí platit všechny).
+    Zprávy zařazené podle původního znění zůstanou, kde jsou; apply_existing=true zařadí i starší zprávy,
+    které odpovídají novému znění (jinak platí jen pro nové zprávy)."""
     _category_or_404(category)
-    rule = _category_rule_fields(request.get_json(force=True))
-    if not database.update_category_rule(category, rule_id, **rule):
+    data = request.get_json(force=True)
+    rule = _category_rule_fields(data)
+    if not database.update_category_rule(category, rule_id, **rule, apply_existing=bool(data.get("apply_existing"))):
         raise ValidationError(tr("err.ruleExists"))
     database.bump()
     syncer.trigger()
@@ -1460,7 +1499,8 @@ def sync_status():
     return jsonify(version=database.version, unread=database.unread_counts(), views=database.view_unread(),
                    folders=database.folder_unread(), trash=database.trash_total(a["id"] for a in store.all()),
                    spam=database.role_count("junk", [a["id"] for a in store.all()], unread=True),
-                   errors=syncer.errors, notices=syncer.notices, update=_update_brief())
+                   errors=syncer.errors, notices=syncer.notices, update=_update_brief(),
+                   i18n=langupdate.generation)
 
 
 def _update_brief():
@@ -1520,10 +1560,11 @@ def message_spam(acc_id, uid):
 
 def _spam_sender_job(job_id, sender, ts):
     moved, errors = 0, []
+    todo = database.todo_keys()  # zprávy v ToDo se automaticky nepřesouvají
     for acc in store.all():
         try:
             with bg_pool.get(acc) as M:
-                moved += mail.move_sender_to_spam(M, sender, ts)
+                moved += mail.move_sender_to_spam(M, sender, ts, todo)
         except Exception as e:
             errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
         with jobs_lock:

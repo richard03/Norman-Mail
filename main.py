@@ -54,6 +54,7 @@ if __name__ == "__main__":
 import webview  # noqa: E402  (až po odblokování knihoven)
 
 import app as server_app  # noqa: E402
+import langupdate  # noqa: E402
 import mail  # noqa: E402
 import taskbar  # noqa: E402
 import updater  # noqa: E402
@@ -358,6 +359,7 @@ def main():
     server_app.EMBEDDED = True
     server_app.start_background()
     updater.start(lambda: server_app.database.settings()["auto_update"])
+    langupdate.start(lambda: server_app.database.settings()["auto_update"])
     harden_link_handling()
     lock_navigation()
     disable_tracking_prevention()

@@ -104,5 +104,76 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(self.d.natural_view(self.msg(1), "a"), "notifications")  # bez ruční značky
 
 
+class RulePlacementTest(unittest.TestCase):
+    """Zařazení pravidlem zůstane, i když se pravidlo smaže nebo změní; nové zprávy řadí platná pravidla."""
+    def setUp(self):
+        self.d = db.Database(Path(tempfile.mkdtemp()) / "test.db")
+        self.d.set_my_addresses("a", {"me@example.com"})
+        self.d.insert_messages("a", "INBOX", [rec(1), rec(2, subject="Faktura")])
+        self.msg = lambda uid: self.d.message("a", "INBOX", uid)
+
+    def uids(self, view):
+        return sorted(m["uid"] for m in self.d.list_messages(["a"], "INBOX", 0, 50, view)["messages"])
+
+    def rule_id(self, cat):
+        return self.d.category_rules(cat)[0]["id"]
+
+    def test_delete_rule_keeps_messages(self):
+        self.d.add_category_rule("notifications", sender="eva@example.com")
+        self.assertEqual(self.uids("notifications"), [1, 2])
+        self.assertEqual(self.d.category_rules("notifications")[0]["messages"], 2)
+        self.d.delete_category_rule("notifications", self.rule_id("notifications"))
+        self.assertEqual(self.uids("notifications"), [1, 2])
+        p = self.d.placement(self.msg(1), "a", "INBOX")
+        self.assertEqual((p["layer"], p["target"], p["changed"]), ("rule", "notifications", True))
+        self.assertEqual(p["rules"][0]["sender"], "eva@example.com")
+        # nová zpráva od stejného odesílatele už pravidlo nemá
+        self.d.insert_messages("a", "INBOX", [rec(3)])
+        self.assertEqual(self.uids("important"), [3])
+
+    def test_new_messages_follow_current_rule(self):
+        self.d.insert_messages("a", "INBOX", [])
+        self.d.add_category_rule("unimportant", subject="faktura")
+        self.assertEqual(self.uids("unimportant"), [2])
+        self.d.insert_messages("a", "INBOX", [rec(3, subject="Faktura 2"), rec(4)])
+        self.assertEqual(self.uids("unimportant"), [2, 3])
+        p = self.d.placement(self.msg(3), "a", "INBOX")
+        self.assertEqual((p["layer"], p["changed"]), ("rule", False))
+
+    def test_edit_rule_future_only(self):
+        self.d.add_category_rule("unimportant", subject="faktura")
+        rid = self.rule_id("unimportant")
+        self.assertEqual(self.d.category_rule_preview("unimportant", "", "", "ahoj"), 1)
+        self.d.update_category_rule("unimportant", rid, "", "", "ahoj")
+        self.assertEqual(self.uids("unimportant"), [2])  # podle původního znění zůstává, č. 1 se nepřesune
+        self.assertEqual(self.d.category_rules("unimportant")[0]["messages"], 1)
+        self.d.insert_messages("a", "INBOX", [rec(3, subject="Ahoj"), rec(4, subject="Faktura")])
+        self.assertEqual(self.uids("unimportant"), [2, 3])
+
+    def test_edit_rule_apply_existing(self):
+        self.d.add_category_rule("unimportant", subject="faktura")
+        self.d.mark_message(self.msg(1), "important")  # ručně umístěná zpráva se nepřesune
+        self.d.insert_messages("a", "INBOX", [rec(3, subject="Ahoj")])
+        self.assertEqual(self.d.category_rule_preview("unimportant", "", "", "ahoj"), 1)
+        self.d.update_category_rule("unimportant", self.rule_id("unimportant"), "", "", "ahoj", apply_existing=True)
+        self.assertEqual(self.uids("unimportant"), [2, 3])
+        self.assertEqual(self.uids("important"), [1])
+
+    def test_migration_keeps_current_state(self):
+        path = Path(tempfile.mkdtemp()) / "m.db"
+        d = db.Database(path)
+        d.set_my_addresses("a", {"me@example.com"})
+        d.insert_messages("a", "INBOX", [rec(1), rec(2, subject="Faktura")])
+        d._q("INSERT INTO category_rules(category, sender, recipient, subject, created) "
+             "VALUES('notifications', 'eva@example.com', '', '', 1), ('unimportant', '', '', 'faktura', 1)")
+        d._q("DELETE FROM meta WHERE key='rule_placements_migrated'")
+        d._conn.close()
+        d = db.Database(path)
+        self.assertEqual(d.view_of("a", "INBOX", 1), "notifications")
+        self.assertEqual(d.view_of("a", "INBOX", 2), "unimportant")  # přednost Nedůležitých
+        d._q("DELETE FROM category_rules")
+        self.assertEqual(d.view_of("a", "INBOX", 2), "unimportant")
+
+
 if __name__ == "__main__":
     unittest.main()

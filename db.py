@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS message_marks(
     key TEXT PRIMARY KEY, category TEXT NOT NULL, created REAL);
 CREATE TABLE IF NOT EXISTS bf_auto(
     key TEXT PRIMARY KEY, target TEXT NOT NULL, score REAL, created REAL);  -- zařazeno bayesovským filtrem
+CREATE TABLE IF NOT EXISTS rule_placements(  -- kam zprávu zařadilo pravidlo kategorie (zůstane i po změně pravidla)
+    key TEXT PRIMARY KEY, category TEXT NOT NULL, rule_id INTEGER,
+    sender TEXT NOT NULL DEFAULT '', recipient TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
+    created REAL);
 CREATE TABLE IF NOT EXISTS category_rules(
     id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL,
     sender TEXT NOT NULL DEFAULT '', recipient TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
@@ -119,8 +123,11 @@ def message_key(rec) -> str:
             f"|{'' if size is None else int(size)}")
 
 
-def _category_rule(cat):
-    return f"EXISTS (SELECT 1 FROM category_rules r WHERE r.category='{cat}' AND {CATEGORY_RULE_MATCH})"
+# Zapamatování zařazení podle pravidel kategorií: zprávy v doručené poště (m) × pravidla (r). Při shodě
+# pravidel obou kategorií vyhrává důležitější (CATEGORY_PRIORITY) – vloží se první řádek.
+_PLACE_SQL = (f"INTO rule_placements SELECT {MSG_KEY}, r.category, r.id, r.sender, r.recipient, r.subject, ? "
+              f"FROM messages m JOIN category_rules r ON {CATEGORY_RULE_MATCH} WHERE m.folder='INBOX' AND {{where}} "
+              f"ORDER BY CASE r.category WHEN 'unimportant' THEN 0 ELSE 1 END")
 
 
 def category_rule_matches(rule, rec) -> bool:
@@ -133,13 +140,14 @@ def category_rule_matches(rule, rec) -> bool:
     return not rule["subject"] or rule["subject"] in (rec.get("base_subject") or "")
 
 
-# Kategorie zprávy (jediný výraz, vyhodnotí se jednou): ruční umístění má přednost před pravidly;
-# když zprávě odpovídají pravidla obou kategorií, vyhrává důležitější cíl (Nedůležité před Notifikacemi).
-# NULL = žádná kategorie.
+# Kategorie zprávy (jediný výraz, vyhodnotí se jednou): ruční umístění má přednost před pravidly.
+# Pravidla se nevyhodnocují pokaždé znovu: zařazení se zapamatuje, když pravidlo zprávu zařadí (nová zpráva,
+# založení pravidla, úprava s přesunem starších – viz rule_placements), takže smazání či změna pravidla
+# už zařazené zprávy nevrátí. NULL = žádná kategorie.
 CATEGORY_EXPLICIT = (f"COALESCE((SELECT k.category FROM message_marks k WHERE k.key={MSG_KEY}), "
-                     f"CASE WHEN {_category_rule('unimportant')} THEN 'unimportant' "
-                     f"WHEN {_category_rule('notifications')} THEN 'notifications' END)")
-# Až po ručním umístění a pravidlech rozhoduje bayesovský filtr (bayes.py) – jen u nových zpráv, které zařadil.
+                     f"(SELECT p.category FROM rule_placements p WHERE p.key={MSG_KEY}))")
+# Až po ručním umístění a pravidlech rozhoduje bayesovský filtr (bayes.py) – jen u nových zpráv, které zařadil;
+# zařazení zůstane, i když filtr později vypnete.
 CATEGORY = (f"COALESCE({CATEGORY_EXPLICIT}, (SELECT a.target FROM bf_auto a WHERE a.key={MSG_KEY} "
             f"AND a.target IN ('unimportant', 'notifications')))")
 # Zpráva ručně umístěná uživatelem – automatické řazení ji nepřesouvá.
@@ -188,6 +196,7 @@ RULE_MATCH = ("((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') 
 
 WEEK = 7 * 24 * 3600
 MONTH = 30 * 24 * 3600
+YEAR = 365 * 24 * 3600
 DEFAULT_SETTINGS = {
     "notify_mark_read_on_leave": False,         # po opuštění Notifikací označit všechny za přečtené
     "notify_delete_read_after_week": False,     # mazat přečtené notifikace starší než týden
@@ -201,6 +210,10 @@ DEFAULT_SETTINGS = {
     "unimp_delete_unread_after_month": False,
     "spam_delete_after_week": False,            # mazat zprávy ve spamu starší než týden
     "spam_delete_after_month": False,           # … starší než měsíc
+    "spam_delete_after_year": False,            # … starší než rok
+    "trash_delete_after_week": False,           # natrvalo mazat zprávy ve Smazaných starší než týden
+    "trash_delete_after_month": False,          # … starší než měsíc
+    "trash_delete_after_year": False,           # … starší než rok
     "bayes_enabled": True,                    # bayesovský filtr řadí nové zprávy (spam, kategorie, složky)
     "bayes_sensitivity": "medium",            # high / medium / low
     "language": "",                           # kód jazyka rozhraní; "" = zatím nezvolený (angličtina)
@@ -213,13 +226,19 @@ SETTING_CHOICES = {"bayes_sensitivity": ("high", "medium", "low")}
 
 def delete_age(settings, prefix, seen=None):
     """Stáří (s), od kterého se zprávy podle nastavení mažou; None = nemažou se.
-    prefix: notify / unimp / spam; seen: přečtené / nepřečtené (None = bez rozlišení, Spam)."""
+    prefix: notify / unimp / spam / trash; seen: přečtené / nepřečtené (None = bez rozlišení, Spam a Smazané).
+    Platí nejkratší zaškrtnutá lhůta."""
     part = f"{prefix}_delete" + ("" if seen is None else "_read" if seen else "_unread")
     if settings.get(f"{part}_after_week"):
         return WEEK
     if settings.get(f"{part}_after_month"):
         return MONTH
+    if settings.get(f"{part}_after_year"):
+        return YEAR
     return None
+
+
+AGE_NAMES = {WEEK: "week", MONTH: "month", YEAR: "year"}  # stáří → přípona klíčů textů
 
 
 def rule_matches(rule, rec) -> bool:
@@ -292,6 +311,10 @@ class Database:
                     SELECT ?, CASE kind WHEN 'sender' THEN value ELSE '' END,
                               CASE kind WHEN 'subject' THEN value ELSE '' END, created FROM {table}""", (cat,))
             self._conn.execute("INSERT INTO meta VALUES('category_rules_migrated', '1')")
+        # migrace: zařazení podle pravidel se dřív počítalo pokaždé znovu – zapamatovat současný stav
+        if not self._conn.execute("SELECT 1 FROM meta WHERE key='rule_placements_migrated'").fetchone():
+            self._conn.execute("INSERT OR IGNORE " + _PLACE_SQL.format(where="1"), (time.time(),))
+            self._conn.execute("INSERT INTO meta VALUES('rule_placements_migrated', '1')")
         # migrace: klíč zprávy bez Message-ID bylo umístění (účet|složka|uid), teď otisk (přežije přesun)
         if not self._conn.execute("SELECT 1 FROM meta WHERE key='fingerprint_keys_migrated'").fetchone():
             for table in ("todos", "message_marks"):
@@ -409,6 +432,12 @@ class Database:
         def run(c):
             new = self._new_records(c, acc_id, folder, records)
             c.executemany("INSERT OR REPLACE INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            if new and folder == "INBOX":  # nové zprávy zařadí platná pravidla (už zařazené zůstanou, jak jsou)
+                for i in range(0, len(new), 500):
+                    part = [r["uid"] for r in new[i:i + 500]]
+                    c.execute("INSERT OR IGNORE " + _PLACE_SQL.format(
+                        where=f"m.account_id=? AND m.uid IN ({','.join('?' * len(part))})"),
+                        (time.time(), acc_id, *part))
             if new and self._contacts_built(c):
                 self._learn_contacts(c, acc_id, folder, new)
         self._tx(run)
@@ -642,6 +671,10 @@ class Database:
         else:
             self._q("DELETE FROM todos WHERE key=?", (message_key(rec),))
 
+    def todo_keys(self) -> set:
+        """Klíče zpráv v ToDo (Message-ID, u zpráv bez něj otisk – viz message_key)."""
+        return {k for (k,) in self._q("SELECT key FROM todos")}
+
     # ------------------------------------------------------------------ koš („Smazané“)
 
     def role_folders(self, role) -> dict:
@@ -814,8 +847,6 @@ class Database:
                 continue
             if k in DEFAULT_SETTINGS and isinstance(v, type(DEFAULT_SETTINGS[k])):
                 self._q("INSERT OR REPLACE INTO meta VALUES(?, ?)", ("setting:" + k, json.dumps(v)))
-                if k.startswith("bayes_auto_") and v is False:  # vypnuté řazení: zprávy se vrátí na své místo
-                    self._q("DELETE FROM bf_auto WHERE target=?", (k[len("bayes_auto_"):],))
         return self.settings()
 
     # ------------------------------------------------------------------ hromadné operace s Notifikacemi / Nedůležitými
@@ -924,11 +955,11 @@ class Database:
 
     def folder_rule_matches(self, folder_id) -> dict:
         """{account_id: {uid: id pravidla}} zpráv v doručené poště, které pravidla složky přesouvají
-        (pravidla „až po přečtení“ jen přečtené; odložené a ručně umístěné se vynechávají)."""
+        (pravidla „až po přečtení“ jen přečtené; odložené, ručně umístěné a zprávy v ToDo se vynechávají)."""
         sql = f"""SELECT m.account_id, m.uid, r.id FROM messages m
                   JOIN user_folder_rules r ON r.folder_id=? AND {RULE_MATCH} AND (r.after_read=0 OR m.seen=1)
                   LEFT JOIN snoozes s ON s.account_id=m.account_id AND s.folder=m.folder AND s.uid=m.uid
-                  WHERE m.folder='INBOX' AND s.uid IS NULL AND NOT {IS_LOCKED}"""
+                  WHERE m.folder='INBOX' AND s.uid IS NULL AND NOT {IS_LOCKED} AND NOT {IS_TODO}"""
         out = {}
         for acc_id, uid, rule_id in self._q(sql, (folder_id,)):
             out.setdefault(acc_id, {}).setdefault(uid, rule_id)
@@ -1053,21 +1084,41 @@ class Database:
     # ------------------------------------------------------------------ Notifikace / Nedůležité: pravidla a označení
 
     def add_category_rule(self, category, sender="", recipient="", subject=""):
-        """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Stejné pravidlo může být v obou
-        kategoriích – pak vyhrávají Notifikace (viz CATEGORY); po smazání jednoho z nich platí to druhé."""
+        """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Zařadí i zprávy, které už v doručené
+        poště jsou (pravidlo vzniká volbou „Vše od …“ / „Vše s předmětem …“ / vlastní pravidlo u zprávy)."""
         if not (category in CATEGORIES and (sender or recipient or subject)):
             raise ValueError("Invalid parameter.")
+        values = (category, sender.lower(), recipient.lower(), subject.lower())
         self._q("""INSERT OR IGNORE INTO category_rules(category, sender, recipient, subject, created)
-                   VALUES(?, ?, ?, ?, ?)""", (category, sender.lower(), recipient.lower(), subject.lower(), time.time()))
+                   VALUES(?, ?, ?, ?, ?)""", (*values, time.time()))
+        rule = self._q("SELECT id FROM category_rules WHERE category=? AND sender=? AND recipient=? AND subject=?",
+                       values)
+        self.place_by_rule(rule[0][0])
 
-    def update_category_rule(self, category, rule_id, sender, recipient, subject) -> bool:
-        """Úprava pravidla. False = stejné pravidlo už v kategorii existuje."""
+    def place_by_rule(self, rule_id):
+        """Zprávy v doručené poště, které pravidlu odpovídají, zařadí podle něj (i ty, které předtím zařadilo
+        jiné pravidlo nebo filtr; ručně umístěné zprávy zůstanou, kde jsou – ruční umístění má přednost)."""
+        self._q("INSERT OR REPLACE " + _PLACE_SQL.format(where="r.id=?"), (time.time(), rule_id))
+
+    def update_category_rule(self, category, rule_id, sender, recipient, subject, apply_existing=False) -> bool:
+        """Úprava pravidla. Zprávy zařazené podle původního znění zůstanou, kde jsou; apply_existing=True
+        zařadí i starší zprávy, které odpovídají novému znění. False = stejné pravidlo už v kategorii existuje."""
         try:
             self._q("UPDATE category_rules SET sender=?, recipient=?, subject=? WHERE id=? AND category=?",
                     (sender, recipient, subject, rule_id, category))
         except sqlite3.IntegrityError:
             return False
+        if apply_existing:
+            self.place_by_rule(rule_id)
         return True
+
+    def category_rule_preview(self, category, sender, recipient, subject) -> int:
+        """Kolik zpráv v doručené poště by pravidlo s tímto zněním nově zařadilo do kategorie
+        (odpovídají mu, nejsou v ní a nejsou ručně umístěné)."""
+        return self._q(f"""SELECT COUNT(*) FROM messages m
+                           JOIN (SELECT ? AS sender, ? AS recipient, ? AS subject) r ON {CATEGORY_RULE_MATCH}
+                           WHERE m.folder='INBOX' AND ({CATEGORY}) IS NOT ? AND NOT {IS_LOCKED}""",
+                       (sender, recipient, subject, category))[0][0]
 
     def remove_category_sender(self, category, sender):
         """Smaže pravidla „jen odesílatel“ (bez dalších podmínek)."""
@@ -1085,27 +1136,12 @@ class Database:
         return {r[0] for r in self._q(sql)}
 
     def category_rules(self, category):
-        """Pravidla s počtem zpráv, které jim v doručené poště odpovídají (jeden průchod doručenou poštou;
-        pravidla „jen odesílatel“ se hledají ve slovníku)."""
-        rules = [dict(r, messages=0) for r in self._q(
+        """Pravidla s počtem zpráv v doručené poště, které podle nich v kategorii jsou."""
+        counts = dict(self._q(f"""SELECT p.rule_id, COUNT(*) FROM messages m
+                                  JOIN rule_placements p ON p.key={MSG_KEY} AND p.category=?
+                                  WHERE m.folder='INBOX' AND NOT {IS_LOCKED} GROUP BY p.rule_id""", (category,)))
+        return [dict(r, messages=counts.get(r["id"], 0)) for r in self._q(
             "SELECT * FROM category_rules WHERE category=? ORDER BY created DESC", (category,))]
-        by_sender, other = {}, []
-        for r in rules:
-            if r["sender"] and not r["recipient"] and not r["subject"]:
-                by_sender[r["sender"]] = r
-            else:
-                other.append(r)
-        for frm, to, cc, subj in self._q(
-                "SELECT from_addrs, to_addrs, cc_addrs, base_subject FROM messages WHERE folder='INBOX'"):
-            for a in frm.strip(",").split(","):
-                if a in by_sender:
-                    by_sender[a]["messages"] += 1
-            for r in other:
-                if ((not r["sender"] or f",{r['sender']}," in frm)
-                        and (not r["recipient"] or f",{r['recipient']}," in to or f",{r['recipient']}," in cc)
-                        and (not r["subject"] or r["subject"] in (subj or ""))):
-                    r["messages"] += 1
-        return rules
 
     def mark_message(self, rec, category):
         """„Jen tento email“: zpráva patří do kategorie bez ohledu na pravidla (vždy jen do jedné)."""
@@ -1120,22 +1156,27 @@ class Database:
             self._q("DELETE FROM message_marks WHERE key=?", (message_key(rec),))
 
     def uncategorize(self, rec, category):
-        """Zpráva přestane patřit do kategorie: zruší se její označení i pravidla, která jí odpovídají
-        – ta platila i pro ostatní zprávy."""
+        """Zpráva přestane patřit do kategorie: zruší se její označení, zařazení i pravidla, která jí
+        odpovídají (ostatní zprávy, které už zařadila, zůstanou, kde jsou)."""
         self.unmark_message(rec, category)
+        self._q("DELETE FROM rule_placements WHERE key=? AND category=?", (message_key(rec), category))
+        self._q("DELETE FROM bf_auto WHERE key=? AND target=?", (message_key(rec), category))
         ids = [r["id"] for r in self._q("SELECT * FROM category_rules WHERE category=?", (category,))
                if category_rule_matches(r, rec)]
         if ids:
             self._q(f"DELETE FROM category_rules WHERE id IN ({','.join('?' * len(ids))})", ids)
 
     def categorizer(self, marks=True):
-        """Funkce zpráva → kategorie / ruční značka / None (stejná logika jako CATEGORY v SQL) – pro zprávy,
-        které nejsou v databázi. marks=False: jen podle pravidel (kam by zprávu zařadila automatika)."""
+        """Funkce zpráva → kategorie / ruční značka / None – pro zprávy, které nejsou v databázi (nebo do
+        doručené pošty teprve přicházejí): ruční značka, zapamatované zařazení, jinak platná pravidla.
+        marks=False: bez ručních značek (kam by zprávu zařadila automatika)."""
         marks = dict(self._q("SELECT key, category FROM message_marks")) if marks else {}
+        placed = dict(self._q("SELECT key, category FROM rule_placements"))
         rules = {cat: self._q("SELECT * FROM category_rules WHERE category=?", (cat,)) for cat in CATEGORIES}
 
         def category(rec):
-            mark = marks.get(message_key(rec))
+            key = message_key(rec)
+            mark = marks.get(key) or placed.get(key)
             if mark:
                 return mark
             return next((cat for cat in CATEGORY_PRIORITY if any(category_rule_matches(r, rec) for r in rules[cat])),
@@ -1194,10 +1235,14 @@ class Database:
             mark = self._q("SELECT category FROM message_marks WHERE key=?", (message_key(rec),))
             if mark:
                 return {"layer": "manual", "target": mark[0][0], "rules": []}
-            cat = self.categorizer(marks=False)(rec)
-            if cat:
-                return {"layer": "rule", "target": cat,
-                        "rules": [r for r in rules if r["type"] == "category" and r["target"] == cat]}
+            placed = self._q("SELECT * FROM rule_placements WHERE key=?", (message_key(rec),))
+            if placed:
+                p = placed[0]
+                now = self._q("SELECT sender, recipient, subject FROM category_rules WHERE id=?", (p["rule_id"],))
+                changed = not now or tuple(now[0]) != (p["sender"], p["recipient"], p["subject"])
+                return {"layer": "rule", "target": p["category"], "changed": changed,
+                        "rules": [{"type": "category", "id": p["rule_id"], "target": p["category"],
+                                   "sender": p["sender"], "recipient": p["recipient"], "subject": p["subject"]}]}
             if auto and auto[0][0] in CATEGORIES:
                 return {"layer": "bayes", "target": auto[0][0], "cls": auto[0][0], "score": auto[0][1], "rules": []}
             return {"layer": "default", "target": "important" if self.is_direct(rec, acc_id) else "fyi", "rules": []}

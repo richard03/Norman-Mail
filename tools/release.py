@@ -12,7 +12,8 @@ Vydání (nejdřív zvyšte VERSION ve version.py, commitněte a pushněte):
     .venv\\Scripts\\python tools\\release.py --notes "Co je nového"      (nebo --notes-file soubor.txt)
   Zkontroluje čistý strom a novou verzi, sestaví dist\\NormanMail.exe, vytvoří a podepíše
   dist\\latest.json a přes GitHub CLI (gh) založí release vX.Y.Z se soubory NormanMail.exe,
-  latest.json a latest.json.sig a s překlady z languages\\*.yaml a šablonou translation-template.yaml. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
+  latest.json a latest.json.sig a s překlady z languages\\*.yaml (jejich SHA-256 je v podepsaném latest.json,
+  aplikace podle něj překlady stahuje a aktualizuje – viz langupdate.py) a šablonou translation-template.yaml. Bez gh (nebo s --no-publish) jen připraví soubory k ručnímu nahrání.
 """
 
 import argparse
@@ -31,6 +32,7 @@ sys.path.insert(0, str(ROOT))
 
 import ed25519  # noqa: E402
 import google_client  # noqa: E402
+import i18n  # noqa: E402
 import updater  # noqa: E402
 from version import VERSION  # noqa: E402
 
@@ -103,8 +105,23 @@ def manifest(exe: Path, notes: str) -> bytes:
         "size": len(data),
         "date": datetime.date.today().isoformat(),
         "notes": notes,
+        "languages": languages(),  # překlady ke stažení a k aktualizaci v aplikaci (langupdate.py)
     }
     return (json.dumps(info, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def languages():
+    """Oficiální překlady pro latest.json: {kód: {name, sha256, size}} (soubor se musí jmenovat <kód>.yaml)."""
+    out = {}
+    for p in sorted((ROOT / "languages").glob("*.yaml")):
+        if p.name.startswith("_"):
+            continue
+        meta, _ = i18n.load_file(p)
+        if p.stem != meta["language"]:
+            die(f"{p.name}: soubor se musí jmenovat {meta['language']}.yaml (podle meta.language).")
+        data = p.read_bytes()
+        out[meta["language"]] = {"name": meta["name"], "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    return out
 
 
 def main():

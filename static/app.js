@@ -17,8 +17,11 @@ function t(key, params = {}) {
 }
 /** Množné číslo: tn('messages.count', 5) → „5 zpráv“. */
 const tn = (key, count, params = {}) => t(key, { ...params, count });
-/** Bezpečné HTML z překladu: vše escapované, jediné formátování je **tučně**. */
-const tHtml = (key, params) => esc(t(key, params)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+/** Bezpečné HTML z překladu: vše escapované, jediné formátování je **tučně** a prázdný řádek (odstavec). */
+const tHtml = (key, params) => {
+  const paras = esc(t(key, params)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split(/\n\s*\n/);
+  return paras.length < 2 ? paras[0] : paras.map(x => `<span class="para">${x.trim()}</span>`).join('');
+};
 
 /** Doplní texty do statického HTML: data-i18n (obsah), data-i18n-title, -placeholder, -aria-label. */
 function applyI18n(root = document) {
@@ -1414,8 +1417,11 @@ function className(cls) {
 function placementInfo(p, todo) {
   if (!p || todo) return null;
   if (p.layer === 'manual') return [{ text: t('placement.manualInfo') }];
-  if (p.layer === 'rule' && p.rules.length)
-    return [{ text: tn('placement.ruleInfo', p.rules.length), list: p.rules.map(ruleText) }];
+  if (p.layer === 'rule' && p.rules.length) {
+    const out = [{ text: tn('placement.ruleInfo', p.rules.length), list: p.rules.map(ruleText) }];
+    if (p.changed) out.push({ text: t('placement.ruleChangedInfo') });
+    return out;
+  }
   if (p.layer === 'bayes') {
     const out = [{ text: t('placement.bayesInfo', { target: className(p.cls), score: Math.round(p.score * 100) }) }];
     if (p.tokens?.length) out.push({ text: t('placement.bayesTokensInfo'),
@@ -1618,12 +1624,15 @@ document.addEventListener('keydown', e => {
 // ------------------------------------------------------------------ přesun více zpráv (drag & drop, Delete)
 
 /** Dialog s upozorněním; vrací true, pokud uživatel potvrdí. */
-function confirmDialog({ title = t('confirm.warning'), lines = [], question = '', ok = t('confirm.continue') }) {
+function confirmDialog({ title = t('confirm.warning'), lines = [], question = '', ok = t('confirm.continue'),
+                         cancel = t('common.cancel'), danger = true }) {
   const dlg = $('#confirmDialog');
   $('#confirmTitle').textContent = title;
   $('#confirmLines').innerHTML = lines.map(l => `<li>${esc(l)}</li>`).join('');
   $('#confirmQuestion').textContent = question;
   $('#confirmOk').textContent = ok;
+  $('#confirmOk').className = danger ? 'btn danger' : 'btn primary';
+  $('#confirmCancel').textContent = cancel;
   dlg.returnValue = '';
   dlg.showModal();
   $('#confirmCancel').focus();
@@ -3262,6 +3271,16 @@ async function renderLanguages() {
   box.hidden = !info.problems.length;
   box.innerHTML = info.problems.length ? `<p>${esc(t('settings.language.problems'))}</p><ul>`
     + info.problems.map(p => `<li><code>${esc(p.file)}</code>: ${esc(p.error)}</li>`).join('') + '</ul>' : '';
+  // oficiální překlady, které ještě nejsou ve složce s jazyky: nabídnout ke stažení (bez internetu nic)
+  let official = [];
+  try { official = await api('/api/i18n/official'); } catch { return; }
+  const have = new Set(info.languages.map(l => l.code));
+  const extra = official.filter(l => !have.has(l.code));
+  if (extra.length && sel.isConnected) {
+    sel.insertAdjacentHTML('beforeend', `<optgroup label="${esc(t('settings.language.downloadGroup'))}">`
+      + extra.map(l => `<option value="download:${esc(l.code)}">${esc(t('settings.language.download', { name: l.name }))}</option>`).join('')
+      + '</optgroup>');
+  }
 }
 
 $('#languageSelect').addEventListener('change', async e => {
@@ -3270,10 +3289,21 @@ $('#languageSelect').addEventListener('change', async e => {
     e.target.value = I18N.lang;
     return;
   }
+  let code = e.target.value;
   try {
-    state.settings = await api('/api/settings', { method: 'PUT', body: { language: e.target.value } });
+    if (code.startsWith('download:')) {  // oficiální překlad z GitHubu: stáhnout, pak přepnout
+      code = code.slice(9);
+      e.target.disabled = true;
+      toast(t('settings.language.downloading'));
+      await api('/api/i18n/install', { method: 'POST', body: { code } });
+    }
+    state.settings = await api('/api/settings', { method: 'PUT', body: { language: code } });
     location.reload();  // celé rozhraní znovu v novém jazyce
-  } catch (err) { toast(err.message, true); }
+  } catch (err) {
+    toast(err.message, true);
+    e.target.disabled = false;
+    e.target.value = I18N.lang;
+  }
 });
 $('#appDataFolder').addEventListener('click', async () => {
   try { await api('/api/app/data-folder', { method: 'POST' }); } catch (err) { toast(err.message, true); }
@@ -3502,9 +3532,17 @@ $('#categoryRuleForm').addEventListener('submit', async e => {
     return;
   }
   try {
+    // zprávy zařazené podle původního znění zůstanou; starší zprávy podle nového znění jen se souhlasem
+    const { count } = await api(`/api/categories/${cat}/rules/preview`, { method: 'POST', body });
+    body.apply_existing = count > 0 && await confirmDialog({
+      title: t('rule.applyTitle'),
+      lines: [tn('rule.applyLine', count, { category: CATEGORIES[cat].title })],
+      question: t('rule.applyQuestion'),
+      ok: t('rule.applyYes'), cancel: t('rule.applyNo'), danger: false,
+    });
     await api(`/api/categories/${cat}/rules/${id}`, { method: 'PUT', body });
     $('#categoryRuleDialog').close();
-    toast('Pravidlo upraveno');
+    toast(t('rule.updated'));
     await afterCategoryRuleChange(cat);
   } catch (err) {
     $('#categoryRuleError').textContent = err.message;
@@ -3557,7 +3595,7 @@ function startRuleEdit(li, list, id) {
     save.disabled = true;
     try {
       await api(ed.url(id), { method: 'PUT', body });
-      toast('Pravidlo upraveno');
+      toast(t('rule.updated'));
       await (ed.after || ed.render)();
     } catch (err) {
       form.querySelector('.rule-edit-error').textContent = err.message;
@@ -3696,6 +3734,13 @@ async function pollSync() {
     state.trashTotal = st.trash;
     countsChanged = true;
     renderTrashFooter();
+  }
+  if (st.i18n != null && st.i18n !== state.i18nGeneration) {  // překlad se na pozadí aktualizoval
+    const first = state.i18nGeneration == null;
+    state.i18nGeneration = st.i18n;
+    if (!first) {
+      try { await loadI18n(); countsChanged = true; renderList(); } catch { /* příště */ }
+    }
   }
   if (countsChanged) renderSidebar();
   renderUpdateButton(st.update);

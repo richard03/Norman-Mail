@@ -652,7 +652,8 @@ class SyncManager:
     CATEGORY_LOG = {"notifications": "notifikací", "unimportant": "nedůležitých zpráv"}
 
     def cleanup_categories(self):
-        """Podle nastavení smaže (do koše) staré notifikace, nedůležité zprávy a zprávy ve spamu."""
+        """Podle nastavení smaže (do koše) staré notifikace, nedůležité zprávy a zprávy ve spamu
+        a natrvalo staré zprávy ve Smazaných (mail.trash_uids zprávy v koši maže natrvalo)."""
         settings = self.db.settings()
         now = time.time()
         work = []  # (účet, složka, uid, popis)
@@ -668,6 +669,10 @@ class SyncManager:
         if age is not None:
             for acc_id, (folder, uids) in self.db.role_uids_older("junk", now - age).items():
                 work.append((acc_id, folder, uids, "zpráv ve spamu", age))
+        age = db_module.delete_age(settings, "trash")
+        if age is not None:
+            for acc_id, (folder, uids) in self.db.role_uids_older("trash", now - age).items():
+                work.append((acc_id, folder, uids, "zpráv ve Smazaných (natrvalo)", age))
         for acc_id, folder, uids, what, age in work:
             acc = self.store.get(acc_id)
             if acc is None:
@@ -680,7 +685,7 @@ class SyncManager:
                 self._error(acc, e)
                 continue
             log.info("Smazáno %d %s starších než %s (účet %s)", len(uids), what,
-                     "týden" if age == db_module.WEEK else "měsíc", acc["name"])
+                     {db_module.WEEK: "týden", db_module.MONTH: "měsíc"}.get(age, "rok"), acc["name"])
             self.db.bump()
 
     def mark_category_read(self, category):
