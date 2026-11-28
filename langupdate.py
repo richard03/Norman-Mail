@@ -245,11 +245,8 @@ def install(code) -> Path:
 
 
 def start(enabled):
-    """Na pozadí po startu: aktualizace překladů (jen sestavená aplikace nebo zkušební NORMANMAIL_UPDATE_URL,
-    jen se zapnutými aktualizacemi). Při neúspěchu se zkouší znovu."""
-    if not (updater.frozen() or os.environ.get("NORMANMAIL_UPDATE_URL")):
-        return
-
+    """Na pozadí po startu: aktualizace překladů (jen se zapnutými aktualizacemi; i při spuštění ze zdrojáků –
+    verze bez vydání na GitHubu se tiše přeskočí). Při neúspěchu se zkouší znovu."""
     def loop():
         time.sleep(FIRST_CHECK)
         while True:

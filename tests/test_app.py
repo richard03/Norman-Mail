@@ -394,11 +394,55 @@ class MessagesTest(AppBase):
         self.assertEqual(self.post("/api/categories/notifications/mark-read")["count"], 0)
         sid = self.d.add_spam_rule("s@x.cz")
         other = self.d.add_spam_rule("t@x.cz")
-        self.put(f"/api/spam-rules/{sid}", {"value": "u@x.cz"})
-        self.put(f"/api/spam-rules/{sid}", {"value": "t@x.cz"}, status=400)  # už existuje
-        self.put(f"/api/spam-rules/{sid}", {"value": "spatne"}, status=400)
+        self.put(f"/api/spam-rules/{sid}", {"sender": "u@x.cz"})
+        self.put(f"/api/spam-rules/{sid}", {"sender": "t@x.cz"}, status=400)  # už existuje
+        self.put(f"/api/spam-rules/{sid}", {"sender": "spatne"}, status=400)
+        self.put(f"/api/spam-rules/{sid}", {"sender": "me@example.com"}, status=400)  # vlastní adresa
+        self.put(f"/api/spam-rules/{sid}", {"subject": "výhra", "subject_exact": True})
+        self.assertEqual({(r["subject"], r["subject_exact"]) for r in self.get("/api/spam-rules")},
+                         {("výhra", 1), ("", 0)})
         self.assertEqual(len(self.get("/api/spam-rules")), 2)
         self.delete(f"/api/spam-rules/{other}")
+
+    def test_add_rules_manually(self):
+        # Nedůležité / Notifikace: zařadí i zprávy, které už v doručené poště jsou
+        rules = self.post("/api/categories/notifications/rules", {"sender": "Eva@x.cz"})
+        self.assertEqual([r["sender"] for r in rules], ["eva@x.cz"])
+        self.assertEqual(self.d.view_of("a", "INBOX", self.u1), "notifications")
+        # jednoduché pravidlo se stejnou podmínkou v jiné kategorii se nahradí
+        self.post("/api/categories/unimportant/rules", {"sender": "eva@x.cz"})
+        self.assertEqual(self.get("/api/categories/notifications/rules"), [])
+        self.post("/api/categories/unimportant/rules", {"sender": "eva@x.cz", "subject": "projekt"})
+        self.assertEqual(len(self.get("/api/categories/unimportant/rules")), 2)
+        # jen doména odesílatele (i s @ na začátku), celý předmět
+        self.post("/api/categories/notifications/rules", {"sender": "@X.cz", "subject": "Re: Oběd", "subject_exact": True})
+        r = next(r for r in self.get("/api/categories/notifications/rules") if r["sender"] == "x.cz")
+        self.assertEqual((r["subject"], r["subject_exact"]), ("oběd", 1))
+        self.post("/api/categories/notifications/rules", {"sender": "neni domena"}, status=400)
+        self.post("/api/categories/unimportant/rules", {}, status=400)
+        self.post("/api/categories/unimportant/rules", {"sender": "spatne"}, status=400)
+        self.post("/api/categories/neni/rules", {"sender": "a@x.cz"}, status=404)
+        # Spam: pravidlo a přesun zpráv, které už ve schránkách jsou (na pozadí)
+        with mock.patch.object(app_module.threading, "Thread") as T:
+            res = self.post("/api/spam-rules", {"sender": "Eva@x.cz"})
+        self.assertEqual([r["sender"] for r in res["rules"]], ["eva@x.cz"])
+        self.assertEqual(self.get("/api/categories/unimportant/rules")[0]["subject"], "projekt")  # složené zůstalo
+        app_module._spam_sender_job(*T.call_args.kwargs["args"])
+        self.assertEqual(self.get(f"/api/jobs/{res['job_id']}")["moved"], 2)  # z obou účtů
+        self.post("/api/spam-rules", {"sender": "spatne"}, status=400)
+        self.post("/api/spam-rules", {"sender": "me@example.com"}, status=400)  # vlastní adresa
+        self.post("/api/spam-rules", {}, status=400)
+        # doména + předmět: na serveru se hledá podle domény, přesně se ověří obě podmínky
+        self.M.add("INBOX", make_raw(sender="info@shop.cz", subject="Sleva"))
+        self.M.add("INBOX", make_raw(sender="info@shop.cz", subject="Faktura"))
+        before = len(self.M.uids("Spam"))
+        with mock.patch.object(app_module.threading, "Thread") as T:
+            res = self.post("/api/spam-rules", {"sender": "shop.cz", "subject": "sleva", "subject_exact": True})
+        app_module._spam_sender_job(*T.call_args.kwargs["args"])
+        self.assertEqual(self.get(f"/api/jobs/{res['job_id']}")["moved"], 1)
+        self.assertEqual(len(self.M.uids("Spam")), before + 1)
+        rule = next(r for r in self.get("/api/spam-rules") if r["sender"] == "shop.cz")
+        self.assertEqual((rule["subject"], rule["subject_exact"], rule["hits"]), ("sleva", 1, 1))
 
     def test_spam_with_sender_job(self):
         self.M.add("INBOX", make_raw(sender="eva@x.cz", subject="Starší", date=OLD))
@@ -528,13 +572,17 @@ class UserFoldersTest(AppBase):
     def test_rules_and_to_folder(self):
         f = self.create(mark_read=True)
         fid = f["id"]
-        rules = self.post(f"/api/user-folders/{fid}/rules", {"kind": "subject", "value": "Faktura"})
-        self.assertEqual(rules[0]["value"], "faktura")
-        self.post(f"/api/user-folders/{fid}/rules", {"kind": "sender", "value": "spatne"}, status=400)
-        self.post(f"/api/user-folders/{fid}/rules", {"kind": "x", "value": "a@b.cz"}, status=400)
-        self.post(f"/api/user-folders/{fid}/rules", {"kind": "subject", "value": "a"}, status=400)
+        rules = self.post(f"/api/user-folders/{fid}/rules", {"subject": "Faktura"})
+        self.assertEqual((rules[0]["subject"], rules[0]["subject_exact"]), ("faktura", 0))
+        self.post(f"/api/user-folders/{fid}/rules", {"sender": "spatne"}, status=400)
+        self.post(f"/api/user-folders/{fid}/rules", {}, status=400)
+        both = self.post(f"/api/user-folders/{fid}/rules", {"sender": "x.cz", "recipient": "me@example.com",
+                                                             "after_read": True})
+        self.assertEqual({(r["sender"], r["recipient"], r["after_read"]) for r in both},
+                         {("", "", 0), ("x.cz", "me@example.com", 1)})
+        self.delete(f"/api/user-folder-rules/{next(r['id'] for r in both if r['sender'])}")
         rid = self.get(f"/api/user-folders/{fid}/rules")[0]["id"]
-        self.put(f"/api/user-folder-rules/{rid}", {"kind": "subject", "value": "faktura 1"})
+        self.put(f"/api/user-folder-rules/{rid}", {"subject": "faktura 1"})
         res = self.post(f"/api/accounts/a/messages/{self.u2}/to-folder", {"folder": "INBOX", "target_id": fid})
         self.assertEqual((res["kind"], res["value"], res["moved"]), ("sender", "eva@x.cz", True))
         self.assertEqual(self.M.uids("INBOX"), [self.u1])
@@ -553,7 +601,7 @@ class UserFoldersTest(AppBase):
         self.post("/api/messages/move", {"target": {"type": "ufolder", "id": f["id"]}, "items": items,
                                          "scope": "sender"})
         self.assertEqual(self.M.uids("INBOX"), [])
-        self.assertEqual(self.d.folder_rules(f["id"])[0]["value"], "eva@x.cz")
+        self.assertEqual(self.d.folder_rules(f["id"])[0]["sender"], "eva@x.cz")
         back = [{"account_id": "a", "folder": "Faktury", "uid": u} for u in self.M.uids("Faktury")]
         self.post("/api/messages/move", {"target": {"type": "inbox", "account_id": "b"}, "items": back,
                                          "scope": "release"})

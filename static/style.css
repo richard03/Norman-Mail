@@ -145,6 +145,7 @@ body.resizing iframe { pointer-events: none; }  /* rámec se zprávou by jinak �
 }
 .icon-btn:hover { background: var(--hover); color: var(--text); }
 .icon-btn.small { font-size: 14px; }
+a { color: var(--accent); }  /* výchozí (navštívená) modrá prohlížeče je v tmavém režimu nečitelná; text zpráv je v rámu */
 .link { border: none; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; }
 .spacer { flex: 1; }
 
@@ -330,7 +331,6 @@ dialog:has(.dialog-x) h2 { padding-right: 36px; }
 .gmail-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
 .app-password-help ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .app-password-help .note { margin: 6px 0 0; }
-#accountForm a { color: var(--accent); }  /* výchozí modrá je v tmavém režimu nečitelná */
 #accountForm.gmail-google .pw-field, #accountForm.gmail-google #passwordLabel,
 #accountForm.gmail-google fieldset, #accountForm.gmail-google #saveAccountBtn,
 #accountForm.gmail-password #googleBox { display: none; }
@@ -491,12 +491,6 @@ dialog.settings .note { font-size: 14px; line-height: 1.45; }
 .rule-value { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rule-meta { font-size: 12px; color: var(--muted); }
 .rule.editing { display: block; }
-.rule-edit { display: flex; flex-wrap: wrap; gap: 6px; }
-.rule-edit select { flex: 1 1 40%; min-width: 0; width: auto; }
-.rule-edit input { flex: 1 1 100%; min-width: 0; }
-.rule-edit-error { flex: 1 1 100%; margin: 0; }
-.rule-edit-error:empty { display: none; }
-.rule-edit-actions { display: flex; gap: 6px; margin-left: auto; }
 .rules .empty-rules { padding: 16px 12px; color: var(--muted); text-align: center; }
 
 .settings-main h3.sub-head, .settings-rules h3.sub-head { margin-top: 28px; }  /* mezera nad podnadpisem, přebije margin: 0 výše */
@@ -515,7 +509,7 @@ dialog #languageSelect { width: 280px; max-width: 100%; }  /* výběr jazyka se 
 dialog label.select-option select { width: auto; flex: 1; min-width: 0; }
 .bayes-actions { margin-top: 10px; }
 .options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
-dialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); cursor: pointer; }
+dialog label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); cursor: pointer; }
 dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; accent-color: var(--accent); flex: none; }
 
 /* ---------- uživatelské složky ---------- */
@@ -537,13 +531,10 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 .folder-rules { border-top: 1px solid var(--border); padding-top: 10px; }
 .folder-rules h3 { margin: 0 0 4px; font-size: 15px; }
 .folder-rules .rules { max-height: 240px; overflow-y: auto; margin-top: 8px; }
-.rule-add { display: flex; gap: 8px; margin-top: 8px; }
-.rule-add input { flex: 1; }
-.folder-form label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.folder-form label.option { flex-direction: row; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .folder-form label.option input { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--accent); }
 .warn-mark { color: var(--danger); font-weight: 700; padding: 0 4px; }
 .folder-form fieldset .grid2 { margin-bottom: 8px; }
-.rule-add select { flex: none; width: auto; }
 .delete-panel {
   border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px; align-items: stretch;
@@ -572,6 +563,10 @@ dialog label.option input { width: 16px; height: 16px; padding: 0; margin: 0; ac
 }
 .list-footer[hidden] { display: none; }
 dialog.confirm { width: min(480px, calc(100vw - 32px)); }
+/* Pravidlo Nedůležitých / Notifikací: větší mezery mezi poli, pod polem jeho nápověda / volba */
+dialog.category-rule-dialog form { gap: 18px; }
+dialog.category-rule-dialog .dialog-actions { margin-top: 4px; }
+.rule-field { display: flex; flex-direction: column; gap: 6px; }
 /* Nastavit pravidlo */
 dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
 /* Pokročilé hledání */
@@ -601,9 +596,9 @@ dialog.rule-dialog { width: min(520px, calc(100vw - 32px)); }
 .settings-nav button .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-main form.folder-form { padding: 0; }
 .settings-rules .rules { margin-top: 10px; }
-.settings-rules .rule-add input { min-width: 0; }
-.settings-rules .rule-add { flex-wrap: wrap; }
-.settings-rules .rule-add select { flex: 1 1 40%; }
+.rules-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rules-head h3 { flex: 1; margin: 0 !important; }
+.rules-head .btn { flex: none; }
 
 /* ---------- kontextové menu ---------- */
 .menu.ctx-menu { position: fixed; right: auto; top: 0; left: 0; min-width: 210px; z-index: 100; }

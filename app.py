@@ -6,6 +6,7 @@ import base64
 import io
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -866,12 +867,23 @@ def user_folder_rules(folder_id):
 
 @app.post("/api/user-folders/<int:folder_id>/rules")
 def user_folder_rule_add(folder_id):
+    """Pravidlo složky z Nastavení: odesílatel (i doména), příjemce, předmět (část / přesně) – vyplněné musí
+    platit všechny; after_read = přesouvat až po přečtení."""
     _folder_or_404(folder_id)
     data = request.get_json(force=True)
-    kind, value = _rule_arg(data)
-    database.add_folder_rule(folder_id, kind, value, bool(data.get("after_read")))
+    conds = _category_rule_fields(data)
+    _replace_simple(conds, ("folder", folder_id))
+    database.add_folder_rule(folder_id, conds, bool(data.get("after_read")))
+    database.bump()
     syncer.trigger()  # existující zprávy podle pravidla přesunout
     return jsonify(database.folder_rules(folder_id))
+
+
+def _replace_simple(conds, keep):
+    """Jednoduché pravidlo (jen odesílatel / jen předmět): stejná podmínka jinde by se s ním přetahovala."""
+    simple = [k for k in ("sender", "subject") if conds[k]]
+    if len(simple) == 1 and not conds["recipient"]:
+        database.replace_simple_rules(simple[0], conds[simple[0]], keep)
 
 
 def _rule_arg(data):
@@ -887,19 +899,18 @@ def _rule_arg(data):
     return kind, value
 
 
-def _update_rule(table, rule_id, kind, value, after_read=None):
-    if not database.update_rule(table, rule_id, kind, value, after_read):
+def _update_rule(table, rule_id, conds, after_read=None):
+    if not database.update_rule(table, rule_id, conds, after_read):
         raise ValidationError(tr("err.ruleExists"))
     database.bump()
     syncer.trigger()  # zprávy podle upraveného pravidla
-    return jsonify(ok=True, kind=kind, value=value)
+    return jsonify(ok=True)
 
 
 @app.put("/api/user-folder-rules/<int:rule_id>")
 def user_folder_rule_update(rule_id):
     data = request.get_json(force=True)
-    kind, value = _rule_arg(data)
-    return _update_rule("user_folder_rules", rule_id, kind, value, bool(data.get("after_read")))
+    return _update_rule("user_folder_rules", rule_id, _category_rule_fields(data), bool(data.get("after_read")))
 
 
 @app.delete("/api/user-folder-rules/<int:rule_id>")
@@ -939,9 +950,10 @@ def message_to_folder(acc_id, uid):
     kind, value = _rule_arg(data)
     if kind in ("sender", "subject"):
         database.replace_simple_rules(kind, value, ("folder", target["id"]))
-    rule_id = database.add_folder_rule(target["id"], kind, value, bool(data.get("after_read")))
+    conds = db.kind_conds(kind, value)
+    rule_id = database.add_folder_rule(target["id"], conds, bool(data.get("after_read")))
     in_target = target["account_id"] == acc_id and target["imap_name"] == folder
-    if row and not in_target and db.rule_matches({"kind": kind, "value": value}, row):
+    if row and not in_target and db.rule_matches(conds, row):
         database.add_folder_rule_hits(rule_id, 1)
     if not in_target:
         syncer.enqueue(acc, folder, uid, tr("op.moveToFolder", folder=target["name"]),
@@ -1160,7 +1172,7 @@ def messages_move():
         fid = target["folder"]["id"]
         for value in senders if scope == "sender" else [subject]:
             database.replace_simple_rules(scope, value, ("folder", fid))
-            database.add_folder_rule(fid, scope, value)
+            database.add_folder_rule(fid, db.kind_conds(scope, value))
     elif target["type"] == "spam" and scope == "sender":
         for s in senders:
             database.replace_simple_rules("sender", s, ("spam", None))
@@ -1431,18 +1443,38 @@ def category_rules(category):
     return jsonify(database.category_rules(_category_or_404(category)))
 
 
+DOMAIN_RE = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$")
+
+
 def _category_rule_fields(data) -> dict:
-    """Ověřené podmínky pravidla Nedůležitých / Notifikací: {sender, recipient, subject}."""
+    """Ověřené podmínky pravidla Nedůležitých / Notifikací: {sender, recipient, subject, subject_exact}.
+    Odesílatel může být adresa, nebo jen doména (github.com – platí pro všechny adresy z ní)."""
     sender, recipient = (str(data.get(k) or "").strip().lower() for k in ("sender", "recipient"))
+    sender = sender.lstrip("@")  # „@github.com“ = doména
     subject = mail.base_subject(str(data.get("subject") or "")).lower()
-    for key, addr in (("err.invalidSender", sender), ("err.invalidRecipient", recipient)):
-        if addr and not mail.ADDR_RE.match(addr):
-            raise ValidationError(tr(key))
+    if sender and not (mail.ADDR_RE.match(sender) if "@" in sender else DOMAIN_RE.match(sender)):
+        raise ValidationError(tr("err.invalidSender"))
+    if recipient and not mail.ADDR_RE.match(recipient):
+        raise ValidationError(tr("err.invalidRecipient"))
     if len(subject) > 200:
         raise ValidationError(tr("err.subjectTooLong"))
     if not (sender or recipient or subject):
         raise ValidationError(tr("err.fillOne"))
-    return {"sender": sender, "recipient": recipient, "subject": subject}
+    return {"sender": sender, "recipient": recipient, "subject": subject,
+            "subject_exact": bool(subject and data.get("subject_exact"))}
+
+
+@app.post("/api/categories/<category>/rules")
+def category_rule_add(category):
+    """Ruční pravidlo Nedůležitých / Notifikací z Nastavení (vyplněné podmínky musí platit všechny).
+    Zařadí i zprávy, které už v doručené poště jsou a pravidlu odpovídají."""
+    _category_or_404(category)
+    rule = _category_rule_fields(request.get_json(force=True))
+    _replace_simple(rule, ("category", category))
+    database.add_category_rule(category, **rule)
+    database.bump()
+    syncer.trigger()
+    return jsonify(database.category_rules(category))
 
 
 @app.post("/api/categories/<category>/rules/preview")
@@ -1479,12 +1511,33 @@ def spam_rules():
     return jsonify(database.spam_rules())
 
 
+def _spam_rule_fields(data) -> dict:
+    """Podmínky pravidla Spamu (jako u kategorií); vlastní adresa jako odesílatel spamu být nesmí."""
+    conds = _category_rule_fields(data)
+    if conds["sender"] and conds["sender"] in {a["email"].lower() for a in store.list_public()}:
+        raise ValidationError(tr("err.spamOwnAddress"))
+    return conds
+
+
+@app.post("/api/spam-rules")
+def spam_rule_add():
+    """Ruční pravidlo Spamu z Nastavení: odesílatel (i doména), příjemce, předmět (část / přesně) – vyplněné
+    musí platit všechny. Do spamu půjdou i odpovídající zprávy, které už ve schránkách jsou (na pozadí,
+    stejně jako volba „Vše od …“ u zprávy; zprávy v ToDo zůstanou)."""
+    conds = _spam_rule_fields(request.get_json(force=True))
+    _replace_simple(conds, ("spam", None))
+    database.add_spam_rule(**conds)
+    database.bump()
+    job_id = uuid.uuid4().hex[:12]
+    with jobs_lock:
+        jobs[job_id] = {"status": "running", "moved": 0, "errors": [], "sender": conds["sender"]}
+    threading.Thread(target=_spam_sender_job, args=(job_id, conds, time.time()), daemon=True).start()
+    return jsonify(rules=database.spam_rules(), job_id=job_id)
+
+
 @app.put("/api/spam-rules/<int:rule_id>")
 def spam_rule_update(rule_id):
-    value = str(request.get_json(force=True).get("value") or "").strip().lower()
-    if not mail.ADDR_RE.match(value):
-        raise ValidationError(tr("err.invalidEmail"))
-    return _update_rule("spam_rules", rule_id, "sender", value)
+    return _update_rule("spam_rules", rule_id, _spam_rule_fields(request.get_json(force=True)))
 
 
 @app.delete("/api/spam-rules/<int:rule_id>")
@@ -1558,21 +1611,38 @@ def message_spam(acc_id, uid):
     return jsonify(ok=True, job_id=job_id, sender=sender)
 
 
-def _spam_sender_job(job_id, sender, ts):
+def _spam_criteria(conds):
+    """Hledání na serveru, které zúží kandidáty pravidla Spamu (nejvýběrovější vyplněná podmínka)."""
+    if conds["sender"]:
+        return [("FROM", conds["sender"])]  # IMAP hledá podřetězec – stačí i pro doménu
+    if conds["recipient"]:
+        return [("TO", conds["recipient"]), ("CC", conds["recipient"])]
+    return [("SUBJECT", conds["subject"])]
+
+
+def _spam_sender_job(job_id, rule, ts):
+    """Na pozadí: do spamu starší zprávy ze všech účtů, které odpovídají pravidlu (rule = odesílatel, nebo
+    podmínky pravidla Spamu)."""
+    conds = db.norm_conds({"sender": rule} if isinstance(rule, str) else rule)
+    sender = conds["sender"] if not (conds["recipient"] or conds["subject"]) and "@" in conds["sender"] else None
     moved, errors = 0, []
     todo = database.todo_keys()  # zprávy v ToDo se automaticky nepřesouvají
     for acc in store.all():
         try:
             with bg_pool.get(acc) as M:
-                moved += mail.move_sender_to_spam(M, sender, ts, todo)
+                moved += mail.move_matching_to_spam(M, _spam_criteria(conds), lambda r: db.rule_matches(conds, r),
+                                                    ts, todo)
         except Exception as e:
             errors.append(f"{acc['name']}: {mail.friendly_error(e)}")
         with jobs_lock:
             jobs[job_id].update(moved=moved, errors=errors)
     with jobs_lock:
         jobs[job_id]["status"] = "done"
-    if moved:
+    if moved and sender:
         database.add_rule_hits(sender, moved)
+    elif moved:
+        rid = database.add_spam_rule(**conds)  # už existuje – jen id
+        database.add_spam_rule_hits(rid, moved)
     syncer.trigger()
 
 

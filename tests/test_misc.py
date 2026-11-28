@@ -64,6 +64,35 @@ class TokensTest(unittest.TestCase):
         self.assertEqual(bayes.fetch_tokens(M, [1]), {})
 
 
+class DatabaseOpenRetryTest(unittest.TestCase):
+    """Po instalaci nové verze drží soubory databáze chvíli antivirus – start to musí přečkat."""
+
+    def test_transient_readonly_is_retried(self):
+        real, calls = db.sqlite3.connect, []
+
+        def connect(*a, **kw):
+            calls.append(1)
+            if len(calls) <= 2:
+                raise db.sqlite3.OperationalError("attempt to write a readonly database")
+            return real(*a, **kw)
+        path = Path(tempfile.mkdtemp()) / "m.db"
+        with mock.patch.object(db.sqlite3, "connect", connect), mock.patch.object(db.time, "sleep") as sleep:
+            d = db.Database(path)
+        self.assertEqual((len(calls), sleep.call_count), (3, 2))
+        self.assertIsNotNone(d._conn.execute("SELECT 1 FROM meta").fetchone())
+
+    def test_gives_up_after_deadline_and_on_other_errors(self):
+        path = Path(tempfile.mkdtemp()) / "m.db"
+        err = db.sqlite3.OperationalError("attempt to write a readonly database")
+        with mock.patch.object(db.sqlite3, "connect", side_effect=err), mock.patch.object(db.time, "sleep"), \
+                mock.patch.object(db, "OPEN_RETRY_FOR", 0), self.assertRaises(db.sqlite3.OperationalError):
+            db.Database(path)
+        with mock.patch.object(db.sqlite3, "connect", side_effect=db.sqlite3.OperationalError("no such table")) as c, \
+                self.assertRaises(db.sqlite3.OperationalError):
+            db.Database(path)
+        self.assertEqual(c.call_count, 1)  # trvalá chyba se nezkouší znovu
+
+
 class BootstrapTest(unittest.TestCase):
     def setUp(self):
         self.d = db.Database(Path(tempfile.mkdtemp()) / "test.db")

@@ -31,6 +31,27 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(self.uids("unimportant"), [1])
         self.assertEqual(self.uids("notifications"), [2])  # pravidlo dál platí pro ostatní zprávy
 
+    def test_sender_domain_and_exact_subject(self):
+        """Odesílatel jen jako doména (i subdomény); předmět celý, nebo jeho část. SQL i Python stejně."""
+        def from_(uid, addr, subject):
+            r = rec(uid, subject=subject)
+            r["from"] = [{"name": "", "addr": addr}]
+            return r
+        self.d.insert_messages("a", "INBOX", [from_(3, "noreply@github.com", "Build failed"),
+                                              from_(4, "x@notifications.github.com", "Faktura za březen"),
+                                              from_(5, "x@notgithub.com", "Faktura")])
+        self.d.add_category_rule("notifications", sender="github.com")
+        self.assertEqual(self.uids("notifications"), [3, 4])
+        self.d.add_category_rule("unimportant", subject="faktura", subject_exact=True)
+        self.assertEqual(self.uids("unimportant"), [2, 5])  # „Faktura za březen“ ne
+        self.assertEqual(self.d.category_rule_preview("unimportant", "", "", "faktura"), 1)  # část: i č. 4
+        cat = self.d.categorizer(marks=False)
+        self.d._q("DELETE FROM rule_placements")  # categorizer podle živých pravidel
+        self.assertEqual([cat(self.msg(u)) for u in (3, 4, 5, 1)], ["notifications", "notifications", "unimportant", None])
+        # totéž pravidlo znovu, ale „část předmětu“: převezme volbu
+        self.d.add_category_rule("unimportant", subject="faktura")
+        self.assertEqual([r["subject_exact"] for r in self.d.category_rules("unimportant")], [0])
+
     def test_priority_unimportant_before_notifications(self):
         self.d.add_category_rule("notifications", sender="eva@example.com")
         self.d.add_category_rule("unimportant", subject="faktura")
@@ -48,7 +69,7 @@ class PlacementTest(unittest.TestCase):
 
     def test_locked_message_skips_folder_rules(self):
         fid = self.d.create_user_folder("Faktury", "a", "Faktury", False, False)
-        self.d.add_folder_rule(fid, "sender", "eva@example.com")
+        self.d.add_folder_rule(fid, db.kind_conds("sender", "eva@example.com"))
         self.assertEqual(sorted(self.d.folder_rule_matches(fid)["a"]), [1, 2])
         self.d.mark_message(self.msg(2), "fyi")  # vrácená ze složky do doručené pošty
         self.assertEqual(sorted(self.d.folder_rule_matches(fid)["a"]), [1])
@@ -56,7 +77,7 @@ class PlacementTest(unittest.TestCase):
 
     def test_matching_rules_and_release(self):
         fid = self.d.create_user_folder("Faktury", "a", "Faktury", False, False)
-        self.d.add_folder_rule(fid, "subject", "faktura")
+        self.d.add_folder_rule(fid, db.kind_conds("subject", "faktura"))
         self.d.add_category_rule("notifications", sender="eva@example.com")
         self.d.add_spam_rule("eva@example.com")
         rules = self.d.matching_rules(self.msg(2))
@@ -67,7 +88,7 @@ class PlacementTest(unittest.TestCase):
 
     def test_replace_simple_rules(self):
         fid = self.d.create_user_folder("Eva", "a", "Eva", False, False)
-        self.d.add_folder_rule(fid, "sender", "eva@example.com")
+        self.d.add_folder_rule(fid, db.kind_conds("sender", "eva@example.com"))
         self.d.add_spam_rule("eva@example.com")
         self.d.add_category_rule("notifications", sender="eva@example.com")
         self.d.add_category_rule("notifications", sender="eva@example.com", subject="faktura")  # složitější zůstane
@@ -93,7 +114,7 @@ class PlacementTest(unittest.TestCase):
         self.d.insert_messages("a", "Faktury", [rec(5, subject="Faktura")])
         in_folder = self.d.message("a", "Faktury", 5)
         self.assertEqual(self.d.placement(in_folder, "a", "Faktury")["layer"], "manual")
-        self.d.add_folder_rule(fid, "subject", "faktura")
+        self.d.add_folder_rule(fid, db.kind_conds("subject", "faktura"))
         self.assertEqual(self.d.placement(in_folder, "a", "Faktury")["layer"], "rule")
 
     def test_natural_view(self):
@@ -177,3 +198,24 @@ class RulePlacementTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CondRulesMigrationTest(unittest.TestCase):
+    """Pravidla Spamu a složek z dřívější verze (kind + value) se převedou na podmínky jako u kategorií."""
+
+    def test_old_rules_are_converted(self):
+        path = Path(tempfile.mkdtemp()) / "test.db"
+        d = db.Database(path)
+        fid = d.create_user_folder("Faktury", "a", "Faktury", False, False)
+        d._q("INSERT INTO spam_rules(kind, value, created) VALUES('sender', 'spam@x.cz', 1)")
+        d._q("INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read) VALUES(?, 'subject', 'faktura', 1, 1)",
+             (fid,))
+        d._conn.close()
+        d = db.Database(path)
+        self.assertEqual([(r["sender"], r["subject"]) for r in d.spam_rules()], [("spam@x.cz", "")])
+        self.assertEqual(d.spam_senders(), {"spam@x.cz"})
+        r = d.folder_rules(fid)[0]
+        self.assertEqual((r["sender"], r["subject"], r["subject_exact"], r["after_read"]), ("", "faktura", 0, 1))
+        self.assertNotIn("kind", r)
+        # stejné pravidlo znovu = totéž pravidlo (jedinečnost drží klíč z podmínek)
+        self.assertEqual(d.add_folder_rule(fid, db.kind_conds("subject", "Faktura")), r["id"])

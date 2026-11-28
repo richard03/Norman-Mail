@@ -130,11 +130,11 @@ class SyncFolderTest(SyncBase):
         self.s.sync_folder(self.A, "INBOX")
         self.assertEqual(self.inbox(), [2])
         self.assertEqual(len(self.M.uids("Spam")), 1)
-        self.assertEqual({r["value"]: r["hits"] for r in self.d.spam_rules()}["spammer@bad.cz"], 1)
+        self.assertEqual({r["sender"]: r["hits"] for r in self.d.spam_rules()}["spammer@bad.cz"], 1)
 
     def test_folder_rule_immediate(self):
         fid = self.d.create_user_folder("Faktury", "a", "Faktury", False, True)
-        self.d.add_folder_rule(fid, "subject", "faktura")
+        self.d.add_folder_rule(fid, db.kind_conds("subject", "faktura"))
         self.M.add("INBOX", make_raw(subject="Faktura za leden"))
         self.M.add("INBOX", make_raw(subject="Ahoj"))
         self.s.refresh_folders(self.A)
@@ -148,7 +148,7 @@ class SyncFolderTest(SyncBase):
         u = self.M.add("INBOX", make_raw(sender="eva@x.cz"), ["\\Seen"])
         self.full_sync()
         fid = self.d.create_user_folder("Eva", "a", "Eva", True, False)
-        self.d.add_folder_rule(fid, "sender", "eva@x.cz", after_read=True)
+        self.d.add_folder_rule(fid, db.kind_conds("sender", "eva@x.cz"), after_read=True)
         self.s.apply_folder_rules()
         self.assertNotIn(u, self.M.uids("INBOX"))
         self.assertEqual(self.inbox(), [])

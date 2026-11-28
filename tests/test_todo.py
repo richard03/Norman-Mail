@@ -71,7 +71,7 @@ class TodoTest(unittest.TestCase):
     def test_folder_rules_skip_todo(self):
         """Zprávu v ToDo pravidlo složky nepřesune; po Vyřešeno už ano."""
         fid = self.d.create_user_folder("Projekty", "a", "Projekty", False, False)
-        self.d.add_folder_rule(fid, "sender", "eva@example.com")
+        self.d.add_folder_rule(fid, db.kind_conds("sender", "eva@example.com"))
         self.d.set_todo(self.msg(1), True)
         self.assertEqual(sorted(self.d.folder_rule_matches(fid)["a"]), [2, 3])
         self.assertEqual(self.d.todo_keys(), {"<1@example.com>"})

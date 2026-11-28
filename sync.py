@@ -56,6 +56,12 @@ def context_folders(folders, extra_names=()):
     return sorted(chosen, key=lambda f: (f["role"] != "inbox", f["role"] == "all"))
 
 
+
+def rule_order(r):
+    """Pořadí pravidel složek: víc podmínek dřív, pak odesílatel > příjemce > předmět."""
+    filled = [bool(r["sender"]), bool(r["recipient"]), bool(r["subject"])]
+    return (-sum(filled), filled.index(True) if any(filled) else 3)
+
 class SyncManager:
     def __init__(self, store, db, pool):
         self.store, self.db, self.pool = store, db, pool
@@ -240,11 +246,11 @@ class SyncManager:
                     changed |= bool(deleted or updates)
 
             missing = sorted(server - cached.keys() - self._pending_uids(acc_id, folder), reverse=True)  # nejnovější první
-            rules = self.db.spam_senders() if folder == "INBOX" else set()
-            # pravidla složek v režimu „ihned“ – nové zprávy přesunout dřív, než se ukážou v seznamu
-            order = {k: i for i, k in enumerate(db_module.RULE_KINDS)}  # odesílatel > příjemce > předmět
+            rules = self.db.spam_rules() if folder == "INBOX" else []
+            # pravidla složek v režimu „ihned“ – nové zprávy přesunout dřív, než se ukážou v seznamu;
+            # přednost má pravidlo s více podmínkami, pak odesílatel > příjemce > předmět
             frules = sorted((r for r in self.db.folder_rules_active() if not r["after_read"]),
-                            key=lambda r: order[r["kind"]]) if folder == "INBOX" else []
+                            key=rule_order) if folder == "INBOX" else []
             batches = [missing[i:i + BATCH] for i in range(0, len(missing), BATCH)]
             for n, chunk in enumerate(batches):
                 if max_batches is not None and n >= max_batches:
@@ -340,17 +346,18 @@ class SyncManager:
         return n
 
     def _apply_spam_rules(self, acc, folder, records, rules, frules=()):
-        """Nové zprávy od odesílatelů z pravidel přesune do spamu (dřív, než se ukážou v seznamu).
+        """Nové zprávy, které odpovídají pravidlům Spamu, přesune do spamu (dřív, než se ukážou v seznamu).
         Zprávy, které řadí jiné explicitní pravidlo (kategorie, složka), mají přednost – Spam je
         nejméně důležitý cíl. Vrací zbylé záznamy."""
-        hits = {}
+        hits = {}  # id pravidla -> uid
         category_of = self.db.categorizer(marks=False)
         for r in records:
-            sender = next((a["addr"].lower() for a in r["from"] if a["addr"].lower() in rules), None)
-            if sender and (category_of(r) or any(db_module.rule_matches(x, r) for x in frules)):
+            rule = next((x for x in rules if db_module.rule_matches(x, r)), None)
+            if rule is None or r.get("deleted"):
                 continue
-            if sender and not r.get("deleted"):
-                hits.setdefault(sender, []).append(r["uid"])
+            if category_of(r) or any(db_module.rule_matches(x, r) for x in frules):
+                continue
+            hits.setdefault(rule["id"], []).append(r["uid"])
         if not hits:
             return records
         uids = [u for lst in hits.values() for u in lst]
@@ -360,8 +367,8 @@ class SyncManager:
         except Exception as e:  # zprávy zůstanou v doručené poště, zkusí se příště
             self._error(acc, e)
             return records
-        for sender, lst in hits.items():
-            self.db.add_rule_hits(sender, len(lst))
+        for rule_id, lst in hits.items():
+            self.db.add_spam_rule_hits(rule_id, len(lst))
         log.info("Pravidla pro spam: přesunuto %d zpráv (účet %s)", len(uids), acc["name"])
         moved = set(uids)
         return [r for r in records if r["uid"] not in moved]

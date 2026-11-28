@@ -152,13 +152,26 @@
   </form>
 </dialog>
 
-<!-- Úprava pravidla Nedůležitých / Notifikací (z Nastavení) -->
-<dialog id="categoryRuleDialog" class="confirm">
+<!-- Pravidlo Nedůležitých, Notifikací, Spamu nebo složky aplikace: přidání a úprava z Nastavení, vlastní pravidlo u zprávy -->
+<dialog id="categoryRuleDialog" class="confirm category-rule-dialog">
   <form id="categoryRuleForm" method="dialog" autocomplete="off">
     <h2 id="categoryRuleTitle" data-i18n="rule.editDialogTitle"></h2>
-    <label><span data-i18n="common.sender"></span><input name="sender" data-i18n-placeholder="common.senderPlaceholder"></label>
+    <p id="ruleIntro" class="note" hidden></p>
+    <div class="rule-field">
+      <label><span data-i18n="common.sender"></span><input name="sender" data-i18n-placeholder="common.senderPlaceholder"></label>
+      <p class="note" data-i18n="category.senderDomainNote"></p>
+    </div>
     <label><span data-i18n="common.recipient"></span><input name="recipient" data-i18n-placeholder="category.recipientPlaceholder"></label>
-    <label><span data-i18n="common.subjectPart"></span><input name="subject" maxlength="200" data-i18n-placeholder="category.subjectPlaceholder"></label>
+    <div class="rule-field">
+      <label><span data-i18n="common.subject"></span><input name="subject" maxlength="200" data-i18n-placeholder="category.subjectPlaceholder"></label>
+      <label class="option"><input type="radio" name="subject_exact" value="1"> <span data-i18n="category.subjectExact"></span></label>
+      <label class="option"><input type="radio" name="subject_exact" value="0" checked> <span data-i18n="category.subjectContains"></span></label>
+    </div>
+    <label id="ruleWhenWrap" hidden><span data-i18n="rule.whenToMove"></span>
+      <select name="when">
+        <option value="now" data-i18n="rule.onDelivery"></option>
+        <option value="read" data-i18n="rule.afterReading"></option>
+      </select></label>
     <p class="note" data-i18n="category.allFieldsNote"></p>
     <p id="categoryRuleError" class="error"></p>
     <div class="dialog-actions">
@@ -530,36 +543,26 @@
 
     <aside class="settings-rules">
       <div data-panel="unimportant">
-        <h3><span data-i18n="common.rules"></span> <span id="unimportantRulesCount" class="muted"></span></h3>
+        <div class="rules-head"><h3><span data-i18n="common.rules"></span> <span id="unimportantRulesCount" class="muted"></span></h3>
+          <button type="button" class="btn" data-add-rule="unimportant" data-i18n="rule.addButton"></button></div>
         <input type="search" class="rule-filter" data-filter="unimportantRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="unimportantRules" class="rules"></ul>
       </div>
       <div data-panel="spam">
-        <h3><span data-i18n="common.rules"></span> <span id="spamRulesCount" class="muted"></span></h3>
+        <div class="rules-head"><h3><span data-i18n="common.rules"></span> <span id="spamRulesCount" class="muted"></span></h3>
+          <button type="button" class="btn" data-add-rule="spam" data-i18n="rule.addButton"></button></div>
         <input type="search" class="rule-filter" data-filter="spamRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="spamRules" class="rules"></ul>
       </div>
       <div data-panel="notifications">
-        <h3><span data-i18n="common.rules"></span> <span id="notificationsRulesCount" class="muted"></span></h3>
+        <div class="rules-head"><h3><span data-i18n="common.rules"></span> <span id="notificationsRulesCount" class="muted"></span></h3>
+          <button type="button" class="btn" data-add-rule="notifications" data-i18n="rule.addButton"></button></div>
         <input type="search" class="rule-filter" data-filter="notificationsRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="notificationsRules" class="rules"></ul>
       </div>
       <div data-panel="folder" id="folderRulesSection">
-        <h3><span data-i18n="common.rules"></span> <span id="folderRulesCount" class="muted"></span></h3>
-        <p class="note" data-i18n="folder.rulesIntro"></p>
-        <div class="rule-add">
-          <select id="folderRuleKind">
-            <option value="sender" data-i18n="common.sender"></option>
-            <option value="recipient" data-i18n="common.recipientToCc"></option>
-            <option value="subject" data-i18n="common.subjectPart"></option>
-          </select>
-          <select id="folderRuleWhen" data-i18n-title="rule.whenToMove">
-            <option value="now" data-i18n="rule.immediately"></option>
-            <option value="read" data-i18n="rule.afterReadingShort"></option>
-          </select>
-          <input id="folderRuleInput" data-i18n-placeholder="common.senderPlaceholder" autocomplete="off">
-          <button type="button" id="folderRuleAdd" class="btn" data-i18n="common.add"></button>
-        </div>
+        <div class="rules-head"><h3><span data-i18n="common.rules"></span> <span id="folderRulesCount" class="muted"></span></h3>
+          <button type="button" class="btn" data-add-rule="folder" id="folderRuleAddBtn" data-i18n="rule.addButton"></button></div>
         <input type="search" class="rule-filter" data-filter="folderRules" data-i18n-placeholder="list.filterPlaceholder" data-i18n-aria-label="list.filterList" autocomplete="off">
         <ul id="folderRules" class="rules"></ul>
       </div>

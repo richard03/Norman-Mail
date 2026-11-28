@@ -1,6 +1,7 @@
 """Lokální databáze metadat zpráv (SQLite): cache hlaviček a těl, stav synchronizace, odložené zprávy."""
 
 import json
+import logging
 import re
 import sqlite3
 import threading
@@ -87,10 +88,15 @@ CATEGORY_PRIORITY = ("unimportant", "notifications")
 # bayesovský filtr) už se jí netýká.
 MARKS = CATEGORIES + ("important", "fyi")
 CATEGORY_RULE_FIELDS = ("sender", "recipient", "subject")
-CATEGORY_RULE_MATCH = ("(r.sender='' OR instr(m.from_addrs, ',' || r.sender || ',') > 0)"
+# Odesílatel pravidla je adresa, nebo jen doména (bez @): pak platí pro adresy z domény i jejích subdomén.
+# Předmět: část předmětu, nebo (subject_exact) celý předmět bez Re:/Fw:.
+CATEGORY_RULE_MATCH = ("(r.sender='' OR (instr(r.sender, '@') > 0 AND instr(m.from_addrs, ',' || r.sender || ',') > 0)"
+                       "      OR (instr(r.sender, '@') = 0 AND (instr(m.from_addrs, '@' || r.sender || ',') > 0"
+                       "          OR instr(m.from_addrs, '.' || r.sender || ',') > 0)))"
                        " AND (r.recipient='' OR instr(m.to_addrs, ',' || r.recipient || ',') > 0"
                        "      OR instr(m.cc_addrs, ',' || r.recipient || ',') > 0)"
-                       " AND (r.subject='' OR instr(m.base_subject, r.subject) > 0)")
+                       " AND (r.subject='' OR (r.subject_exact AND m.base_subject = r.subject)"
+                       "      OR (NOT r.subject_exact AND instr(m.base_subject, r.subject) > 0))")
 # Klíč zprávy pro označení „jen tento email“ a ToDo – Message-ID, jinak otisk odesílatele, data (celé sekundy),
 # předmětu a velikosti (dvě různé zprávy se stejnými hlavičkami se skoro vždy liší velikostí). Obojí přežije
 # přesun do jiné složky. Stejný řetězec skládá message_key() v Pythonu.
@@ -130,14 +136,26 @@ _PLACE_SQL = (f"INTO rule_placements SELECT {MSG_KEY}, r.category, r.id, r.sende
               f"ORDER BY CASE r.category WHEN 'unimportant' THEN 0 ELSE 1 END")
 
 
+def sender_matches(rule_sender, addr) -> bool:
+    """Adresa odesílatele × odesílatel pravidla (adresa, nebo doména – i subdomény). Jako v CATEGORY_RULE_MATCH."""
+    addr = (addr or "").lower()
+    if "@" in rule_sender:
+        return addr == rule_sender
+    return addr.endswith("@" + rule_sender) or addr.endswith("." + rule_sender)
+
+
 def category_rule_matches(rule, rec) -> bool:
-    """Odpovídá zpráva pravidlu Nedůležitých / Notifikací? Stejná logika jako CATEGORY_RULE_MATCH v SQL."""
-    if rule["sender"] and not any((a.get("addr") or "").lower() == rule["sender"] for a in rec["from"]):
+    """Odpovídá zpráva pravidlu (Nedůležité / Notifikace, Spam, složka – všechna mají stejné podmínky)?
+    Stejná logika jako CATEGORY_RULE_MATCH v SQL."""
+    if rule["sender"] and not any(sender_matches(rule["sender"], a.get("addr")) for a in rec["from"]):
         return False
     if rule["recipient"] and not any((a.get("addr") or "").lower() == rule["recipient"]
                                      for a in rec.get("to", []) + rec.get("cc", [])):
         return False
-    return not rule["subject"] or rule["subject"] in (rec.get("base_subject") or "")
+    subject = rec.get("base_subject") or ""
+    if not rule["subject"]:
+        return True
+    return subject == rule["subject"] if rule["subject_exact"] else rule["subject"] in subject
 
 
 # Kategorie zprávy (jediný výraz, vyhodnotí se jednou): ruční umístění má přednost před pravidly.
@@ -187,12 +205,44 @@ VIEW_FILTERS = {
     "all": "1",
 }
 
-# Typy pravidel složek a jejich podmínka v SQL (r = pravidlo, m = zpráva)
-RULE_KINDS = ("sender", "recipient", "subject")
-RULE_MATCH = ("((r.kind='sender' AND instr(m.from_addrs, ',' || r.value || ',') > 0)"
-              " OR (r.kind='recipient' AND (instr(m.to_addrs, ',' || r.value || ',') > 0"
-              "                             OR instr(m.cc_addrs, ',' || r.value || ',') > 0))"
-              " OR (r.kind='subject' AND instr(m.base_subject, r.value) > 0))")
+# Pravidla Spamu a složek mají stejné podmínky jako pravidla kategorií (sloupce sender, recipient, subject,
+# subject_exact; vyplněné musí platit všechny). Sloupce kind / value z dřívější verze: kind='rule' a value =
+# klíč z podmínek (rule_key) – drží jedinečnost pravidla.
+RULE_KINDS = ("sender", "recipient", "subject")  # jednoduchá pravidla ze zprávy („Vše od …“, Nastavit pravidlo…)
+RULE_MATCH = CATEGORY_RULE_MATCH
+COND_FIELDS = ("sender", "recipient", "subject", "subject_exact")
+SIMPLE_SENDER = "sender<>'' AND recipient='' AND subject=''"  # pravidlo „jen odesílatel“
+
+
+def kind_conds(kind, value) -> dict:
+    """Podmínky jednoduchého pravidla (jen odesílatel / příjemce / část předmětu)."""
+    if kind not in RULE_KINDS:
+        raise ValueError("Invalid parameter.")
+    value = " ".join(str(value).lower().split())
+    return {"sender": "", "recipient": "", "subject": "", "subject_exact": False, kind: value}
+
+
+def norm_conds(c) -> dict:
+    """Podmínky pravidla (malými písmeny, bez nadbytečných mezer). Aspoň jedna musí být vyplněná."""
+    sender, recipient = (str(c.get(k) or "").strip().lower() for k in ("sender", "recipient"))
+    subject = " ".join(str(c.get("subject") or "").lower().split())
+    if not (sender or recipient or subject):
+        raise ValueError("Invalid parameter.")
+    return {"sender": sender, "recipient": recipient, "subject": subject,
+            "subject_exact": int(bool(c.get("subject_exact") and subject))}
+
+
+def rule_key(c) -> str:
+    """Jedinečný klíč pravidla z podmínek (sloupec value)."""
+    return "".join((c["sender"], c["recipient"], c["subject"], str(int(c["subject_exact"]))))
+
+
+def cond_rule_out(r) -> dict:
+    """Pravidlo Spamu / složky pro rozhraní: podmínky (+ id, created, hits, after_read, folder_id)."""
+    d = dict(r)
+    d.pop("kind", None)
+    d.pop("value", None)
+    return d
 
 WEEK = 7 * 24 * 3600
 MONTH = 30 * 24 * 3600
@@ -241,14 +291,7 @@ def delete_age(settings, prefix, seen=None):
 AGE_NAMES = {WEEK: "week", MONTH: "month", YEAR: "year"}  # stáří → přípona klíčů textů
 
 
-def rule_matches(rule, rec) -> bool:
-    """Odpovídá zpráva (záznam z hlaviček) pravidlu složky? Stejná logika jako RULE_MATCH v SQL."""
-    v = rule["value"]
-    if rule["kind"] == "sender":
-        return any(a["addr"].lower() == v for a in rec["from"])
-    if rule["kind"] == "recipient":
-        return any(a["addr"].lower() == v for a in rec["to"] + rec["cc"])
-    return v in (rec.get("base_subject") or "")
+rule_matches = category_rule_matches  # pravidla složek a Spamu mají stejné podmínky
 
 
 # Adresy, které se do našeptávání nehodí (automatické odesílatele)
@@ -279,17 +322,47 @@ def _refs(mids) -> str:
     return "," + "".join(f"{m}," for m in mids or [])
 
 
+log = logging.getLogger(__name__)
+
+OPEN_RETRY_FOR = 60     # s: jak dlouho zkoušet databázi otevřít, když je dočasně nepřístupná
+OPEN_RETRY_STEP = 1.0
+_TRANSIENT = ("readonly", "locked", "unable to open", "disk i/o")
+
+
+def _open(path):
+    """Otevře databázi a založí schéma. Hned po instalaci nové verze drží soubory databáze (-wal, -shm) chvíli
+    antivirus nebo končící předchozí instance a SQLite hlásí „attempt to write a readonly database“ nebo
+    „database is locked“ – to přejde, proto se to chvíli zkouší znovu."""
+    deadline = time.monotonic() + OPEN_RETRY_FOR
+    while True:
+        conn = None
+        try:
+            conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None, timeout=10)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.executescript(SCHEMA)
+            conn.execute("INSERT OR IGNORE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+            return conn
+        except sqlite3.OperationalError as e:
+            if conn is not None:
+                conn.close()
+            if not any(s in str(e).lower() for s in _TRANSIENT) or time.monotonic() >= deadline:
+                raise
+            log.warning("Databáze je dočasně nepřístupná (%s), zkouším znovu", e)
+            time.sleep(OPEN_RETRY_STEP)
+
+
 class Database:
     def __init__(self, path=DB_FILE):
         path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.executescript(SCHEMA)
-        self._conn.execute("INSERT OR IGNORE INTO meta VALUES('schema', ?)", (str(SCHEMA_VERSION),))
+        self._conn = _open(path)
         # migrace: uživatelské složky míří na konkrétní účet (starší složky bez účtu je třeba dokonfigurovat)
+        if "subject_exact" not in {r[1] for r in self._conn.execute("PRAGMA table_info(category_rules)")}:
+            # migrace: pravidlo kategorie může chtít celý předmět (dřív jen část)
+            self._conn.execute("ALTER TABLE category_rules ADD COLUMN subject_exact INTEGER NOT NULL DEFAULT 0")
+        self._migrate_cond_rules()
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(user_folders)")}
         if "account_id" not in cols:
             self._conn.execute("ALTER TABLE user_folders ADD COLUMN account_id TEXT")
@@ -766,22 +839,45 @@ class Database:
 
     # ------------------------------------------------------------------ pravidla pro spam
 
-    def add_spam_rule(self, sender):
-        """Pravidlo „odesílatel je spam“ (platí pro všechny účty). Vrací id pravidla."""
-        sender = sender.lower()
-        self._q("INSERT OR IGNORE INTO spam_rules(kind, value, created) VALUES('sender', ?, ?)", (sender, time.time()))
-        return self._q("SELECT id FROM spam_rules WHERE kind='sender' AND value=?", (sender,))[0][0]
-
-    def spam_rules(self):
-        return [dict(r) for r in self._q("SELECT * FROM spam_rules ORDER BY created DESC")]
-
     RULE_TABLES = ("spam_rules", "user_folder_rules")
 
-    def update_rule(self, table, rule_id, kind, value, after_read=None) -> bool:
-        """Úprava pravidla (typ, hodnota, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
+    def _migrate_cond_rules(self):
+        """Pravidla Spamu a složek z dřívější verze (jedna podmínka: kind + value) na podmínky jako u kategorií."""
+        for table in self.RULE_TABLES:
+            cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            for col in ("sender", "recipient", "subject"):
+                if col not in cols:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            if "subject_exact" not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN subject_exact INTEGER NOT NULL DEFAULT 0")
+            old = self._conn.execute(f"SELECT id, kind, value FROM {table} WHERE kind<>'rule'").fetchall()
+            for rid, kind, value in old:
+                try:
+                    c = norm_conds(kind_conds(kind, value))
+                except ValueError:
+                    self._conn.execute(f"DELETE FROM {table} WHERE id=?", (rid,))
+                    continue
+                self._conn.execute(f"UPDATE {table} SET kind='rule', value=?, sender=?, recipient=?, subject=?, "
+                                   "subject_exact=? WHERE id=?", (rule_key(c), *(c[k] for k in COND_FIELDS), rid))
+
+    def add_spam_rule(self, sender="", recipient="", subject="", subject_exact=False):
+        """Pravidlo Spamu (platí pro všechny účty): odesílatel (i doména), příjemce, předmět – vyplněné musí
+        platit všechny. Vrací id pravidla."""
+        c = norm_conds({"sender": sender, "recipient": recipient, "subject": subject, "subject_exact": subject_exact})
+        self._q("INSERT OR IGNORE INTO spam_rules(kind, value, created, sender, recipient, subject, subject_exact) "
+                "VALUES('rule', ?, ?, ?, ?, ?, ?)", (rule_key(c), time.time(), *(c[k] for k in COND_FIELDS)))
+        return self._q("SELECT id FROM spam_rules WHERE kind='rule' AND value=?", (rule_key(c),))[0][0]
+
+    def spam_rules(self):
+        return [cond_rule_out(r) for r in self._q("SELECT * FROM spam_rules ORDER BY created DESC")]
+
+    def update_rule(self, table, rule_id, conds, after_read=None) -> bool:
+        """Úprava pravidla Spamu / složky (podmínky, u složek i kdy přesouvat). False = takové pravidlo už existuje."""
         if not (table in self.RULE_TABLES):
             raise ValueError("Invalid parameter.")
-        sets, params = ["kind=?", "value=?"], [kind, value]
+        c = norm_conds(conds)
+        sets = ["value=?", "sender=?", "recipient=?", "subject=?", "subject_exact=?"]
+        params = [rule_key(c), *(c[k] for k in COND_FIELDS)]
         if after_read is not None:
             sets.append("after_read=?")
             params.append(int(after_read))
@@ -813,14 +909,20 @@ class Database:
         if not senders:
             return 0
         n = len(self.spam_senders() & set(senders))
-        self._q(f"DELETE FROM spam_rules WHERE kind='sender' AND value IN ({','.join('?' * len(senders))})", senders)
+        self._q(f"DELETE FROM spam_rules WHERE {SIMPLE_SENDER} AND sender IN ({','.join('?' * len(senders))})",
+                senders)
         return n
 
     def spam_senders(self) -> set:
-        return {r[0] for r in self._q("SELECT value FROM spam_rules WHERE kind='sender'")}
+        """Adresy z pravidel Spamu „jen odesílatel“ (bez domén a dalších podmínek)."""
+        return {r[0] for r in self._q(f"SELECT sender FROM spam_rules WHERE {SIMPLE_SENDER} AND instr(sender, '@') > 0")}
 
     def add_rule_hits(self, sender, count=1):
-        self._q("UPDATE spam_rules SET hits=hits+? WHERE kind='sender' AND value=?", (count, sender.lower()))
+        """Zachycené zprávy u pravidla Spamu „jen odesílatel“."""
+        self._q(f"UPDATE spam_rules SET hits=hits+? WHERE {SIMPLE_SENDER} AND sender=?", (count, sender.lower()))
+
+    def add_spam_rule_hits(self, rule_id, count=1):
+        self._q("UPDATE spam_rules SET hits=hits+? WHERE id=?", (count, rule_id))
 
     # ------------------------------------------------------------------ obecné hodnoty (meta)
 
@@ -925,20 +1027,20 @@ class Database:
         self._tx(run)
 
     def folder_rules(self, folder_id):
-        return [dict(r) for r in self._q(
+        return [cond_rule_out(r) for r in self._q(
             "SELECT * FROM user_folder_rules WHERE folder_id=? ORDER BY created DESC", (folder_id,))]
 
-    def add_folder_rule(self, folder_id, kind, value, after_read=False):
-        """Pravidlo složky (odesílatel / příjemce / slovo v předmětu), přesun ihned nebo až po přečtení.
-        Stejné pravidlo může patřit jen do jedné složky (při přidání do jiné se přesune)."""
-        if not (kind in RULE_KINDS):
-            raise ValueError("Invalid parameter.")
-        value = " ".join(value.lower().split())
-        self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read) VALUES(?, ?, ?, ?, ?)
+    def add_folder_rule(self, folder_id, conds, after_read=False):
+        """Pravidlo složky (odesílatel – i doména, příjemce, předmět; vyplněné musí platit všechny), přesun ihned
+        nebo až po přečtení. Stejné pravidlo může patřit jen do jedné složky (při přidání do jiné se přesune)."""
+        c = norm_conds(conds)
+        self._q("""INSERT INTO user_folder_rules(folder_id, kind, value, created, after_read,
+                                                 sender, recipient, subject, subject_exact)
+                   VALUES(?, 'rule', ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(kind, value) DO UPDATE SET folder_id=excluded.folder_id, created=excluded.created,
                                                           after_read=excluded.after_read""",
-                (folder_id, kind, value, time.time(), int(after_read)))
-        return self._q("SELECT id FROM user_folder_rules WHERE kind=? AND value=?", (kind, value))[0][0]
+                (folder_id, rule_key(c), time.time(), int(after_read), *(c[k] for k in COND_FIELDS)))
+        return self._q("SELECT id FROM user_folder_rules WHERE kind='rule' AND value=?", (rule_key(c),))[0][0]
 
     def delete_folder_rule(self, rule_id):
         self._q("DELETE FROM user_folder_rules WHERE id=?", (rule_id,))
@@ -949,7 +1051,8 @@ class Database:
     def folder_rules_active(self) -> list:
         """Všechna pravidla složek, které mají cílový účet, i s nastavením složky."""
         return [dict(r) for r in self._q("""
-            SELECT r.id AS rule_id, r.kind, r.value, r.after_read, f.id, f.name, f.account_id, f.imap_name, f.mark_read
+            SELECT r.id AS rule_id, r.sender, r.recipient, r.subject, r.subject_exact, r.after_read,
+                   f.id, f.name, f.account_id, f.imap_name, f.mark_read
             FROM user_folder_rules r JOIN user_folders f ON f.id=r.folder_id
             WHERE f.account_id IS NOT NULL""")]
 
@@ -1083,14 +1186,18 @@ class Database:
 
     # ------------------------------------------------------------------ Notifikace / Nedůležité: pravidla a označení
 
-    def add_category_rule(self, category, sender="", recipient="", subject=""):
+    def add_category_rule(self, category, sender="", recipient="", subject="", subject_exact=False):
         """Pravidlo kategorie (vyplněné podmínky musí platit všechny). Zařadí i zprávy, které už v doručené
-        poště jsou (pravidlo vzniká volbou „Vše od …“ / „Vše s předmětem …“ / vlastní pravidlo u zprávy)."""
+        poště jsou (pravidlo vzniká volbou „Vše od …“ / „Vše s předmětem …“ / vlastní pravidlo u zprávy,
+        nebo ručně v Nastavení). sender může být i jen doména; subject_exact = celý předmět, ne jeho část.
+        Stejné pravidlo, které už existuje, převezme zvolené subject_exact."""
         if not (category in CATEGORIES and (sender or recipient or subject)):
             raise ValueError("Invalid parameter.")
         values = (category, sender.lower(), recipient.lower(), subject.lower())
-        self._q("""INSERT OR IGNORE INTO category_rules(category, sender, recipient, subject, created)
-                   VALUES(?, ?, ?, ?, ?)""", (*values, time.time()))
+        exact = int(bool(subject_exact and subject))
+        self._q("""INSERT INTO category_rules(category, sender, recipient, subject, created, subject_exact)
+                   VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(category, sender, recipient, subject)
+                   DO UPDATE SET subject_exact=excluded.subject_exact""", (*values, time.time(), exact))
         rule = self._q("SELECT id FROM category_rules WHERE category=? AND sender=? AND recipient=? AND subject=?",
                        values)
         self.place_by_rule(rule[0][0])
@@ -1100,25 +1207,27 @@ class Database:
         jiné pravidlo nebo filtr; ručně umístěné zprávy zůstanou, kde jsou – ruční umístění má přednost)."""
         self._q("INSERT OR REPLACE " + _PLACE_SQL.format(where="r.id=?"), (time.time(), rule_id))
 
-    def update_category_rule(self, category, rule_id, sender, recipient, subject, apply_existing=False) -> bool:
+    def update_category_rule(self, category, rule_id, sender, recipient, subject, subject_exact=False,
+                             apply_existing=False) -> bool:
         """Úprava pravidla. Zprávy zařazené podle původního znění zůstanou, kde jsou; apply_existing=True
         zařadí i starší zprávy, které odpovídají novému znění. False = stejné pravidlo už v kategorii existuje."""
         try:
-            self._q("UPDATE category_rules SET sender=?, recipient=?, subject=? WHERE id=? AND category=?",
-                    (sender, recipient, subject, rule_id, category))
+            self._q("UPDATE category_rules SET sender=?, recipient=?, subject=?, subject_exact=? WHERE id=? AND category=?",
+                    (sender, recipient, subject, int(bool(subject_exact and subject)), rule_id, category))
         except sqlite3.IntegrityError:
             return False
         if apply_existing:
             self.place_by_rule(rule_id)
         return True
 
-    def category_rule_preview(self, category, sender, recipient, subject) -> int:
+    def category_rule_preview(self, category, sender, recipient, subject, subject_exact=False) -> int:
         """Kolik zpráv v doručené poště by pravidlo s tímto zněním nově zařadilo do kategorie
         (odpovídají mu, nejsou v ní a nejsou ručně umístěné)."""
         return self._q(f"""SELECT COUNT(*) FROM messages m
-                           JOIN (SELECT ? AS sender, ? AS recipient, ? AS subject) r ON {CATEGORY_RULE_MATCH}
+                           JOIN (SELECT ? AS sender, ? AS recipient, ? AS subject, ? AS subject_exact) r
+                             ON {CATEGORY_RULE_MATCH}
                            WHERE m.folder='INBOX' AND ({CATEGORY}) IS NOT ? AND NOT {IS_LOCKED}""",
-                       (sender, recipient, subject, category))[0][0]
+                       (sender, recipient, subject, int(bool(subject_exact)), category))[0][0]
 
     def remove_category_sender(self, category, sender):
         """Smaže pravidla „jen odesílatel“ (bez dalších podmínek)."""
@@ -1210,18 +1319,18 @@ class Database:
         for r in self._q("SELECT * FROM category_rules"):
             if category_rule_matches(r, rec):
                 out.append({"type": "category", "id": r["id"], "target": r["category"], "sender": r["sender"],
-                            "recipient": r["recipient"], "subject": r["subject"]})
-        senders = {(a.get("addr") or "").lower() for a in rec.get("from") or []}
-        for r in self._q("SELECT * FROM spam_rules WHERE kind='sender'"):
-            if r["value"] in senders:
-                out.append({"type": "spam", "id": r["id"], "target": "spam", "sender": r["value"],
-                            "recipient": "", "subject": ""})
+                            "recipient": r["recipient"], "subject": r["subject"],
+                            "subject_exact": bool(r["subject_exact"])})
+        for r in self._q("SELECT * FROM spam_rules"):
+            if category_rule_matches(r, rec):
+                out.append({"type": "spam", "id": r["id"], "target": None,
+                            **{k: r[k] for k in ("sender", "recipient", "subject")},
+                            "subject_exact": bool(r["subject_exact"])})
         for r in self._q("SELECT r.*, f.name FROM user_folder_rules r JOIN user_folders f ON f.id=r.folder_id"):
-            if rule_matches(r, rec):
+            if category_rule_matches(r, rec):
                 out.append({"type": "folder", "id": r["id"], "target": r["folder_id"], "folder": r["name"],
-                            "sender": r["value"] if r["kind"] == "sender" else "",
-                            "recipient": r["value"] if r["kind"] == "recipient" else "",
-                            "subject": r["value"] if r["kind"] == "subject" else ""})
+                            **{k: r[k] for k in ("sender", "recipient", "subject")},
+                            "subject_exact": bool(r["subject_exact"])})
         return out
 
     def placement(self, rec, acc_id, folder):
@@ -1274,10 +1383,10 @@ class Database:
         other = "subject" if kind == "sender" else "sender"
         self._q(f"""DELETE FROM category_rules WHERE {kind}=? AND {other}='' AND recipient=''
                     AND category IS NOT ?""", (value, keep[1] if keep[0] == "category" else None))
-        if kind == "sender" and keep[0] != "spam":
-            self._q("DELETE FROM spam_rules WHERE kind='sender' AND value=?", (value,))
-        self._q("DELETE FROM user_folder_rules WHERE kind=? AND value=? AND folder_id IS NOT ?",
-                (kind, " ".join(value.split()), keep[1] if keep[0] == "folder" else None))
+        if keep[0] != "spam":
+            self._q(f"DELETE FROM spam_rules WHERE {kind}=? AND {other}='' AND recipient=''", (value,))
+        self._q(f"DELETE FROM user_folder_rules WHERE {kind}=? AND {other}='' AND recipient='' AND folder_id IS NOT ?",
+                (" ".join(value.split()), keep[1] if keep[0] == "folder" else None))
 
     # ------------------------------------------------------------------ kontext
 

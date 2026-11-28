@@ -1101,33 +1101,49 @@ def move_to_spam(M, folder, uids) -> int:
     return len(uids)
 
 
-def move_sender_to_spam(M, sender, before_ts, skip_ids=frozenset()) -> int:
-    """Přesune do spamu starší zprávy od odesílatele (Doručená pošta + archiv). Zprávy s Message-ID
-    ze skip_ids (zprávy v ToDo) vynechá. Vrací počet."""
-    if not sender.isascii():
-        return 0
+def _search_key(M, key, text) -> list:
+    """UID zpráv, které mají v hlavičce key (FROM, TO, CC, SUBJECT) podřetězec text (i mimo ASCII)."""
+    if text.isascii():
+        typ, data = M.uid("SEARCH", key, q(text))
+    else:
+        M.literal = check_imap_text(text).encode("utf-8")
+        typ, data = M.uid("SEARCH", "CHARSET", "UTF-8", key)
+    return [int(u) for u in data[0].split()] if typ == "OK" and data and data[0] else []
+
+
+def move_matching_to_spam(M, criteria, match, before_ts, skip_ids=frozenset()) -> int:
+    """Přesune do spamu starší zprávy (Doručená pošta + archiv), které odpovídají pravidlu. criteria =
+    [(klíč, text)] – hledání na serveru, které zúží kandidáty (sjednocení); match(záznam) – přesná kontrola.
+    Zprávy s Message-ID ze skip_ids (zprávy v ToDo) vynechá. Vrací počet."""
     folders = list_folders(M, with_counts=False)
     sources = [f["name"] for f in folders if f["role"] in ("inbox", "archive", "all")]
     junk = None
     moved = 0
     for folder in sources:
         _select(M, folder, readonly=False)
-        typ, data = M.uid("SEARCH", "FROM", q(sender))
-        uids = data[0].split() if typ == "OK" and data and data[0] else []
-        matches = []
-        for uid, flags, h in _fetch_headers(M, [u.decode() for u in uids], "FROM DATE MESSAGE-ID"):
-            if get_header(h, "Message-ID").strip() in skip_ids:
-                continue
-            ts = parse_date(get_header(h, "Date"))
-            # IMAP hledá podřetězec – ověříme přesnou shodu adresy; „starší“ = nejvýš stejné datum
-            if sender in addr_set(h, "From") and "\\Deleted" not in flags and (ts is None or before_ts is None or ts <= before_ts):
-                matches.append(uid)
+        uids = set()
+        for key, text in criteria:
+            uids.update(_search_key(M, key, text))
+        if not uids:
+            continue
+        matches = [str(r["uid"]) for r in fetch_header_records(M, sorted(uids))
+                   if (r.get("message_id") or "").strip() not in skip_ids and not r.get("deleted")
+                   # „starší“ = nejvýš stejné datum
+                   and (r["date"] is None or before_ts is None or r["date"] <= before_ts) and match(r)]
         if matches:
             junk = junk or _ensure_folder(M, folders, ("junk",), "Spam")
             _select(M, folder, readonly=False)
             _move_uids(M, matches, junk)
             moved += len(matches)
     return moved
+
+
+def move_sender_to_spam(M, sender, before_ts, skip_ids=frozenset()) -> int:
+    """Přesune do spamu starší zprávy od odesílatele (Doručená pošta + archiv). Vrací počet."""
+    sender = sender.lower()
+    return move_matching_to_spam(M, [("FROM", sender)],
+                                 lambda r: any((a.get("addr") or "").lower() == sender for a in r["from"]),
+                                 before_ts, skip_ids)
 
 
 # --------------------------------------------------------------------------

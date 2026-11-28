@@ -1515,6 +1515,8 @@ function askCustomCategoryRule(cur, cat, submit) {
   f.sender.value = m.from?.[0]?.addr || '';
   f.recipient.value = rcpts.find(a => a.toLowerCase() === me) || rcpts[0] || '';  // přednostně moje adresa
   f.subject.value = realSubject(m.subject) ? baseSubject(m.subject) : '';
+  f.subject_exact.value = '0';
+  $('#ruleWhenWrap').hidden = $('#ruleIntro').hidden = true;
   $('#categoryRuleTitle').textContent = t('category.customRuleTitle', { category: CATEGORIES[cat].title });
   $('#categoryRuleSave').textContent = t('category.customRuleSave');
   $('#categoryRuleError').textContent = '';
@@ -1573,14 +1575,14 @@ async function categorize(cur, cat, btn) {
 }
 
 /** Sleduje hromadný přesun starších zpráv odesílatele do spamu (běží na serveru na pozadí). */
-function watchSpamJob(jobId, sender) {
+function watchSpamJob(jobId, sender, movedKey = 'spam.bulkMoved') {
   const timer = setInterval(async () => {
     let job;
     try { job = await api('/api/jobs/' + jobId); } catch { clearInterval(timer); return; }
     if (job.status !== 'done') return;
     clearInterval(timer);
     if (job.errors.length) toast(t('spam.bulkFailed', { errors: job.errors.join('; ') }), true);
-    else if (job.moved) toast(tn('spam.bulkMoved', job.moved, { sender }));
+    else if (job.moved) toast(tn(movedKey, job.moved, { sender }));
     if (job.moved) {
       loadList({ quiet: true });
       state.accounts.forEach(a => loadFolders(a.id));
@@ -1729,6 +1731,8 @@ function dropTarget(el) {
   if (el.dataset.unified) {
     const view = el.dataset.unified;
     if (v.type === 'unified' && v.filter === view) return null;
+    if (view === 'todo')  // ToDo není přesun, ale označení (jako tlačítko ToDo): doručená pošta a složky aplikace
+      return items.every(m => !m.remote && !m.todo && (m.folder === 'INBOX' || isAppFolder(m))) ? { type: 'todo' } : null;
     return { type: 'inbox', view };
   }
   if (el.dataset.acc) {
@@ -1792,7 +1796,7 @@ $('#accounts').addEventListener('drop', e => {
   state.dragItems = null;
   clearDropMarks();
   if (!target || !items?.length) return;
-  const done = moveItems(items, target);
+  const done = target.type === 'todo' ? todoItems(items, true) : moveItems(items, target);
   if (state.dragFromContext) refreshContextAfter(done);
 });
 
@@ -2972,12 +2976,9 @@ async function openFolderDialog(id) {
   $('#folderSaveBtn').textContent = folder ? t('folder.saveChanges') : t('folder.create');
   $('#folderDeleteBtn').hidden = !folder;
   $('#folderDeletePanel').hidden = true;
-  $('#folderRuleKind').value = 'sender';
-  $('#folderRuleWhen').value = 'now';
-  $('#folderRuleInput').placeholder = t(RULE_PLACEHOLDERS.sender);
   $('#folderError').textContent = folder && !folder.account_id
     ? t('folder.legacyNoAccount') : '';
-  $('#folderRuleInput').value = '';
+  $('#folderRuleAddBtn').hidden = !folder;  // nová složka: pravidla až po vytvoření
   $('#folderRules').innerHTML = '';
   $('#folderRulesCount').textContent = '';
   showSettingsSection('folder');
@@ -3003,8 +3004,8 @@ async function renderFolderRules(rules) {
   $('#folderRules').innerHTML = rules.length ? rules.map(r => `
     <li class="rule">
       <div class="rule-main">
-        <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
-        <div class="rule-meta">${esc(FOLDER_RULE_KINDS[r.kind] ? t(FOLDER_RULE_KINDS[r.kind]) : r.kind)} · ${esc(r.after_read ? t('rule.afterRead') : t('rule.immediately'))} · ${esc(t('rule.added', { date: fmtDay(r.created) }))} · ${esc(t('rule.movedTimes', { count: r.hits }))}</div>
+        <div class="rule-value" title="${esc(categoryRuleText(r))}">${esc(categoryRuleText(r))}</div>
+        <div class="rule-meta">${esc(r.after_read ? t('rule.afterRead') : t('rule.immediately'))} · ${esc(t('rule.added', { date: fmtDay(r.created) }))} · ${esc(t('rule.movedTimes', { count: r.hits }))}</div>
       </div>
       ${editRuleButton('folder', r.id)}
       <button type="button" class="btn danger" data-folder-rule="${r.id}">${esc(t('common.delete'))}</button>
@@ -3042,30 +3043,17 @@ $('#folderForm').addEventListener('submit', async e => {
   }
 });
 
-const FOLDER_RULE_KINDS = { sender: 'common.sender', recipient: 'common.recipient', subject: 'common.subjectPart' };
-const RULE_PLACEHOLDERS = { sender: 'common.senderPlaceholder', recipient: 'rule.placeholderRecipient', subject: 'rule.subjectPlaceholder' };
-$('#folderRuleKind').addEventListener('change', e => {
-  $('#folderRuleInput').placeholder = t(RULE_PLACEHOLDERS[e.target.value]);
-  $('#folderRuleInput').focus();
-});
-
-async function addFolderRule() {
-  const input = $('#folderRuleInput');
-  const kind = $('#folderRuleKind').value;
-  const value = input.value.trim();
-  if (!value) return;
-  try {
-    const rules = await api(`/api/user-folders/${state.editingFolder}/rules`, { method: 'POST',
-      body: { kind, value, after_read: $('#folderRuleWhen').value === 'read' } });
-    input.value = '';
-    renderFolderRules(rules);
-    toast(t(`rule.toast.${kind}`, { value, folder: state.userFolders.find(x => x.id === state.editingFolder)?.name || '' }));
-    loadUserFolders();
-  } catch (err) { toast(err.message, true); }
-}
-$('#folderRuleAdd').addEventListener('click', addFolderRule);
-$('#folderRuleInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') { e.preventDefault(); addFolderRule(); }
+// --- ruční přidání pravidla v Nastavení (tlačítko Přidat pravidlo nad seznamem pravidel): okno pravidla
+$('#settingsDialog').addEventListener('click', e => {
+  const b = e.target.closest('[data-add-rule]');
+  if (!b) return;
+  const list = b.dataset.addRule;
+  if (list === 'folder' && !state.editingFolder) return;
+  openRuleDialog(list, null, CATEGORIES[list] ? async body => {
+    await api(`/api/categories/${list}/rules`, { method: 'POST', body });
+    toast(t(`category.${list}.customSaved`));
+    await afterCategoryRuleChange(list);
+  } : null);
 });
 
 $('#folderRules').addEventListener('click', async e => {
@@ -3120,8 +3108,6 @@ $('#folderDeletePanel').addEventListener('click', async e => {
 });
 
 // ------------------------------------------------------------------ nastavení
-
-const RULE_KINDS = { sender: 'common.sender', subject: 'common.subject' };
 
 // Nastavení: skupiny (O aplikaci / Složky / Účty) → položky skupiny ve druhém sloupci → obrazovka položky.
 // Sekce = obrazovka: 'app', pohledy a složky (todo … trash, 'folder' = uživatelská složka), 'account',
@@ -3459,7 +3445,7 @@ async function renderCategoryRules(cat) {
         <div class="rule-meta">${esc(t('rule.added', { date: fmtDay(r.created) }))}
           · ${esc(tn('rule.inInbox', r.messages))}</div>
       </div>
-      <button type="button" class="btn" data-edit-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.editTitle'))}">${esc(t('rule.edit'))}</button>
+      ${editRuleButton(cat, r.id)}
       <button type="button" class="btn danger" data-category-rule="${r.id}" data-category="${cat}" title="${esc(t('rule.deleteTitle'))}">${esc(t('common.delete'))}</button>
     </li>`).join('')
     : `<li class="empty-rules">${esc(t(`category.${cat}.noRules`))}</li>`;
@@ -3491,36 +3477,92 @@ const ruleCache = {};  // poslední vykreslená pravidla podle seznamu: spam / u
 
 /** Popis pravidla Nedůležitých / Notifikací: vyplněné podmínky. */
 const categoryRuleText = r => [r.sender && t('rule.textSender', { value: r.sender }), r.recipient && t('rule.textRecipient', { value: r.recipient }),
-                               r.subject && t('rule.textSubject', { value: r.subject })].filter(Boolean).join(' · ');
+                               r.subject && t(r.subject_exact ? 'rule.textSubjectExact' : 'rule.textSubject', { value: r.subject })]
+  .filter(Boolean).join(' · ');
 
-// --- úprava pravidla Nedůležitých / Notifikací v modálním okně
-let editingCategoryRule = null;  // { cat, id } úprava z Nastavení, nebo { cat, create } vlastní pravidlo u zprávy
-$('#settingsDialog').addEventListener('click', e => {
-  const b = e.target.closest('[data-edit-category-rule]');
-  if (!b) return;
-  const cat = b.dataset.category, id = +b.dataset.editCategoryRule;
-  const r = ruleCache[cat]?.find(x => x.id === id);
-  if (!r) return;
-  editingCategoryRule = { cat, id };
-  const f = $('#categoryRuleForm').elements;
-  f.sender.value = r.sender;
-  f.recipient.value = r.recipient;
-  f.subject.value = r.subject;
-  $('#categoryRuleTitle').textContent = t('rule.editCategoryTitle', { category: CATEGORIES[cat].title });
-  $('#categoryRuleSave').textContent = t('common.save');
+// --- okno pravidla (Nedůležité, Notifikace, Spam, složka aplikace): přidání a úprava z Nastavení, vlastní
+// pravidlo u zprávy. Podmínky: odesílatel (i doména), příjemce, předmět (část / přesně); u složek i kdy přesouvat.
+let editingCategoryRule = null;  // { cat: seznam pravidel, id } úprava, { cat, create } nové pravidlo (create uloží)
+
+const editRuleButton = (list, id) =>
+  `<button type="button" class="btn" data-edit-rule="${id}" data-list="${list}" title="${esc(t('rule.editTitle'))}">${esc(t('rule.edit'))}</button>`;
+
+/** Název seznamu pravidel do titulku okna: kategorie, Spam, nebo upravovaná složka. */
+function ruleListTitle(list) {
+  if (CATEGORIES[list]) return CATEGORIES[list].title;
+  if (list === 'spam') return t('view.spam');
+  return state.userFolders.find(x => x.id === state.editingFolder)?.name || '';
+}
+
+/** Otevře okno pravidla seznamu list; r = upravované pravidlo (null = nové), create(body) = jak nové uložit
+ *  (bez něj Spam a složka přes saveListRule). */
+function openRuleDialog(list, r, create = null) {
+  editingCategoryRule = { cat: list, id: r?.id, create };
+  const form = $('#categoryRuleForm'), f = form.elements;
+  form.reset();
+  if (r) {
+    f.sender.value = r.sender;
+    f.recipient.value = r.recipient;
+    f.subject.value = r.subject;
+    f.subject_exact.value = r.subject_exact ? '1' : '0';
+    f.when.value = r.after_read ? 'read' : 'now';
+  }
+  $('#ruleWhenWrap').hidden = list !== 'folder';
+  const intro = list === 'spam' ? 'rule.addSpamIntro' : list === 'folder' ? 'folder.rulesIntro' : null;
+  $('#ruleIntro').hidden = !intro || !!r;
+  $('#ruleIntro').innerHTML = intro ? tHtml(intro) : '';
+  const name = ruleListTitle(list);
+  $('#categoryRuleTitle').textContent = t(r ? 'rule.editCategoryTitle' : 'rule.addCategoryTitle', { category: name });
+  $('#categoryRuleSave').textContent = r ? t('common.save') : t('common.add');
   $('#categoryRuleError').textContent = '';
   $('#categoryRuleSave').disabled = false;
   $('#categoryRuleDialog').showModal();
   f.sender.focus();
+}
+
+$('#settingsDialog').addEventListener('click', e => {
+  const b = e.target.closest('[data-edit-rule]');
+  if (!b) return;
+  const list = b.dataset.list, r = ruleCache[list]?.find(x => x.id === +b.dataset.editRule);
+  if (r) openRuleDialog(list, r);
 });
+
+/** Uloží nové / upravené pravidlo Spamu nebo složky aplikace a obnoví seznam. */
+async function saveListRule(list, id, body) {
+  if (list === 'spam') {
+    const res = await api(id ? `/api/spam-rules/${id}` : '/api/spam-rules', { method: id ? 'PUT' : 'POST', body });
+    $('#categoryRuleDialog').close();
+    toast(id ? t('rule.updated') : t('rule.spamSaved'));
+    renderSpamRules();
+    if (res.job_id) watchSpamJob(res.job_id, body.sender, 'spam.ruleMoved');
+    return;
+  }
+  const fid = state.editingFolder, folder = ruleListTitle('folder');
+  await api(id ? `/api/user-folder-rules/${id}` : `/api/user-folders/${fid}/rules`, { method: id ? 'PUT' : 'POST', body });
+  $('#categoryRuleDialog').close();
+  toast(id ? t('rule.updated') : t('rule.folderSaved', { folder }));
+  renderFolderRules();
+  loadUserFolders();
+}
 $('#categoryRuleCancel').addEventListener('click', () => $('#categoryRuleDialog').close());
 $('#categoryRuleForm').addEventListener('submit', async e => {
   e.preventDefault();
   const { cat, id, create } = editingCategoryRule || {};
   if (!cat) return;
   const f = e.target.elements;
-  const body = { sender: f.sender.value.trim(), recipient: f.recipient.value.trim(), subject: f.subject.value.trim() };
+  const body = { sender: f.sender.value.trim(), recipient: f.recipient.value.trim(), subject: f.subject.value.trim(),
+                 subject_exact: f.subject_exact.value === '1' };
+  if (cat === 'folder') body.after_read = f.when.value === 'read';
   $('#categoryRuleSave').disabled = true;
+  if (!create && !CATEGORIES[cat]) {  // Spam, složka aplikace
+    try {
+      await saveListRule(cat, id, body);
+    } catch (err) {
+      $('#categoryRuleError').textContent = err.message;
+      $('#categoryRuleSave').disabled = false;
+    }
+    return;
+  }
   if (create) {  // vlastní pravidlo z tlačítka Nedůležité / Notifikace: zprávu zařadí categorize()
     try {
       await create(body);
@@ -3549,61 +3591,6 @@ $('#categoryRuleForm').addEventListener('submit', async e => {
     $('#categoryRuleSave').disabled = false;
   }
 });
-const RULE_EDITORS = {
-  spam: { kinds: { sender: 'common.sender' }, url: id => `/api/spam-rules/${id}`, render: () => renderSpamRules() },
-  folder: { kinds: FOLDER_RULE_KINDS, when: true, url: id => `/api/user-folder-rules/${id}`,
-            render: () => renderFolderRules(), after: () => { renderFolderRules(); loadUserFolders(); } },
-};
-const editRuleButton = (list, id) =>
-  `<button type="button" class="btn" data-edit-rule="${id}" data-list="${list}" title="${esc(t('rule.editTitle'))}">${esc(t('rule.edit'))}</button>`;
-
-$('#settingsDialog').addEventListener('click', e => {
-  const b = e.target.closest('[data-edit-rule]');
-  if (b) startRuleEdit(b.closest('li'), b.dataset.list, +b.dataset.editRule);
-});
-
-/** Řádek pravidla se změní na formulář: typ, (u složek kdy přesouvat), hodnota, Uložit / Zrušit. */
-function startRuleEdit(li, list, id) {
-  const ed = RULE_EDITORS[list], r = ruleCache[list]?.find(x => x.id === id);
-  if (!li || !ed || !r) return;
-  const kinds = Object.entries(ed.kinds);
-  li.classList.add('editing');
-  li.innerHTML = `<form class="rule-edit" autocomplete="off">
-    ${kinds.length > 1 ? `<select name="kind" title="${esc(t('rule.kindTitle'))}">${kinds.map(([k, label]) =>
-      `<option value="${k}" ${k === r.kind ? 'selected' : ''}>${esc(t(label))}</option>`).join('')}</select>` : ''}
-    ${ed.when ? `<select name="when" title="${esc(t('rule.whenToMove'))}">
-      <option value="now">${esc(t('rule.immediately'))}</option><option value="read" ${r.after_read ? 'selected' : ''}>${esc(t('rule.afterReadingShort'))}</option></select>` : ''}
-    <input name="value" value="${esc(r.value)}" aria-label="${esc(t('rule.valueLabel'))}">
-    <p class="error rule-edit-error"></p>
-    <div class="rule-edit-actions">
-      <button type="button" class="btn" data-cancel>${esc(t('common.cancel'))}</button>
-      <button type="submit" class="btn primary">${esc(t('common.save'))}</button>
-    </div>
-  </form>`;
-  const form = li.querySelector('form'), input = form.elements.value;
-  input.focus();
-  input.select();
-  form.querySelector('[data-cancel]').addEventListener('click', () => ed.render());
-  form.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); ed.render(); }  // nezavírat celé Nastavení
-  });
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const body = { kind: form.elements.kind?.value || r.kind, value: input.value.trim() };
-    if (ed.when) body.after_read = form.elements.when.value === 'read';
-    const save = form.querySelector('[type="submit"]');
-    save.disabled = true;
-    try {
-      await api(ed.url(id), { method: 'PUT', body });
-      toast(t('rule.updated'));
-      await (ed.after || ed.render)();
-    } catch (err) {
-      form.querySelector('.rule-edit-error').textContent = err.message;
-      save.disabled = false;
-    }
-  });
-}
-
 async function renderSpamRules() {
   let rules;
   try { rules = await api('/api/spam-rules'); } catch (e) {
@@ -3615,8 +3602,8 @@ async function renderSpamRules() {
   $('#spamRules').innerHTML = rules.length ? rules.map(r => `
     <li class="rule">
       <div class="rule-main">
-        <div class="rule-value" title="${esc(r.value)}">${esc(r.value)}</div>
-        <div class="rule-meta">${esc(RULE_KINDS[r.kind] ? t(RULE_KINDS[r.kind]) : r.kind)} · ${esc(t('rule.added', { date: fmtDay(r.created) }))}
+        <div class="rule-value" title="${esc(categoryRuleText(r))}">${esc(categoryRuleText(r))}</div>
+        <div class="rule-meta">${esc(t('rule.added', { date: fmtDay(r.created) }))}
           · ${esc(t('rule.caughtTimes', { count: r.hits }))}</div>
       </div>
       ${editRuleButton('spam', r.id)}
